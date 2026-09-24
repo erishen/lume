@@ -4,7 +4,7 @@
   "description": "Syntax highlighting for the Lume scripting DSL",
   "version": "0.1.0",
   "license": "MIT",
-  "publisher": "cnb",
+  "publisher": "erishen",
   "engines": {
     "vscode": "^1.75.0"
   },
