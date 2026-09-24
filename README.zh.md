@@ -54,6 +54,8 @@ make clean        # 删 build/ 与 bin/
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) —— **开发文档**:目录结构、
   解释器核心约定(改代码前必读)、怎么加内建函数/新语句/新类型、测试约定、
   UI 层分层、Agent/LLM 接线、已知约定与坑。
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) —— **架构文档**:系统全景与
+  设计决策、进程/内存模型、分层架构、请求生命周期、部署拓扑与安全边界。
 
 ## 容器
 

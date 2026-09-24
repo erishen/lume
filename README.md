@@ -64,6 +64,9 @@ source.
   interpreter core conventions (read before changing code), how to add
   built-ins / statements / types, testing conventions, UI layering,
   agent / LLM wiring, known conventions and pitfalls.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — **Architecture**: system
+  overview and design decisions, process / memory model, layering, request
+  lifecycles, deployment topology and the security boundary.
 
 ## Containers
 
