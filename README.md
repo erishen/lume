@@ -122,3 +122,10 @@ stays git-ignored.
 - `examples/invest.lume` must be started via `make invest` — the allow-list
   env is only injected there; running `./bin/lume` directly prints a warning
   and exposes the full capability catalog.
+- To make the invest settings page actually gate the paid review models, point
+  `IQUEST_ENV_FILE` at the same `autogen-pse/.env` file `pse-review` reads
+  (unset → settings writes are refused with HTTP 500, read-only display still
+  works).
+- The invest account ledger (`.data/portfolio.json`) is written with a
+  per-process flock + atomic rename: concurrent workers cannot lose an update,
+  and a crash mid-write never leaves a truncated file.

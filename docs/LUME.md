@@ -332,6 +332,10 @@ func use(): Result {
 | `env(k)` | 环境变量值;未设置 → `null` |
 | `files(dir)` | 目录条目列表(排序;目录带尾部 `/`;缺失 → `[]`) |
 | `read_file(path)` | 整个文件内容;缺失/不可读 → `null`(上限 16 MiB) |
+| `write_file(path, s)` | 写文件(**原子写**:先写同目录 `.tmp.<pid>` 再 rename,崩溃不会留半截文件);成功 → `true` |
+| `mkdir(path)` | 逐级创建目录(0700),已是目录也返回 `true` |
+| `lock_file(path, 等待毫秒?)` | flock 排他锁(文件自动创建 0600;进程死自动释放;同进程再次调用会替换旧锁);拿到 → `true`,超时/失败 → `false` |
+| `unlock_file()` | 释放当前进程持有的 flock 锁 |
 | `tools()` | 已注册工具名列表(本地内建 + DSL `tool` + MCP `<server>/<tool>` + router 代理,排序) |
 | `skills()` | 技能索引列表,每项 `{ name, desc }`(整理自 `SKILL.md` 目录,排序) |
 | `mcps()` | 读取 `./.data/mcp-servers-router.json` 并解析为列表;文件缺失/无效 → `null`(router 同步产物,离线时为空) |

@@ -101,3 +101,8 @@ Mach-O,必须在 Linux 容器内重编。
   `.env`(密钥,模板 `.env.example` 入库)。
 - `examples/invest.lume` 需要 `make invest` 起——白名单 env 只在那里注入,
   直跑 `./bin/lume` 会打印告警并暴露完整能力目录。
+- 要让 invest 设置页的审批开关真正管住付费复盘模型,`IQUEST_ENV_FILE` 需指向
+  `pse-review` 读取的同一个 `autogen-pse/.env`(未配置时设置写回会被 500 拒绝,
+  只读展示不受影响)。
+- invest 账本(`.data/portfolio.json`)写入带每进程 flock 锁 + 原子 rename:
+  并发 worker 不会互相覆盖丢更新,写一半崩溃也不会留下半截文件。

@@ -787,6 +787,7 @@ bool type_check_program(Node *prog, char *errbuf, size_t errbuf_size) {
             "float", "bool", "string", "type", "Result", /* type words usable as idents */
             "write", "read", /* built-in verb groups (see seed_verb_groups) */
             "env", "files", "read_file", "write_file", "mkdir", "strftime", "put",
+            "lock_file", "unlock_file", /* flock advisory lock (invest ledger) */
             "tools", "skills", "mcps",
             "discovery_endpoints", "catalog", /* discovery builtins */
         };

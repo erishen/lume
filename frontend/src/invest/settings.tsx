@@ -175,6 +175,13 @@ function SettingsApp(): React.ReactElement {
                 服务商；默认 router 网关的下游模型服务商可能位于<b>中国大陆境外</b>。
               </li>
               <li>
+                深度周报管线（pse-review）<b>另外</b>经 autogen-pse/.env 配置的模型链路
+                （默认 router 网关，或 deepseek）生成周报——持仓与快照数据同样发送到该
+                服务商，由 autogen-pse/.env 的
+                <code className="mx-1 rounded bg-line/60 px-1 py-0.5 font-mono text-xs">PSE_ALLOW_PAID</code>
+                审批闸门控制是否放行付费模型。
+              </li>
+              <li>
                 发送内容仅用于生成你的回答与周报，不用于其他用途；我们不在服务端留存副本，
                 服务商侧的留存以其各自隐私政策为准。
               </li>

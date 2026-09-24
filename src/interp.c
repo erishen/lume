@@ -6,8 +6,11 @@
 #include <errno.h>
 #include <math.h>
 #include <stdarg.h>
+#include <sys/file.h>   /* flock */
 #include <sys/stat.h>
+#include <sys/time.h>   /* gettimeofday */
 #include <time.h>
+#include <unistd.h>     /* getpid / usleep / close / rmdir */
 
 /* Tree-walk interpreter (the "Runtime"). Every expression evaluation leaves
  * exactly ONE value on the VM's value stack, so partial results are always
@@ -424,7 +427,11 @@ static void native_read_file(VM *vm, int argc, Value *args, Value *out) {
  * Returns true/false. Mirror of native_read_file, capped at 16 MiB.
  * NOTE: string payload lives inline after the Obj (obj_string()), NOT in
  * as.str.data — that pointer field is never set and was a "works until the
- * fopen actually succeeds" latent bug. */
+ * fopen actually succeeds" latent bug.
+ * Atomic: the payload goes to a sibling .tmp.<pid> file which is then
+ * rename()d over the target. A crash mid-write can never leave a truncated
+ * file behind — product tools overwrite portfolio.json / .env through this
+ * and a torn write would otherwise destroy the only copy of the data. */
 static void native_write_file(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 2) { vm_set_error(vm, "write_file() needs a path and content"); return; }
     const char *p = NULL;
@@ -440,10 +447,15 @@ static void native_write_file(VM *vm, int argc, Value *args, Value *out) {
         *out = val_bool(false);
         return;
     }
-    FILE *f = fopen(p, "wb");
+    if (strlen(p) + 32 >= 4096) { *out = val_bool(false); return; }
+    char tmp[4096];
+    snprintf(tmp, sizeof tmp, "%s.tmp.%d", p, (int)getpid());
+    FILE *f = fopen(tmp, "wb");
     if (!f) { *out = val_bool(false); return; }
     size_t wrote = data && len ? fwrite(data, 1, len, f) : 0;
     int ok = (fclose(f) == 0) && (wrote == len);
+    if (ok) ok = rename(tmp, p) == 0;
+    if (!ok) remove(tmp);
     *out = val_bool(ok);
 }
 
@@ -471,6 +483,68 @@ static void native_mkdir(VM *vm, int argc, Value *args, Value *out) {
     if (mkdir(tmp, 0700) != 0 && errno != EEXIST) { *out = val_bool(false); return; }
     struct stat st;
     *out = val_bool(stat(tmp, &st) == 0 && S_ISDIR(st.st_mode));
+}
+
+/* ---- advisory file lock (single lock per VM process) ---- */
+
+/* flock(2)-based mutual exclusion for product data files: invest.lume wraps
+ * its read-modify-write of .data/portfolio.json in lock_file/unlock_file so
+ * two workers cannot lose an update to each other. The lock is held on the
+ * open fd; it is released automatically when the process dies (no stale lock
+ * files to clean up). One lock per VM process: acquiring again replaces the
+ * previous lock, which is enough for the single-ledger pattern. */
+static int g_lock_fd = -1;
+
+static void native_lock_file(VM *vm, int argc, Value *args, Value *out) {
+    if (argc < 1) { vm_set_error(vm, "lock_file() needs a path"); return; }
+    const char *p = NULL;
+    if (!arg_string(vm, args[0], &p)) return;
+    long wait_ms = 2000;
+    if (argc >= 2 && IS_NUM(args[1])) {
+        wait_ms = (long)AS_NUM(args[1]);
+        if (wait_ms < 0) wait_ms = 0;
+        if (wait_ms > 30000) wait_ms = 30000;
+    }
+    if (g_lock_fd >= 0) {
+        flock(g_lock_fd, LOCK_UN);
+        close(g_lock_fd);
+        g_lock_fd = -1;
+    }
+    int fd = open(p, O_CREAT | O_RDWR, 0600);
+    if (fd < 0) { *out = val_bool(false); return; }
+    struct timeval t0;
+    gettimeofday(&t0, NULL);
+    for (;;) {
+        if (flock(fd, LOCK_EX | LOCK_NB) == 0) break;
+        if (errno == EINTR) continue;
+        if (errno != EWOULDBLOCK && errno != EAGAIN) {
+            close(fd);
+            *out = val_bool(false);
+            return;
+        }
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        long elapsed_ms = (now.tv_sec - t0.tv_sec) * 1000 +
+                          (now.tv_usec - t0.tv_usec) / 1000;
+        if (elapsed_ms >= wait_ms) {
+            close(fd);
+            *out = val_bool(false);
+            return;
+        }
+        usleep(25000); /* 25 ms backoff */
+    }
+    g_lock_fd = fd;
+    *out = val_bool(true);
+}
+
+static void native_unlock_file(VM *vm, int argc, Value *args, Value *out) {
+    (void)vm; (void)argc; (void)args;
+    if (g_lock_fd >= 0) {
+        flock(g_lock_fd, LOCK_UN);
+        close(g_lock_fd);
+        g_lock_fd = -1;
+    }
+    *out = val_bool(true);
 }
 
 /* Localtime format of a unix timestamp, like strftime(3). The DSL has no date
@@ -1047,6 +1121,8 @@ static Value b_files(VM *vm, int argc, Value *args)      { return vm_native(vm, 
 static Value b_read_file(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_read_file); }
 static Value b_write_file(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_write_file); }
 static Value b_mkdir(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_mkdir); }
+static Value b_lock_file(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_lock_file); }
+static Value b_unlock_file(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_unlock_file); }
 static Value b_strftime(VM *vm, int argc, Value *args)   { return vm_native(vm, argc, args, native_strftime); }
 static Value b_put(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_put); }
 static Value b_tools(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_tools); }
@@ -1699,6 +1775,8 @@ void bridge_seed_builtins(VM *vm) {
         {"read_file", b_read_file},
         {"write_file", b_write_file},
         {"mkdir", b_mkdir},
+        {"lock_file", b_lock_file},
+        {"unlock_file", b_unlock_file},
         {"strftime", b_strftime},
         {"put", b_put},
         {"tools", b_tools},

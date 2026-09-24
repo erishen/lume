@@ -13,6 +13,12 @@
 //
 // 产品 API(GET+/POST /api/settings、GET /api/reports…)由 C 侧 iquest 模块
 // 在 run() 时注册(src/iquest.c),这里不需要再声明路由。
+//
+// 权限边界(知情提示):聊天页的模型经白名单工具可以<b>直接写账本</b>
+// (portfolio_add/remove)并<b>触发本地管线</b>(portfolio-check 在 asset-lens
+// 跑 make、pse-review 跑 autogen-pse 三角色)。写操作有 flock 锁 + 原子写
+// 兜底(不会损坏/丢失文件),但对话内容本身不可信 —— 不要向不受信方透露
+// 账本或 .env 内容。
 // ============================================================================
 
 server {
@@ -56,12 +62,18 @@ server {
 //   里明说口径,避免把「快照成本」冒充「实时市值」。
 // ============================================================================
 let portfolio_file = ".data/portfolio.json";
+let portfolio_lock = ".data/.portfolio.lock";   // flock 锁文件(常驻,进程死自动释放)
 
 func load_portfolio() {
   let raw = read_file(portfolio_file);
   if (raw == null) { return { holdings: {} }; }
   let data = json(raw);
-  if (data == null) { return { holdings: {} }; }
+  if (data == null) {
+    // 文件存在但解析失败 = 内容损坏(理论上 write_file 原子写后不会发生;
+    // 可能是手工改坏)。显式告警而不是静默当空账本 —— 下次 save 会覆盖它。
+    print("警告: " + portfolio_file + " 解析失败(内容损坏?)——按空账本继续,保存会覆盖该文件");
+    return { holdings: {} };
+  }
   return data;
 }
 
@@ -85,11 +97,17 @@ tool "portfolio_get", "返回本地投资账本的持仓快照:每个 symbol 一
 
 // portfolio_add: 记录一次买入,按 symbol 归组;已存在时按加权平均合并均价
 // (units 相加, avg_cost = 新旧成本合计 / 新总量)。name 传空串则保留旧名。
+// 写路径加 flock 锁(lock_file/unlock_file):workers>1 时两个并发请求的
+// 读-改-写若不串行会互相覆盖、静默丢一笔更新。锁等 3 秒拿不到就报错让
+// 用户重试,而不是无锁覆盖。
 tool "portfolio_add", "记录/更新一次买入:按 symbol 归组,已存在则合并成加权均价。参数 units(数量,float)、avg_cost(买入均价,float)、name(自定义名,可选,空串保留旧名)。", { symbol: string, units: float, avg_cost: float, name: string }, (arg) => {
   let sym = arg.symbol;
   if (sym == "") { return { err: "symbol 不能为空" }; }
   if (arg.units <= 0 or arg.avg_cost < 0) {
     return { err: "units 必须 > 0, avg_cost 必须 >= 0" };
+  }
+  if (not lock_file(portfolio_lock, 3000)) {
+    return { err: "账本写锁超时(另一请求正在写),请稍后重试" };
   }
   let p = load_portfolio();
   let h = get(p, "holdings", {});
@@ -105,17 +123,25 @@ tool "portfolio_add", "记录/更新一次买入:按 symbol 归组,已存在则�
   put(p, "holdings", h);
   put(p, "updated", now());
   save_portfolio(p);
+  unlock_file();
   let after = get(h, sym, null);
   return { ok: true, symbol: sym, units: after.units, avg_cost: after.avg_cost };
 };
 
-// portfolio_remove: 整仓删除(清仓记账),返回被删的持仓与剩余只数。
+// portfolio_remove: 整仓删除(清仓记账),返回被删的持仓与剩余只数。同样持
+// 账本写锁(见 portfolio_add 注释)。
 tool "portfolio_remove", "从账本删除一个持仓(整仓清仓记账)。参数 symbol(代码)。", { symbol: string }, (arg) => {
   let sym = arg.symbol;
+  if (not lock_file(portfolio_lock, 3000)) {
+    return { err: "账本写锁超时(另一请求正在写),请稍后重试" };
+  }
   let p = load_portfolio();
   let h = get(p, "holdings", {});
   let old = get(h, sym, null);
-  if (old == null) { return { err: "账本里没有持仓 " + sym }; }
+  if (old == null) {
+    unlock_file();
+    return { err: "账本里没有持仓 " + sym };
+  }
   let out = {};
   let syms = keys(h);
   let i = 0;
@@ -127,6 +153,7 @@ tool "portfolio_remove", "从账本删除一个持仓(整仓清仓记账)。参�
   put(p, "holdings", out);
   put(p, "updated", now());
   save_portfolio(p);
+  unlock_file();
   return { ok: true, removed: sym, units: old.units, avg_cost: old.avg_cost, remaining: len(keys(out)) };
 };
 
@@ -140,6 +167,7 @@ func report_body(p, prices, prices_ok) {
   let value_total = 0.0;
   let max_sym = "";
   let max_value = -1.0;
+  let missing = 0;   // 传入的 prices 里没有现价的 symbol 数(按成本计)
   let rows = "";
   while (i < len(syms)) {
     let sym = get(syms, i);
@@ -153,6 +181,7 @@ func report_body(p, prices, prices_ok) {
       let value = cost;
       let px_str = "—(按成本)";
       if (px != null) { value = px * units; px_str = str(px); }
+      else { missing = missing + 1; }
       cost_total = cost_total + cost;
       value_total = value_total + value;
       if (value > max_value) { max_value = value; max_sym = sym; }
@@ -164,8 +193,13 @@ func report_body(p, prices, prices_ok) {
   let pnl = value_total - cost_total;
   let sign = "";
   if (pnl >= 0) { sign = "+"; }
+  // 口径如实标注:prices 只覆盖部分 symbol 时,缺现价的按成本计,不能统一
+  // 写"按实时行情"(混合口径下集中度/盈亏数值同样以本口径为准)。
   let pricing = "按买入成本计价(未提供当前行情)";
-  if (prices_ok) { pricing = "按传入的当前行情计价"; }
+  if (prices_ok) {
+    if (missing == 0) { pricing = "按传入的当前行情计价"; }
+    else { pricing = "按传入的当前行情计价, " + str(missing) + " 项无现价按成本计价"; }
+  }
   let conc = "—";
   if (max_sym != "" and value_total > 0) {
     conc = max_sym + " " + str(100.0 * max_value / value_total) + "%";
@@ -193,7 +227,8 @@ tool "report_generate", "把本地投资账本生成一份 Markdown 周报(组�
   mkdir(".data/reports");
   let dir = env("IQUEST_REPORTS_DIR");
   if (dir == null or dir == "") { dir = ".data/reports"; }
-  let file = dir + "/lume-tool__weekly_review_" + strftime("%Y%m%d", now()) + ".md";
+  // 文件名带时分,同一天多次生成不再互相覆盖(归档按"每周一篇"语义保留历史)。
+  let file = dir + "/lume-tool__weekly_review_" + strftime("%Y%m%d_%H%M", now()) + ".md";
   let md = report_body(p, prices, prices_ok);
   let wrote = write_file(file, md);
   if (not wrote) { return { err: "写入报告失败: " + file }; }
