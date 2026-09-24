@@ -134,8 +134,9 @@ SQLite 直接内建进服务器:`agent-httpd` 静态链 libsqlite3
 - **启用**:`make invest` 设置 `SQLITE_DB=.data/lume.db` 并白名单放行只读
   `sql_*` 工具。容器:设置 `SQLITE_DB`(如经挂载卷指向 `/app/.data/lume.db`)
   即可——compose/k8s 的白名单条目已就位。`make demo-sqlite`
-  (examples/sqlite-write.lume,:8084) 是一个可直接跑的写能力演示——该
-  profile 额外放行 `sql_write`,问模型建一张分析表即可看到受检写循环。
+  (examples/sqlite-write.lume,:8084) 是一个可直接跑的写能力演示——自带
+  独立聊天 UI(`www/sqlite-write/`,不依赖 invest 前端),该 profile 额外放行
+  `sql_write`,问模型建一张分析表即可看到受检写循环。
 - **旧 MCP server**:`tools/mcp-sqlite-safe.py` 保留为归档的可选写通道
   (分析表)。需要时把 `sqlite` 加回 `INVEST_MCPS` 并恢复
   `.data/mcp-servers.json` 条目;默认 profile 走原生只读。

@@ -166,8 +166,9 @@ static container image works too:
   read-only `sql_*` tools. Containers: set `SQLITE_DB` (e.g. `/app/.data/lume.db`
   via a mounted volume) — the whitelist entries are already present in
   compose/k8s. `make demo-sqlite` (examples/sqlite-write.lume, :8084) is a
-  runnable demo that additionally whitelists `sql_write` — ask the model to
-  build an analysis table and watch the guarded write loop.
+  runnable demo with its own self-contained chat UI (www/sqlite-write/,
+  no invest frontend) that additionally whitelists `sql_write` — ask the
+  model to build an analysis table and watch the guarded write loop.
 - **Legacy MCP server**: `tools/mcp-sqlite-safe.py` is kept as an archived
   optional write path (analysis tables). Add `sqlite` back to `INVEST_MCPS` and
   restore its `.data/mcp-servers.json` entry to use it; the default profile is

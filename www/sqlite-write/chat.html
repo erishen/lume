@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lume · SQLite 写能力演示</title>
+<style>
+  :root { --bg:#f5f7fa; --card:#fff; --line:#e2e8f0; --ink:#1e293b; --sub:#64748b;
+          --accent:#0f766e; --accent-2:#166534; --tool:#f1f5f9; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+         background:var(--bg); color:var(--ink); }
+  .top { background:var(--card); border-bottom:1px solid var(--line); padding:14px 20px; }
+  .top h1 { margin:0; font-size:17px; }
+  .top p { margin:4px 0 0; font-size:12px; color:var(--sub); }
+  .wrap { max-width:820px; margin:0 auto; padding:16px 20px 32px; }
+  .prompts { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .prompts button { border:1px solid var(--line); background:var(--card); color:var(--accent);
+    font-size:12px; padding:6px 10px; border-radius:8px; cursor:pointer; }
+  .prompts button:hover { border-color:var(--accent); }
+  .chat { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          min-height:420px; display:flex; flex-direction:column; }
+  #msgs { flex:1; overflow-y:auto; padding:14px; }
+  .msg { margin-bottom:10px; }
+  .who { font-size:11px; color:var(--sub); margin-bottom:2px; }
+  .bubble { background:var(--bg); border-radius:8px; padding:8px 10px;
+            font-size:13px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
+  .msg.user .bubble { background:#ecfdf5; border:1px solid #a7f3d0; }
+  .msg.tool .bubble { background:var(--tool); font-size:12px; color:#334155;
+                      font-family:ui-monospace,Menlo,monospace; }
+  .msg.think .bubble { background:#fffbeb; border:1px solid #fde68a; font-size:12px; color:#92400e; }
+  .msg.err .bubble { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; }
+  .input { display:flex; gap:8px; padding:12px; border-top:1px solid var(--line); }
+  .input input { flex:1; border:1px solid var(--line); border-radius:8px; padding:8px 10px;
+                 font-size:13px; outline:none; }
+  .input input:focus { border-color:var(--accent); }
+  .input button { background:var(--accent-2); color:#fff; border:0; border-radius:8px;
+                  padding:8px 16px; font-size:13px; cursor:pointer; }
+  .input button:disabled { opacity:.5; cursor:wait; }
+  .note { font-size:11px; color:var(--sub); margin-top:12px; line-height:1.6; }
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Lume · SQLite 写能力演示（examples/sqlite-write.lume，:8084）</h1>
+  <p>本页独立于 invest 前端。该 profile 显式放行 <b>sql_write</b>——模型可建分析表、写入、查询；portfolio 镜像表只读，DROP/ALTER/PRAGMA 等被护栏拒绝。</p>
+</div>
+<div class="wrap">
+  <div class="prompts">
+    <button data-p="建 analysis 表存每只持仓的成本市值（symbol, cost_value 两列），把数据写进去，再查出来给我">建表写入</button>
+    <button data-p="把 analysis 表里 AAPL 的成本市值改成 2000，再查出来">改数据</button>
+    <button data-p="把 analysis 表删掉（DROP TABLE analysis）">试 DROP（应被拒）</button>
+    <button data-p="把 NVDA 的持仓数量改成 1000 股（更新 portfolio 表）">改账本（应走类型化工具）</button>
+  </div>
+  <div class="chat">
+    <div id="msgs"></div>
+    <form class="input" id="f">
+      <input id="in" placeholder="问点什么…（也可点上方演示按钮）" autocomplete="off">
+      <button id="send" type="submit">发送</button>
+    </form>
+  </div>
+  <div class="note">
+    护栏（agent-httpd src/agent/sqlite_tool.c）：sql_query 只读（SQLITE_OPEN_READONLY 物理只读）；
+    sql_write 仅 INSERT / UPDATE / DELETE（UPDATE/DELETE 必须带 WHERE）或新建 CREATE TABLE；
+    DROP / ALTER / TRUNCATE / VACUUM / ATTACH / PRAGMA / GRANT / REVOKE 与任何触碰 portfolio
+    镜像表的语句一律拒绝。对照：<code>make invest</code>（:8082）默认不含 sql_write，只读。
+  </div>
+</div>
+<script>
+(() => {
+  const msgs = document.getElementById('msgs');
+  const form = document.getElementById('f');
+  const inp = document.getElementById('in');
+  const send = document.getElementById('send');
+  const sid = 'demo-' + Math.random().toString(36).slice(2);
+  document.querySelectorAll('.prompts button').forEach(b =>
+    b.addEventListener('click', () => { inp.value = b.dataset.p; form.requestSubmit(); }));
+
+  function add(who, text, cls) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + (cls || '');
+    d.innerHTML = '<div class="who">' + who + '</div><div class="bubble"></div>';
+    d.querySelector('.bubble').textContent = text;
+    msgs.appendChild(d);
+    msgs.scrollTop = msgs.scrollHeight;
+    return d;
+  }
+
+  async function chat(text) {
+    add('你', text, 'user');
+    send.disabled = true;
+    const bubble = add('Agent', '', '');
+    const bl = bubble.querySelector('.bubble');
+    const resp = await fetch('/react/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, sessionId: sid }),
+    });
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line.startsWith('data:')) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        if (ev.t === 'note' && typeof ev.d === 'string' && ev.d.startsWith('tool ')) {
+          const n = add('工具', ev.d, 'tool');
+          n.scrollIntoView({ block: 'end' });
+        } else if (ev.t === 'delta' && typeof ev.d === 'string') {
+          bl.textContent += ev.d;
+          bubble.scrollIntoView({ block: 'end' });
+        } else if (ev.t === 'done') {
+          break;
+        }
+      }
+    }
+    send.disabled = false;
+    inp.focus();
+  }
+
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    const t = inp.value.trim();
+    if (!t || send.disabled) return;
+    inp.value = '';
+    chat(t).catch(err => { add('错误', String(err), 'err'); send.disabled = false; });
+  });
+  inp.focus();
+})();
+</script>
+</body>
+</html>

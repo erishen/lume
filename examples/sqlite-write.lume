@@ -29,13 +29,15 @@ server {
   workers = 2;
   bind = "127.0.0.1";   // 只绑回环,不向局域网暴露
   docroot = "./www";
-  views = "invest";     // 复用 invest 前端壳:/ → www/invest/index.html, /chat 可用
+  views = "sqlite-write"; // 独立演示 UI(www/sqlite-write/chat.html,自包含 SSE 聊天页,
+                          // 不复用 invest 前端;/ → /chat)
   htpasswd   = env("HTPASSWD_FILE");   // 未设 = 认证关闭(本机演示)
   auth_realm = "lume";
 }
 
-// 演示页面:聊天页由框架按 views=invest 自动提供(/chat 与 invest 同一套壳),
-// 模型经 /react/api/chat 原生 SSE 循环,工具调用实时可见。根路径跳到 /chat。
+// 演示页面:聊天页由 views=sqlite-write 提供(www/sqlite-write/chat.html),
+// 自包含 CSS+JS,直接连 /react/api/chat 的 SSE 循环,不依赖 invest 的 React
+// bundle。根路径跳到 /chat。
 route "GET", "/", func(req) {
   return { status: 302, type: "text/plain", body: "/chat" };
 };
