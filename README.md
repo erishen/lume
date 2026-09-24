@@ -43,7 +43,7 @@ source.
 | Path | Contents |
 |---|---|
 | `src/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, ~5.5k lines of C11 |
-| `examples/` | 5 `.lume` examples (demo / hello / invest / hub / lang-basics) |
+| `examples/` | 6 `.lume` examples (demo / hello / invest / hub / lang-basics / sqlite-write) |
 | `frontend/` | React 18 + TS + Tailwind 4 client, bundled with esbuild `--splitting` |
 | `www/` | docroot: hand-written HTML shells + build artifacts (mixed; don't delete wholesale) |
 | `tests/` | C unit tests (`smoke.c`) + tool dispatch (`tools_driver.c`) + end-to-end (`run_all.sh`) |
@@ -163,8 +163,11 @@ static container image works too:
   mirror (`.data/lume.db`, upsert by symbol via `tools/sqlite-migrate.py`) on
   every start; the portfolio mirror is read-only by construction.
 - **Enable**: `make invest` sets `SQLITE_DB=.data/lume.db` and whitelists the
-  `sql_*` tools. Containers: set `SQLITE_DB` (e.g. `/app/.data/lume.db` via a
-  mounted volume) — the whitelist entries are already present in compose/k8s.
+  read-only `sql_*` tools. Containers: set `SQLITE_DB` (e.g. `/app/.data/lume.db`
+  via a mounted volume) — the whitelist entries are already present in
+  compose/k8s. `make demo-sqlite` (examples/sqlite-write.lume, :8084) is a
+  runnable demo that additionally whitelists `sql_write` — ask the model to
+  build an analysis table and watch the guarded write loop.
 - **Legacy MCP server**: `tools/mcp-sqlite-safe.py` is kept as an archived
   optional write path (analysis tables). Add `sqlite` back to `INVEST_MCPS` and
   restore its `.data/mcp-servers.json` entry to use it; the default profile is

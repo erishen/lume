@@ -43,7 +43,7 @@ DEMO     := examples/demo.lume
 HELLO    := examples/hello.lume
 INVEST   := examples/invest.lume
 HUB      := examples/hub.lume
-EXAMPLES := $(DEMO) examples/lang-basics.lume $(HELLO) $(INVEST) $(HUB)
+EXAMPLES := $(DEMO) examples/lang-basics.lume $(HELLO) $(INVEST) $(HUB) examples/sqlite-write.lume
 # dev / dev-minimal 用的默认端口 (echo 与启动前清端口用)。
 PORT ?= 8082
 HUB_PORT ?= 8083
@@ -151,6 +151,27 @@ invest-watch:
 	HARNESS_SKILLS_ALLOW=$(INVEST_SKILLS) HARNESS_TOOLS_ALLOW=$(INVEST_TOOLS) \
 		MCP_ALLOW=$(INVEST_MCPS) SQLITE_DB=.data/lume.db \
 		IQUEST_REPORTS_DIR=.data/reports ./$(TARGET) --watch $(INVEST)
+
+# SQLite 写能力演示: examples/sqlite-write.lume on :$(DEMO_SQLITE_PORT)(默认
+# 8084,与 invest 8082 / hub 8083 并存)。与 invest 的只读默认对照 —— 这个
+# profile 显式放行 sql_write,展示"模型建分析表 → 写入 → 查询"完整链路
+# (护栏见 agent-httpd src/agent/sqlite_tool.c;portfolio 镜像表只读)。
+#   make demo-sqlite        # 构建 + 同步账本镜像 + 清端口 + 前台启动(Ctrl-C 停)
+#   make demo-sqlite-watch  # 热更新:改 examples/sqlite-write.lume 自动重起
+DEMO_SQLITE_PORT ?= 8084
+DEMO_SQLITE_TOOLS := read_file,get_time,sql_query,sql_write,sql_tables,sql_schema
+demo-sqlite: all check ui
+	$(call KILL_SERVER,$(DEMO_SQLITE_PORT),[s]qlite-write.lume)
+	@if [ -x .venv-sqlite/bin/python ]; then echo "==> sync JSON ledger -> SQLite mirror (.data/lume.db)"; .venv-sqlite/bin/python tools/sqlite-migrate.py; fi
+	@echo "==> lume examples/sqlite-write.lume on :$(DEMO_SQLITE_PORT) (tools=$(DEMO_SQLITE_TOOLS))"; \
+	HARNESS_TOOLS_ALLOW=$(DEMO_SQLITE_TOOLS) MCP_ALLOW=fs,think,memory \
+		SQLITE_DB=.data/lume.db ./$(TARGET) examples/sqlite-write.lume
+
+demo-sqlite-watch: all check ui
+	$(call KILL_SERVER,$(DEMO_SQLITE_PORT),[s]qlite-write.lume)
+	@echo "==> lume --watch examples/sqlite-write.lume on :$(DEMO_SQLITE_PORT) (tools=$(DEMO_SQLITE_TOOLS))"; \
+	HARNESS_TOOLS_ALLOW=$(DEMO_SQLITE_TOOLS) MCP_ALLOW=fs,think,memory \
+		SQLITE_DB=.data/lume.db ./$(TARGET) --watch examples/sqlite-write.lume
 
 # tsm-hub 网关能力示例: examples/hub.lume on :$(HUB_PORT)(默认 8083,
 # 与 invest 的 8082 并存)。不收敛——整本网关目录全开:
@@ -283,4 +304,4 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 	@ASAN_OPTIONS=detect_leaks=0 ./tests/tools-bin-asan || exit 1
 	@echo "ok   ASan/UBSan all passed"
 
-.PHONY: all check dump dev dev-minimal invest hub invest-watch hub-watch run ui ui-items vsix image image-push test clean asan
+.PHONY: all check dump dev dev-minimal invest hub demo-sqlite demo-sqlite-watch invest-watch hub-watch run ui ui-items vsix image image-push test clean asan

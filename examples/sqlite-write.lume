@@ -1,0 +1,44 @@
+// ============================================================================
+// sqlite-write.lume —— 原生 SQLite 写能力演示(与 invest 的只读默认对照)
+//
+// 这个 profile 显式放行 sql_write,展示"模型建分析表 → 写入 → 查询"的完整
+// 链路。护栏与 invest 相同(agent-httpd src/agent/sqlite_tool.c):
+//   - sql_query :  只读 SELECT(SQLITE_OPEN_READONLY 物理只读)
+//   - sql_write :  INSERT / UPDATE / DELETE(必须带 WHERE)或新建表的
+//                  CREATE TABLE;DROP/ALTER/TRUNCATE/VACUUM/ATTACH/PRAGMA/
+//                  GRANT/REVOKE 与任何触碰 portfolio 镜像表的语句一律拒绝
+//   - sql_tables / sql_schema : introspect
+//
+// 启动方式(make 目标注入 HARNESS_TOOLS_ALLOW + SQLITE_DB,不要裸跑):
+//   make demo-sqlite          # 构建 + 同步账本镜像 + 清端口 + 前台启动
+//   make demo-sqlite-watch    # 热更新版(改本文件自动重起)
+//   然后浏览器开 http://localhost:8084/chat ,把下面任一问题粘进聊天框:
+//
+//     "建一张 analysis 表存每只持仓的成本市值(symbol, cost_value 两列),
+//      把数据写进去,再查出来给我"
+//     "把 analysis 表里 AAPL 的市值改成 2000,再查出来"
+//     "试着 DROP 掉 analysis 表"(应被护栏拒绝,回答说明原因)
+//
+// 只读对照:make invest(8082)默认不含 sql_write —— 需要模型建分析表的
+// 场景才放行。SQLITE_DB 指向镜像库 .data/lume.db,每次启动由
+// tools/sqlite-migrate.py 从 .data/portfolio.json 幂等重灌(portfolio 表只读)。
+// ============================================================================
+
+server {
+  port = 8084;
+  workers = 2;
+  bind = "127.0.0.1";   // 只绑回环,不向局域网暴露
+  docroot = "./www";
+  views = "invest";     // 复用 invest 前端壳:/ → www/invest/index.html, /chat 可用
+  htpasswd   = env("HTPASSWD_FILE");   // 未设 = 认证关闭(本机演示)
+  auth_realm = "lume";
+}
+
+// 演示页面:聊天页由框架按 views=invest 自动提供(/chat 与 invest 同一套壳),
+// 模型经 /react/api/chat 原生 SSE 循环,工具调用实时可见。根路径跳到 /chat。
+route "GET", "/", func(req) {
+  return { status: 302, type: "text/plain", body: "/chat" };
+};
+
+print("sqlite-write.lume: on :8084 — 打开 /chat,问\"建一张 analysis 表存持仓成本市值\"试试");
+run();

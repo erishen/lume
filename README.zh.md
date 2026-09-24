@@ -38,7 +38,7 @@ make clean        # 删 build/ 与 bin/
 | 路径 | 内容 |
 |---|---|
 | `src/` | 词法/语法/类型检查/树遍历解释器 + agent-httpd 桥接,共约 5.5k 行 C11 |
-| `examples/` | 5 个 `.lume` 示例(demo / hello / invest / hub / lang-basics) |
+| `examples/` | 6 个 `.lume` 示例(demo / hello / invest / hub / lang-basics / sqlite-write) |
 | `frontend/` | React 18 + TS + Tailwind 4 客户端,esbuild `--splitting` 打包 |
 | `www/` | docroot:手写 HTML 壳 + 构建产物(混合,勿整体删) |
 | `tests/` | C 单测(`smoke.c`) + 工具派发(`tools_driver.c`) + 端到端(`run_all.sh`) |
@@ -131,9 +131,11 @@ SQLite 直接内建进服务器:`agent-httpd` 静态链 libsqlite3
 - **数据**:类型化领域工具(`portfolio_add`/`portfolio_remove`)仍是 JSON 账本的
   权威写入方。`make invest` 每次启动用 `tools/sqlite-migrate.py` 把账本幂等
   重灌成 SQLite 镜像(`.data/lume.db`);portfolio 镜像表天然只读。
-- **启用**:`make invest` 设置 `SQLITE_DB=.data/lume.db` 并白名单放行 `sql_*`
-  工具。容器:设置 `SQLITE_DB`(如经挂载卷指向 `/app/.data/lume.db`)即可——
-  compose/k8s 的白名单条目已就位。
+- **启用**:`make invest` 设置 `SQLITE_DB=.data/lume.db` 并白名单放行只读
+  `sql_*` 工具。容器:设置 `SQLITE_DB`(如经挂载卷指向 `/app/.data/lume.db`)
+  即可——compose/k8s 的白名单条目已就位。`make demo-sqlite`
+  (examples/sqlite-write.lume,:8084) 是一个可直接跑的写能力演示——该
+  profile 额外放行 `sql_write`,问模型建一张分析表即可看到受检写循环。
 - **旧 MCP server**:`tools/mcp-sqlite-safe.py` 保留为归档的可选写通道
   (分析表)。需要时把 `sqlite` 加回 `INVEST_MCPS` 并恢复
   `.data/mcp-servers.json` 条目;默认 profile 走原生只读。
