@@ -1,5 +1,7 @@
 # Lume
 
+![CI](https://github.com/erishen/lume/actions/workflows/ci.yml/badge.svg)
+
 自足 agent DSL 服务器:业务逻辑写在 `.lume` 脚本里,一个 C11 二进制直接伺服
 静态站点 + JSON API + SSE 聊天 + Agent 工具 + SSR 页面。没有 Node 运行时、
 没有 nginx、没有独立 React 后端——静态页直接 COPY 进二进制旁,聊天走进程内
@@ -54,7 +56,7 @@ make clean        # 删 build/ 与 bin/
 ## 容器
 
 ```bash
-cd research && docker compose -f lume/docker/docker-compose.yml up -d --build
+cd lume && docker compose -f docker/docker-compose.yml up -d --build
 ```
 
 单镜像 `lume:latest`,compose 里 `invest`(宿主 `127.0.0.1:18082`)/ `hub`

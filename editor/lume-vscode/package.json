@@ -32,5 +32,10 @@
         "path": "./syntaxes/lume.tmLanguage.json"
       }
     ]
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/erishen/lume.git"
+  },
+  "homepage": "https://github.com/erishen/lume"
 }

@@ -180,7 +180,7 @@ ui-items:
 # LICENSE 文件;发新版前记得递增 package.json 的 version。
 #   make vsix
 vsix:
-	@cd editor/lume-vscode && npx -y @vscode/vsce package --allow-missing-repository --skip-license
+	@cd editor/lume-vscode && npx -y @vscode/vsce package
 
 CORE_OBJS := $(filter-out build/main.o, $(OBJS))
 
