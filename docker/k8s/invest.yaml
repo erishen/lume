@@ -1,0 +1,84 @@
+# lume invest 应用（本地 k3s 闭环）。与 hello-cicd 同模式：
+# 平台 Pipeline 会 docker save 导入本地镜像后 kubectl set-image 覆盖为最新
+# 构建 tag，镜像用 lume:local 占位 + IfNotPresent（纯本地，绝不外网 pull）。
+# 服务探测靠 NodePort：本地单节点下节点即 localhost，探针经
+# localhost:<nodePort> 直达宿主可达地址。
+#
+# LLM 上游：k3s Pod 内 host.docker.internal 已解析到宿主网关（实测可达
+# 宿主 :19070），与 compose 的 extra_hosts 语义一致。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lume-invest
+  labels:
+    app: lume-invest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lume-invest
+  template:
+    metadata:
+      labels:
+        app: lume-invest
+    spec:
+      containers:
+        - name: lume-invest
+          image: lume:local
+          imagePullPolicy: IfNotPresent
+          # args 只覆盖 CMD，保留镜像 ENTRYPOINT（entrypoint.sh 负责生成 htpasswd）。
+          # 用 command 会把 ENTRYPOINT 一并替换 → entrypoint 不执行 → 找不到
+          # /app/auth/htpasswd → lume 启动即退（cannot open htpasswd file）。
+          args: ["./bin/lume", "examples/invest.lume"]
+          ports:
+            - containerPort: 8082
+          env:
+            # 认证：entrypoint 用 LUME_AUTH_PASSWORD 现场生成 /app/auth/htpasswd。
+            # 密码不落库（避免明文进 git）：apply 前先建 Secret——
+            #   kubectl create secret generic lume-invest-auth --from-literal=password=<你的密码>
+            - name: LUME_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lume-invest-auth
+                  key: password
+            - name: HTPASSWD_FILE
+              value: "/app/auth/htpasswd"
+            # LLM 上游：容器坐标 host.docker.internal（实测 k3s Pod 可达宿主）
+            - name: LLM_API_URL
+              value: "http://host.docker.internal:19070/v1"
+            - name: ROUTER_API_URL
+              value: "http://host.docker.internal:19070/v1"
+            # 白名单与 Makefile INVEST_* 对齐
+            - name: HARNESS_SKILLS_ALLOW
+              value: "weekly-investment"
+            - name: HARNESS_TOOLS_ALLOW
+              value: "skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate"
+            - name: MCP_ALLOW
+              value: "fs,think,memory"
+            # iquest 产品 API 可写落点（镜像内已建 /app/reports 归 lume 用户）
+            - name: IQUEST_REPORTS_DIR
+              value: "/app/reports"
+            - name: IQUEST_ENV_FILE
+              value: "/app/.env"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lume-invest
+  # 必须带 app=<部署名> 标签：平台服务探测按 Service 自身标签查找可达地址
+  labels:
+    app: lume-invest
+spec:
+  type: NodePort
+  selector:
+    app: lume-invest
+  ports:
+    - port: 8082
+      targetPort: 8082
