@@ -138,10 +138,20 @@ stays git-ignored.
 ## SQLite support (MCP)
 
 The Lume DSL has no SQL builtins, so SQLite arrives through the existing MCP
-client: a stdio MCP server (`mcp-server-sqlite`, the official Python package)
-exposes `read_query` / `list_tables` / `describe_table` to the model.
+client. A restricted stdio server (`tools/mcp-sqlite-safe.py`, using the mcp
+SDK) exposes `read_query` / `write_query` / `create_table` / `list_tables` /
+`describe_table` to the model with hard write guardrails (the official
+mcp-server-sqlite package does NOT block DROP/ALTER — verified empirically):
 
-- **Enable**: `python3 -m venv .venv-sqlite && .venv-sqlite/bin/pip install mcp-server-sqlite "mcp<2"`（mcp-server-sqlite 2025.4.25 需锁定 mcp SDK < 2）。`invest` Makefile profile already registers the `sqlite` MCP server and whitelists the read-only SQL tools.
-- **Data**: the typed domain tools (`portfolio_add` / `portfolio_remove`) keep writing the JSON ledger; run `tools/sqlite-migrate.py`（idempotent, upsert by symbol）to mirror it into `.data/lume.db` for SQL queries. Re-run after ledger changes.
-- **Safety**: only read-only tools are whitelisted — the model can query but not write SQL. Ledger writes stay in the typed DSL tools (schema-checked at compile time). The server entry is registered in `.data/mcp-servers.json`（persistent layer）rather than the router file, because `llm-router` rewrites the router file on sync.
+- `write_query` allows only `INSERT` / `UPDATE` / `DELETE`; `UPDATE`/`DELETE`
+  must carry a `WHERE` clause (no full-table rewrites)
+- `DROP` / `ALTER` / `TRUNCATE` / `VACUUM` / `ATTACH` / `PRAGMA` / `GRANT` /
+  `REVOKE` / `COPY` are rejected; only `CREATE TABLE` DDL is allowed (new
+  tables only)
+- the `portfolio` mirror table is **read-only** — any write touching it is
+  rejected
+
+- **Enable**: `python3 -m venv .venv-sqlite && .venv-sqlite/bin/pip install mcp-server-sqlite "mcp<2"`（mcp-server-sqlite 2025.4.25 需锁定 mcp SDK < 2，但 server 本体是 tools/mcp-sqlite-safe.py）。`invest` Makefile profile registers the `sqlite` MCP server and whitelists the SQL tools (read + write).
+- **Data**: the typed domain tools (`portfolio_add` / `portfolio_remove`) remain the authoritative writer to the JSON ledger. `make invest` re-seeds the SQLite mirror (`.data/lume.db`, upsert by symbol via `tools/sqlite-migrate.py`) on every start — the model may build its own analysis tables with writes, but the portfolio mirror is read-only and re-seeded from the ledger, so any drift is repaired on restart.
+- **Registration**: the server entry lives in `.data/mcp-servers.json` (persistent layer) rather than the router file, because `llm-router` rewrites the router file on sync.
 - **Scope**: local development only — the static container image has no Python, so container/pod deployments don't include this MCP server.

@@ -123,10 +123,11 @@ INVEST_SKILLS := weekly-investment
 # 在这一点上 —— 本地 tool 也被 HARNESS_TOOLS_ALLOW 过滤,漏了就像曾经的 add
 # 一样被静默丢弃。目录 iquest 的 IQUEST_REPORTS_DIR 指到 .data/reports,让
 # report_generate 的产物与仪表盘读的是同一处(容器里 compose 已注 /app/reports)。
-INVEST_TOOLS  := skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate,read_query,list_tables,describe_table
+INVEST_TOOLS  := skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate,read_query,write_query,list_tables,create_table,describe_table
 INVEST_MCPS   := portfolio-check,pse-review,fs,think,memory,sqlite
 invest: all check ui
 	$(call KILL_SERVER,$(PORT),[i]nvest.lume)
+	@if [ -x .venv-sqlite/bin/python ]; then echo "==> sync JSON ledger -> SQLite mirror (.data/lume.db)"; .venv-sqlite/bin/python tools/sqlite-migrate.py; fi
 	@echo "==> lume $(INVEST) on :$(PORT) (skills=$(INVEST_SKILLS) tools=$(INVEST_TOOLS) mcps=$(INVEST_MCPS))"; \
 	HARNESS_SKILLS_ALLOW=$(INVEST_SKILLS) HARNESS_TOOLS_ALLOW=$(INVEST_TOOLS) \
 		MCP_ALLOW=$(INVEST_MCPS) IQUEST_REPORTS_DIR=.data/reports ./$(TARGET) $(INVEST)
