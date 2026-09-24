@@ -249,7 +249,7 @@ build-asan/tests:
 build-asan/%.o: src/%.c src/lume.h | build-asan $(AH_LIB)
 	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -c $< -o $@
 
-$(ASAN_TARGET): $(ASAN_OBJS) $(AH_LIB) | build-asan
+$(ASAN_TARGET): $(ASAN_OBJS) $(AH_LIB) | build-asan bin
 	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -o $@ $(ASAN_OBJS) $(AH_LIB) $(LDFLAGS) $(ASAN_LDFLAGS) -lm
 
 tests/smoke-bin-asan: tests/smoke.c $(ASAN_CORE_OBJS) build-asan/tests | $(AH_LIB)
