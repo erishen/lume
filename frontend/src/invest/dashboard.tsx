@@ -73,6 +73,11 @@ function Home(): React.ReactElement {
         </p>
       </header>
 
+      <div className="mb-5 rounded-lg border border-amber-400/30 bg-amber-500/5 px-4 py-2.5 text-[13px] text-amber-200">
+        使用聊天/周报时,持仓快照与对话文本会发送到已配置的 LLM 服务商(可能位于境外)。
+        <a href="/settings#privacy" className="underline">数据出境告知与隐私政策</a>
+      </div>
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <a href="/chat" className="card block hover:border-accent no-underline">
           <h3 className="font-semibold text-ink">Agent 对话</h3>

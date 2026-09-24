@@ -164,6 +164,49 @@ function SettingsApp(): React.ReactElement {
               <Row k="运行时 ROUTER_API_URL" v={s.runtime.ROUTER_API_URL === "configured" ? "已配置" : "未配置"} />
             </dl>
           </section>
+
+          <section id="privacy" className="mt-6 rounded-xl border border-amber-400/30 bg-amber-500/5 p-6">
+            <h2 className="text-base font-semibold text-amber-200">数据出境告知</h2>
+            <ul className="mt-3 space-y-2 text-[13px] leading-relaxed text-ink/90">
+              <li>
+                聊天与周报功能依赖外部 LLM：一次对话/生成会把<b>持仓快照</b>（代码、数量、
+                均价、名称）与<b>你的对话文本</b>随请求发送到本页「环境对照」所显示的
+                <code className="mx-1 rounded bg-line/60 px-1 py-0.5 font-mono text-xs">LLM_API_URL</code>
+                服务商；默认 router 网关的下游模型服务商可能位于<b>中国大陆境外</b>。
+              </li>
+              <li>
+                发送内容仅用于生成你的回答与周报，不用于其他用途；我们不在服务端留存副本，
+                服务商侧的留存以其各自隐私政策为准。
+              </li>
+              <li>
+                不会外发的内容：<code className="mx-1 rounded bg-line/60 px-1 py-0.5 font-mono text-xs">.env</code> 密钥
+                （API 密钥等服务端脱敏、页面拿不到）、MCP 沙箱内的文件（除非你在对话中显式
+                让工具读取并纳入上下文）。
+              </li>
+              <li>
+                如不同意：不使用聊天/周报即可，仪表盘与归档仍为本地功能；本地账本不会因此
+                离开本机。
+              </li>
+            </ul>
+          </section>
+
+          <section className="mt-6 rounded-xl border border-line bg-panel p-6">
+            <h2 className="text-base font-semibold text-ink">隐私政策</h2>
+            <div className="mt-3 space-y-2 text-[13px] leading-relaxed text-ink/90">
+              <p><b>1. 本地存储。</b>投资账本（<code className="rounded bg-line/60 px-1 py-0.5 font-mono text-xs">.data/portfolio.json</code>）、
+              周报归档（<code className="rounded bg-line/60 px-1 py-0.5 font-mono text-xs">.data/reports/</code>）、
+              会话与 MCP 配置均只保存在本机 <code className="rounded bg-line/60 px-1 py-0.5 font-mono text-xs">.data/</code>
+              目录（权限 0700），不提交版本库、不上传任何存储服务。</p>
+              <p><b>2. 数据出境。</b>仅当你使用聊天/周报功能时，持仓快照与对话文本会发送到你在本页配置的
+              LLM 服务商，可能位于中国大陆境外；详见上方「数据出境告知」。其余功能（仪表盘、归档、设置）不出本机。</p>
+              <p><b>3. 无第三方统计。</b>本工具页面为自托管静态资源，不含第三方 SDK、统计脚本或外链资源。</p>
+              <p><b>4. 删除。</b>删除 <code className="rounded bg-line/60 px-1 py-0.5 font-mono text-xs">.data/</code>
+              目录即删除全部本地数据；已发送给 LLM 服务商的内容需联系对应服务商处理。</p>
+              <p><b>5. 变更与联系。</b>本政策随版本更新；问题或建议请提交到 GitHub
+              <code className="mx-1 rounded bg-line/60 px-1 py-0.5 font-mono text-xs">erishen/lume</code> issues。
+              生效日期：2026-09-24。</p>
+            </div>
+          </section>
         </>
       )}
     </main>
