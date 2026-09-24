@@ -22,6 +22,12 @@ LDFLAGS  +=
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
     CFLAGS_EXTRA += -D_GNU_SOURCE
+    # glibc fortify 与 agent-httpd 同开: Ubuntu 默认注入, 显式开启使本地
+    # Linux 构建与 CI 一致(realpath 等 _chk 调用会校验 PATH_MAX)。
+    CFLAGS_EXTRA += -D_FORTIFY_SOURCE=2
+    # stringop-truncation: fortify 下 strncpy 会报可截断告警(此处用法安全:
+    # 64B 零初始化缓冲 + 复制 63B, 尾部 NUL 保底); 与 agent-httpd 同款豁免。
+    CFLAGS_EXTRA += -Wno-stringop-truncation
     LDFLAGS_EXTRA += -lcrypt -lm
 else ifeq ($(UNAME_S),Darwin)
     CFLAGS_EXTRA += -D_DARWIN_C_SOURCE
