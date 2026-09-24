@@ -452,6 +452,9 @@ static void native_write_file(VM *vm, int argc, Value *args, Value *out) {
     snprintf(tmp, sizeof tmp, "%s.tmp.%d", p, (int)getpid());
     FILE *f = fopen(tmp, "wb");
     if (!f) { *out = val_bool(false); return; }
+    /* 数据文件默认 0600(账本/周报/设置 .env 都经此写;即使用户把
+     * IQUEST_REPORTS_DIR 指到 .data 之外,报告也不会随 umask 落成 0644) */
+    fchmod(fileno(f), 0600);
     size_t wrote = data && len ? fwrite(data, 1, len, f) : 0;
     int ok = (fclose(f) == 0) && (wrote == len);
     if (ok) ok = rename(tmp, p) == 0;

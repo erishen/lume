@@ -60,9 +60,10 @@ static void json_error(HttpResponse *res, int status, const char *msg) {
                         : status == 404 ? "Not Found" : "Internal Server Error", &b);
 }
 
-/* 同源守卫:浏览器发 POST 必带 Origin。本服务是 http://host[:port],因此
- * Origin 必须精确等于 "http://" + Host 头才算放行;其它站(CSRF)一律拒绝。
- * 无 Origin(Curl/脚本)视为本机可信源。 */
+/* 同源守卫:浏览器发请求必带 Origin。本服务是 http://host[:port],因此
+ * Origin 必须精确等于 "http://" + Host 头才算放行;其它站(读取周报/设置的
+ * 跨源网页,防 DNS-rebinding 类窃读)一律拒绝。无 Origin(Curl/脚本)视为
+ * 本机可信源。GET 的 reports/settings 也走这道守卫,不只是 POST 写路径。 */
 static int origin_ok(const HttpRequest *req) {
     if (!req->origin[0]) return 1;
     if (strcmp(req->origin, "null") == 0) return 0;
@@ -161,6 +162,10 @@ static int report_entries(ReportEntry **out, int *out_n) {
 }
 
 static int h_reports_list(HttpRequest *req, HttpResponse *res) {
+    if (!origin_ok(req)) {
+        json_error(res, 403, "cross-origin read rejected");
+        return 0;
+    }
     (void)req;
     ReportEntry *arr;
     int n;
@@ -198,6 +203,10 @@ static int h_reports_list(HttpRequest *req, HttpResponse *res) {
 }
 
 static int h_reports_get(HttpRequest *req, HttpResponse *res) {
+    if (!origin_ok(req)) {
+        json_error(res, 403, "cross-origin read rejected");
+        return 0;
+    }
     const char *base_prefix = ROUTE_REPORTS_PREFIX;
     size_t plen = strlen(base_prefix);
     const char *name = req->path + plen;
@@ -367,6 +376,10 @@ static int write_settings_disk(const char *allow_paid, const char *provider,
 }
 
 static int h_settings_get(HttpRequest *req, HttpResponse *res) {
+    if (!origin_ok(req)) {
+        json_error(res, 403, "cross-origin read rejected");
+        return 0;
+    }
     (void)req;
     sbuf src = {0};
     const char *ef = default_env_file();
