@@ -134,3 +134,14 @@ stays git-ignored.
   another site cannot read your reports off `localhost:8082`
   (DNS-rebinding style theft). Origin-less callers (curl, local scripts) keep
   working.
+
+## SQLite support (MCP)
+
+The Lume DSL has no SQL builtins, so SQLite arrives through the existing MCP
+client: a stdio MCP server (`mcp-server-sqlite`, the official Python package)
+exposes `read_query` / `list_tables` / `describe_table` to the model.
+
+- **Enable**: `python3 -m venv .venv-sqlite && .venv-sqlite/bin/pip install mcp-server-sqlite "mcp<2"`（mcp-server-sqlite 2025.4.25 需锁定 mcp SDK < 2）。`invest` Makefile profile already registers the `sqlite` MCP server and whitelists the read-only SQL tools.
+- **Data**: the typed domain tools (`portfolio_add` / `portfolio_remove`) keep writing the JSON ledger; run `tools/sqlite-migrate.py`（idempotent, upsert by symbol）to mirror it into `.data/lume.db` for SQL queries. Re-run after ledger changes.
+- **Safety**: only read-only tools are whitelisted — the model can query but not write SQL. Ledger writes stay in the typed DSL tools (schema-checked at compile time). The server entry is registered in `.data/mcp-servers.json`（persistent layer）rather than the router file, because `llm-router` rewrites the router file on sync.
+- **Scope**: local development only — the static container image has no Python, so container/pod deployments don't include this MCP server.
