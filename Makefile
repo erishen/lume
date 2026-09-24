@@ -1,6 +1,9 @@
 # Lume — a strongly-typed DSL that compiles against the sibling project's
 # static embed library (libagenthttpd.a). Everything besides libc comes from
 # there.
+# 依赖锁定: 静态链 ../agent-httpd (github.com/erishen/agent-httpd)。
+# 当前基线 commit: f46d03d655a65c165fdd36969e48edcc5dace3b0 (2026-09-24)。
+# 升级兄弟仓库后同步更新本行;CI 按同一 commit 检出(见 .github/workflows/ci.yml)。
 AH          := ../agent-httpd
 AH_LIB      := $(AH)/bin/libagenthttpd.a
 AH_INC      := $(AH)/src $(AH)/src/core $(AH)/src/agent
@@ -194,6 +197,42 @@ test: all ui tests/smoke-bin tests/tools-bin
 	chmod +x tests/run_all.sh && ./tests/run_all.sh
 
 clean:
-	rm -rf build bin
+	rm -rf build bin build-asan
 
-.PHONY: all check dump dev dev-minimal invest hub invest-watch hub-watch run ui ui-items vsix test clean
+# --- ASan/UBSan 构建 (make asan) ------------------------------------------
+# 独立构建目录 build-asan/,不污染正常 build/。检出 lume 侧代码的
+# 堆/栈越界与 UB;agent-httpd 的 lib 不插桩(宿主编译),只能检出 lume 侧。
+# macOS clang 与 Linux gcc 均支持 -fsanitize=address,undefined。
+ASAN_CFLAGS   := -fsanitize=address,undefined -fno-omit-frame-pointer
+ASAN_LDFLAGS  := -fsanitize=address,undefined
+ASAN_TARGET   := bin/lume-asan
+ASAN_OBJS     := $(SRCS:src/%.c=build-asan/%.o)
+ASAN_CORE_OBJS := $(filter-out build-asan/main.o, $(ASAN_OBJS))
+
+build-asan:
+	mkdir -p build-asan
+
+build-asan/tests:
+	mkdir -p build-asan/tests
+
+build-asan/%.o: src/%.c src/lume.h | build-asan $(AH_LIB)
+	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -c $< -o $@
+
+$(ASAN_TARGET): $(ASAN_OBJS) $(AH_LIB) | build-asan
+	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -o $@ $(ASAN_OBJS) $(AH_LIB) $(LDFLAGS) $(ASAN_LDFLAGS) -lm
+
+tests/smoke-bin-asan: tests/smoke.c $(ASAN_CORE_OBJS) build-asan/tests | $(AH_LIB)
+	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -o $@ tests/smoke.c $(ASAN_CORE_OBJS) $(AH_LIB) $(LDFLAGS) $(ASAN_LDFLAGS) -lm
+
+tests/tools-bin-asan: tests/tools_driver.c $(ASAN_CORE_OBJS) build-asan/tests | $(AH_LIB)
+	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -o $@ tests/tools_driver.c $(ASAN_CORE_OBJS) $(AH_LIB) $(LDFLAGS) $(ASAN_LDFLAGS) -lm
+
+asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
+	@echo "==> ASan/UBSan: --check 全部示例 + lang-basics 直跑 + 单测 + 工具派发"
+	@for f in $(EXAMPLES); do ./$(ASAN_TARGET) --check $$f || exit 1; done
+	@./$(ASAN_TARGET) examples/lang-basics.lume >/dev/null || exit 1
+	@./tests/smoke-bin-asan || exit 1
+	@./tests/tools-bin-asan || exit 1
+	@echo "ok   ASan/UBSan all passed"
+
+.PHONY: all check dump dev dev-minimal invest hub invest-watch hub-watch run ui ui-items vsix test clean asan

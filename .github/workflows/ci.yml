@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Lume 静态链 ../agent-httpd(与 Makefile 头部注释的基线 commit 一致)。
+# 升级 agent-httpd 时同步更新两处: Makefile 注释 与 下方 ref。
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lume
+      - uses: actions/checkout@v4
+        with:
+          repository: erishen/agent-httpd
+          ref: f46d03d655a65c165fdd36969e48edcc5dace3b0
+          path: agent-httpd
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install pnpm
+        run: npm install -g pnpm@9.15.9
+      - name: Build + full test suite
+        working-directory: lume
+        run: |
+          make -j4 test
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: lume/logs/
+        continue-on-error: true
+
+  asan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lume
+      - uses: actions/checkout@v4
+        with:
+          repository: erishen/agent-httpd
+          ref: f46d03d655a65c165fdd36969e48edcc5dace3b0
+          path: agent-httpd
+      - name: Build + run ASan/UBSan checks
+        working-directory: lume
+        run: |
+          make -j4 asan

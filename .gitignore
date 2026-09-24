@@ -1,15 +1,21 @@
 # ============================================================================
 # 构建产物: make clean 全清,不入库。Makefile 的 build/ 与 bin/ 是 C 侧产物,
-# tests/*-bin 由 make test 编出(dSYM 是 macOS 调试符号,同样可重编)。
+# tests/*-bin 由 make test 编出(dSYM 是 macOS 调试符号,同样可重编);
+# build-asan/ 与 tests/*-asan 是 make asan 的独立构建产物。
 # =============================================================================
 build/
 bin/
 *.o
 *.d
+build-asan/
 tests/smoke-bin
 tests/smoke-bin.dSYM/
 tests/tools-bin
 tests/tools-bin.dSYM/
+tests/smoke-bin-asan
+tests/smoke-bin-asan.dSYM/
+tests/tools-bin-asan
+tests/tools-bin-asan.dSYM/
 
 # --- 前端依赖与产物 ---------------------------------------------------------
 # 源码在 frontend/src/;make ui 用 esbuild/Tailwind 把 bundle 与 CSS 写进

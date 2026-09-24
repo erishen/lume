@@ -6,7 +6,8 @@
 SSE,工具注册在进程内。
 
 Lume 是 DSL 层,HTTP/聊天/MCP/会话由兄弟仓库 [agent-httpd](../agent-httpd/)
-提供,静态链 `libagenthttpd.a`。
+提供,静态链 `libagenthttpd.a`。agent-httpd 基线 commit 锁定在
+`Makefile` 头部注释与 `.github/workflows/ci.yml` 两处(升级后同步改)。
 
 ## 快速开始
 

@@ -406,3 +406,8 @@ Lume 直接复用 agent-httpd 的 agent 能力,不需要在 DSL 里再造一套:
   错误（缺失 `y`）。
 - 类型检查会拒绝 `not 0` / `not ""`（不是 bool），如需 truthiness 语义请
   显式转 bool。
+- `--watch` 热重载的每次编辑都会重解析 + 重类型检查，新 AST / Type 树
+  不释放——**这是有意的 dev 工具泄漏**（parse/typecheck 无 free 路径，
+  且 Type 对象存在共享引用：多个引用点经 `resolve()` 指向同一个 struct
+  定义，递归 free 会 double-free）。单次编辑约几十 KB，长期挂机定期重启
+  watch 即可；**不要**给 Type 树加递归 free 而不先处理共享引用语义。

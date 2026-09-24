@@ -179,6 +179,40 @@ WORKERS=$(ps aux | grep -c "[b]in/lume /tmp/lume-demo-test")
 [ "$WORKERS" -ge 1 ] || fail "no server processes"
 pass "GC stress (300 requests)"
 
+# 4d. --watch hot reload (main.c run_watch): a valid edit restarts the child
+#     and the new route is live; an invalid edit keeps the old child serving.
+#     run() blocks, so edits must be inserted *before* the trailing run();
+#     perl keeps this portable across macOS BSD sed / Linux GNU sed.
+WATCH_PORT=8997
+WATCH_PID=0
+trap 'kill $SERVER_PID $WATCH_PID 2>/dev/null; pkill -f "[b]in/lume /tmp/lume-watch-test" 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
+sed "s|port = [0-9]*;|port = $WATCH_PORT;|" examples/demo.lume > /tmp/lume-watch-test.lume
+./bin/lume --watch /tmp/lume-watch-test.lume > "$SERVER_LOG" 2>&1 &
+WATCH_PID=$!
+for _ in $(seq 1 50); do
+    curl -s -m 1 http://127.0.0.1:$WATCH_PORT/sum > /dev/null 2>&1 && break
+    sleep 0.1
+done
+[ "$(curl -s -m 3 http://127.0.0.1:$WATCH_PORT/sum)" = "40 + 2 = 42" ] || fail "watch: child not serving after start"
+pass "watch: starts and serves"
+
+# valid edit -> watcher restarts the child, new route is live
+perl -pi -e 's/^run\(\);$/route "GET", "\/watch-alive", func(req) { return "alive"; };\nrun();/' /tmp/lume-watch-test.lume
+sleep 2
+[ "$(curl -s -m 3 http://127.0.0.1:$WATCH_PORT/watch-alive)" = "alive" ] || fail "watch: valid edit did not reload"
+pass "watch: valid edit reloads new route"
+
+# invalid edit -> validation fails, old child keeps serving
+perl -pi -e 's/^run\(\);$/route "GET", "\/bad", func(req) { return 1 + "x"; };\nrun();/' /tmp/lume-watch-test.lume
+sleep 2
+[ "$(curl -s -m 3 http://127.0.0.1:$WATCH_PORT/watch-alive)" = "alive" ] || fail "watch: invalid edit killed the server"
+pass "watch: invalid edit keeps old child"
+
+kill $WATCH_PID 2>/dev/null; WATCH_PID=0
+sleep 1
+pkill -f "[b]in/lume /tmp/lume-watch-test" 2>/dev/null || true
+pass "watch: shutdown"
+
 echo
 echo "all tests passed"
 exit 0
