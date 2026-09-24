@@ -11,6 +11,7 @@
  */
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { renderMarkdown } from "../invest/markdown";
 
 const SID_KEY = "lume.sqlite.sid";
 
@@ -158,6 +159,8 @@ function Chat(): React.ReactElement {
             <li key={i} className={"msg " + (m.who === "user" ? "user" : m.who === "agent" ? "agent" : "")}>
               {m.who === "tool" ? (
                 <span className="note">{m.text}</span>
+              ) : m.who === "agent" ? (
+                <div className="text">{renderMarkdown(m.text)}</div>
               ) : (
                 <div className="text">{m.text}</div>
               )}
