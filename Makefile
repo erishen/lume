@@ -65,7 +65,9 @@ OBJS     := $(SRCS:src/%.c=build/%.o)
 all: bin $(TARGET)
 
 # Build the embedding library first if it is missing.
-$(AH_LIB):
+# 子模块源文件变化即触发 lib 重建（否则 llm.c 等改动不会带进 bin/lume）。
+AH_DEPS := $(shell find $(AH)/src -name '*.c' -o -name '*.h')
+$(AH_LIB): $(AH_DEPS)
 	$(MAKE) -C $(AH) lib
 
 build:
@@ -129,6 +131,8 @@ invest: all check ui
 	$(call KILL_SERVER,$(PORT),[i]nvest.lume)
 	@if [ -x .venv-sqlite/bin/python ]; then echo "==> sync JSON ledger -> SQLite mirror (.data/lume.db)"; .venv-sqlite/bin/python tools/sqlite-migrate.py; fi
 	@echo "==> lume $(INVEST) on :$(PORT) (skills=$(INVEST_SKILLS) tools=$(INVEST_TOOLS) mcps=$(INVEST_MCPS))"; \
+	$(eval SCHEMA_EXTRA := $(shell if [ -x .venv-sqlite/bin/python ]; then .venv-sqlite/bin/python tools/sqlite-schema.py --db .data/lume.db 2>/dev/null; fi)) \
+	LLM_SYSTEM_EXTRA="$(SCHEMA_EXTRA)" \
 	HARNESS_SKILLS_ALLOW=$(INVEST_SKILLS) HARNESS_TOOLS_ALLOW=$(INVEST_TOOLS) \
 		MCP_ALLOW=$(INVEST_MCPS) IQUEST_REPORTS_DIR=.data/reports ./$(TARGET) $(INVEST)
 
@@ -137,6 +141,8 @@ invest: all check ui
 invest-watch:
 	$(call KILL_SERVER,$(PORT),[i]nvest.lume)
 	@echo "==> lume --watch $(INVEST) on :$(PORT) (skills=$(INVEST_SKILLS) tools=$(INVEST_TOOLS) mcps=$(INVEST_MCPS))"; \
+	$(eval SCHEMA_EXTRA := $(shell if [ -x .venv-sqlite/bin/python ]; then .venv-sqlite/bin/python tools/sqlite-schema.py --db .data/lume.db 2>/dev/null; fi)) \
+	LLM_SYSTEM_EXTRA="$(SCHEMA_EXTRA)" \
 	HARNESS_SKILLS_ALLOW=$(INVEST_SKILLS) HARNESS_TOOLS_ALLOW=$(INVEST_TOOLS) \
 		MCP_ALLOW=$(INVEST_MCPS) IQUEST_REPORTS_DIR=.data/reports ./$(TARGET) --watch $(INVEST)
 

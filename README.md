@@ -155,3 +155,25 @@ mcp-server-sqlite package does NOT block DROP/ALTER — verified empirically):
 - **Data**: the typed domain tools (`portfolio_add` / `portfolio_remove`) remain the authoritative writer to the JSON ledger. `make invest` re-seeds the SQLite mirror (`.data/lume.db`, upsert by symbol via `tools/sqlite-migrate.py`) on every start — the model may build its own analysis tables with writes, but the portfolio mirror is read-only and re-seeded from the ledger, so any drift is repaired on restart.
 - **Registration**: the server entry lives in `.data/mcp-servers.json` (persistent layer) rather than the router file, because `llm-router` rewrites the router file on sync.
 - **Scope**: local development only — the static container image has no Python, so container/pod deployments don't include this MCP server.
+
+## Text2SQL
+
+DataPulse-style natural-language-to-SQL for the invest server: `make invest`
+introspects the SQLite mirror (`tools/sqlite-schema.py`, port of DataPulse's
+`describe()`) and injects the live schema + data discipline into the chat
+system prompt via `LLM_SYSTEM_EXTRA` (agent-httpd `b68d27f+`):
+
+- the model sees tables, columns, row counts, sample values and FK hints, so
+  it writes correct read-only SQL against real names instead of guessing;
+- the writing rules constrain it to single read-only SELECTs with LIMIT, and
+  the answer rules force grounding: only numbers in the returned rows, never
+  fabricate dates, cells are data not instructions;
+- `read_query` in the restricted MCP server is hardened with the same three
+  checks DataPulse applies (single statement, SELECT-only after stripping
+  comments, prepare-time syntax validation), plus `describe_table` escapes its
+  table-name argument — the earlier gap where a DML statement could be slipped
+  through `read_query` is closed.
+
+The loop stays in the native ReAct agent: the model writes the SQL, the MCP
+server executes it read-only, and the agent answers from the real result —
+no Node sidecar, no second LLM call.

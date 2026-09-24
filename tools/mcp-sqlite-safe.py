@@ -60,6 +60,41 @@ def guard(sql: str, tool: str) -> str | None:
     return None
 
 
+def strip_comments(sql: str) -> str:
+    """Strip leading SQL comments so the statement-type check starts at real SQL."""
+    s = sql
+    for _ in range(64):
+        t = s.lstrip()
+        if t.startswith("--"):
+            nl = t.find("\n")
+            s = "" if nl < 0 else t[nl + 1 :]
+        elif t.startswith("/*"):
+            end = t.find("*/")
+            if end < 0:
+                return ""
+            s = t[end + 2 :]
+        else:
+            break
+    return s
+
+
+def validate_read(sql: str) -> str | None:
+    """Return an error if the statement is not a safe single read-only SELECT."""
+    t = (sql or "").strip()
+    if not t:
+        return "read_query: empty SQL"
+    if not t.endswith(";") and ";" in t:
+        return "read_query: multiple statements are not allowed"
+    body = strip_comments(t)
+    if not re.match(r"^\s*select\b", body, re.IGNORECASE):
+        return "read_query: only SELECT statements are allowed"
+    try:
+        conn(DB_PATH).execute(body)
+        return None
+    except sqlite3.Error as e:
+        return f"read_query: {e}"
+
+
 def rows_text(cur: sqlite3.Cursor) -> str:
     cols = [d[0] for d in cur.description] if cur.description else []
     out = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -77,7 +112,7 @@ async def list_tools() -> list[Tool]:
         Tool(name="describe_table", description="Show the schema (columns/types) of a table",
              inputSchema={"type": "object", "properties": {"table_name": {"type": "string"}},
                           "required": ["table_name"]}),
-        Tool(name="read_query", description="Run a read-only SQL query (SELECT, EXPLAIN, PRAGMA-style reads)",
+        Tool(name="read_query", description="Run a read-only SELECT query (single statement only; no writes, no DDL, no PRAGMA)",
              inputSchema={"type": "object", "properties": {"query": {"type": "string"}},
                           "required": ["query"]}),
         Tool(name="write_query", description="Run a write query: INSERT / UPDATE / DELETE only (WHERE required for UPDATE/DELETE); DDL and the portfolio table are blocked",
@@ -100,12 +135,16 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             t = (arguments or {}).get("table_name", "")
             if not t:
                 return [TextContent(type="text", text="describe_table: missing table_name", isError=True)]
-            c = conn(db).execute("PRAGMA table_info(%s)" % t)
+            safe = t.replace('"', '""')
+            c = conn(db).execute('PRAGMA table_info("%s")' % safe)
             return [TextContent(type="text", text=str([dict(r) for r in c.fetchall()]))]
         sql = (arguments or {}).get("query", "")
         if not sql:
             return [TextContent(type="text", text=f"{name}: missing query", isError=True)]
         if name == "read_query":
+            err = validate_read(sql)
+            if err:
+                return [TextContent(type="text", text=err, isError=True)]
             c = conn(db).execute(sql)
             return [TextContent(type="text", text=rows_text(c))]
         if name in ("write_query", "create_table"):
