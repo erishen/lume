@@ -69,7 +69,7 @@ spec:
             # 设置 SQLITE_DB(如 /app/.data/lume.db, 需挂载 volume/ConfigMap 或
             # COPY 入镜像)即启用; 不设置时工具不注册, 白名单条目无害。
             - name: HARNESS_TOOLS_ALLOW
-              value: "skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate,sql_query,sql_tables,sql_schema"
+              value: "skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate,sql_query,sql_write,sql_tables,sql_schema"
             - name: MCP_ALLOW
               value: "fs,think,memory"
             # iquest 产品 API 可写落点（镜像内已建 /app/reports 归 lume 用户）

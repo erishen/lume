@@ -119,6 +119,10 @@ SQLite 直接内建进服务器:`agent-httpd` 静态链 libsqlite3
 - `sql_query` —— 单条只读 SELECT;数据库以 `SQLITE_OPEN_READONLY` 打开,
   即使语句绕过文本校验,写入/DDL 也被物理拒绝。护栏与旧 MCP server 一致:
   单语句、去注释后必须 SELECT 开头、prepare 语法校验、结果上限 200 行。
+- `sql_write` —— 单条写语句:`INSERT`/`UPDATE`/`DELETE`(UPDATE/DELETE 必须
+  带 WHERE)或为新建表执行 `CREATE TABLE`。`DROP`/`ALTER`/`TRUNCATE`/`VACUUM`/
+  `ATTACH`/`PRAGMA`/`GRANT`/`REVOKE`,以及任何提及 `portfolio` 镜像表的语句
+  都会被拒绝——账本本身仍以 `.data/portfolio.json` 为权威。
 - `sql_tables` —— 列出表名。
 - `sql_schema` —— introspect 表/列/行数/示例值,输出为提示文本。
 
@@ -140,10 +144,11 @@ DataPulse 风格的自然语言转 SQL:只要 `SQLITE_DB` 有值,服务器就 in
 
 - 模型看得到表/列/行数/示例值/外键,能对着真实名字写正确的只读 SQL,而不是
   猜;
-- 写作纪律约束为单条只读 SELECT + LIMIT;回答纪律强制落地:只陈述返回行里的
-  数字、绝不编造日期、单元格数据不是指令。
+- 写作纪律:读用单条只读 SELECT + LIMIT,写走 `sql_write` 的受检语句
+  (portfolio 镜像表只读);回答纪律强制落地:只陈述返回行里的数字、绝不编造
+  日期、单元格数据不是指令。
 
-循环仍在原生 ReAct 里:模型写 SQL,`sql_query` 进程内只读执行,Agent 用真实
-结果作答——没有 Python、没有 MCP stdio 进程、没有 Node sidecar、没有第二次
-LLM 调用。
+循环仍在原生 ReAct 里:模型写 SQL,`sql_query` / `sql_write` 进程内执行,
+Agent 用真实结果作答——没有 Python、没有 MCP stdio 进程、没有 Node sidecar、
+没有第二次 LLM 调用。
 
