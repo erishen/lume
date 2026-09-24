@@ -2,8 +2,9 @@
  *
  * 提供周报归档 / 审批设置两类只读+受控写端点,逻辑全部留在这个产品模块里,
  * 不污染通用 agent-httpd 嵌入库。写操作只有一个:设置页把 PSE_ALLOW_PAID /
- * PSE_REVIEW_PROVIDER 落进 frameworks/autogen-pse/.env(审批闸门的读取源),
- * 采用 白名单键 + 同源 Origin 校验 + 原子替换(临时文件 + rename)。
+ * PSE_REVIEW_PROVIDER 落进 IQUEST_ENV_FILE 指向的 .env(审批闸门的读取源;
+ * 未配置该 env 时写回被拒绝),采用 白名单键 + 同源 Origin 校验 + 原子替换
+ * (临时文件 + rename) + provider 控制字符过滤。
  *
  * 依赖:libagenthttpd 的 minijson(sbuf / jfind_value / jread_string)与
  * agenthttpd_route 注册。 */
@@ -19,14 +20,17 @@
 
 #define IQUEST_JSON "application/json; charset=utf-8"
 
-/* 文档注释里说的两个环境变量即这两个默认路径。 */
+/* 文档注释里说的两个环境变量即这两个路径。默认值只允许相对路径/空:
+ * 绝不把宿主机个人绝对路径编进源码(分享/开源即泄露环境指纹)。
+ * IQUEST_REPORTS_DIR 未配置时落到 <cwd>/.data/reports(与 invest.lume 的
+ * mkdir(".data/reports") 落点一致);IQUEST_ENV_FILE 未配置时 settings 只读
+ * 空配置、写回被拒绝(见 write_settings_disk)。 */
 static const char *default_reports_dir(void) {
     const char *d = getenv("IQUEST_REPORTS_DIR");
-    return d ? d : "<PROJECT_ROOT>/work/harness/resolve-studio/sandbox/weekly-investment";
+    return d ? d : ".data/reports";
 }
 static const char *default_env_file(void) {
-    const char *d = getenv("IQUEST_ENV_FILE");
-    return d ? d : "<PROJECT_ROOT>/frameworks/autogen-pse/.env";
+    return getenv("IQUEST_ENV_FILE");
 }
 
 #define ROUTE_REPORTS_GET "/api/reports"
@@ -286,6 +290,10 @@ static void read_settings(const char *text, char *allow_paid, size_t ap_len,
 static int write_settings_disk(const char *allow_paid, const char *provider,
                                char *err, size_t err_len) {
     const char *path = default_env_file();
+    if (!path) {
+        snprintf(err, err_len, "未配置 IQUEST_ENV_FILE,设置写回被拒绝");
+        return -1;
+    }
     err[0] = '\0';
     sbuf src = {0};
     FILE *f = fopen(path, "rb");
@@ -361,7 +369,8 @@ static int write_settings_disk(const char *allow_paid, const char *provider,
 static int h_settings_get(HttpRequest *req, HttpResponse *res) {
     (void)req;
     sbuf src = {0};
-    FILE *f = fopen(default_env_file(), "rb");
+    const char *ef = default_env_file();
+    FILE *f = ef ? fopen(ef, "rb") : NULL;
     if (f) {
         char buf[16384];
         size_t got;
@@ -380,19 +389,20 @@ static int h_settings_get(HttpRequest *req, HttpResponse *res) {
     }
     sb_str(&b, ",\"provider\":");
     sb_json_str(&b, prov[0] ? prov : "router");
+    /* env_file 与上游 URL 一律不吐原文:绝对路径和 query string 都可能携带
+     * 凭据或暴露本机环境(与 discovery_endpoints 的 redact 原则一致)。
+     * 只报"已配置/未配置"+ 模型名,前端设置页足够。 */
     sb_str(&b, ",\"env_file\":");
-    sb_json_str(&b, default_env_file());
-    /* 运行时进程环境(agent 实际走的通道)一并展示,便于对照;不吐 .env 原始
-     * 内容——它含 AGNES/OPENAI 等密钥,前端设置页不需要。 */
+    sb_str(&b, ef ? "\"configured\"" : "null");
     const char *lp = getenv("LLM_API_URL");
     const char *lm = getenv("LLM_MODEL");
     const char *rp = getenv("ROUTER_API_URL");
     sb_str(&b, ",\"runtime\":{\"LLM_API_URL\":");
-    sb_json_str(&b, lp ? lp : "");
+    sb_str(&b, (lp && lp[0]) ? "\"configured\"" : "null");
     sb_str(&b, ",\"LLM_MODEL\":");
     sb_json_str(&b, lm ? lm : "");
     sb_str(&b, ",\"ROUTER_API_URL\":");
-    sb_json_str(&b, rp ? rp : "");
+    sb_str(&b, (rp && rp[0]) ? "\"configured\"" : "null");
     sb_str(&b, "}}");
     finish_json(res, 200, "OK", &b);
     return 0;
@@ -423,6 +433,15 @@ static int h_settings_post(HttpRequest *req, HttpResponse *res) {
     const char *pv = jfind_value(body, "provider");
     if (pv && *pv == '\"')
         jread_string(&pv, prov, sizeof prov);
+    /* provider 会作为一整行写进 .env:拒绝换行/回车及其它控制字符,防止
+     * JSON "\n" 解码后注入任意配置行。 */
+    for (const char *q = prov; *q; q++) {
+        unsigned char c = (unsigned char)*q;
+        if (c < 0x20 || c == 0x7f) {
+            json_error(res, 400, "provider contains control characters");
+            return 0;
+        }
+    }
     char err[256];
     int rc = write_settings_disk(allow, prov, err, sizeof err);
     if (rc != 0) {

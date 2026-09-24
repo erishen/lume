@@ -450,7 +450,9 @@ static void native_write_file(VM *vm, int argc, Value *args, Value *out) {
 /* Ensure a directory exists, creating it (with parents) when missing. Returns
  * true when the path exists as a directory afterwards. Lets product tools
  * lazily create their private data dirs (`.data/`, `.data/reports/`) instead
- * of hoping a build/deploy step pre-made them. */
+ * of hoping a build/deploy step pre-made them.
+ * Mode 0700: these dirs hold session/report/portfolio data — 0755 would let
+ * other local users read them (matches the 0600 session files). */
 static void native_mkdir(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "mkdir() needs a directory path"); return; }
     const char *p = NULL;
@@ -462,11 +464,11 @@ static void native_mkdir(VM *vm, int argc, Value *args, Value *out) {
     for (char *c = tmp + 1; *c; c++) {
         if (*c == '/') {
             *c = '\0';
-            if (mkdir(tmp, 0755) != 0 && errno != EEXIST) { *out = val_bool(false); return; }
+            if (mkdir(tmp, 0700) != 0 && errno != EEXIST) { *out = val_bool(false); return; }
             *c = '/';
         }
     }
-    if (mkdir(tmp, 0755) != 0 && errno != EEXIST) { *out = val_bool(false); return; }
+    if (mkdir(tmp, 0700) != 0 && errno != EEXIST) { *out = val_bool(false); return; }
     struct stat st;
     *out = val_bool(stat(tmp, &st) == 0 && S_ISDIR(st.st_mode));
 }

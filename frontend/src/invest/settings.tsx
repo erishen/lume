@@ -1,7 +1,7 @@
 /* Invest 助手 — 设置页。
  *
- * 审批开关(PSE_ALLOW_PAID)与模型来源(PSE_REVIEW_PROVIDER)直接落到
- * frameworks/autogen-pse/.env(dotenvValue 的读取源)。写走 iquest 的
+ * 审批开关(PSE_ALLOW_PAID)与模型来源(PSE_REVIEW_PROVIDER)落到
+ * IQUEST_ENV_FILE 指向的 .env(dotenvValue 的读取源)。写走 iquest 的
  * POST /api/settings,同源 Origin 由浏览器自动携带;仅回显开关/来源,不碰
  * .env 里的密钥。
  *
@@ -158,10 +158,10 @@ function SettingsApp(): React.ReactElement {
           <section className="rounded-xl border border-line bg-panel p-6">
             <h2 className="text-base font-semibold text-ink">环境对照</h2>
             <dl className="mt-3 space-y-1.5 text-[13px]">
-              <Row k=".env 文件" v={s.env_file} mono />
-              <Row k="运行时 LLM_API_URL" v={s.runtime.LLM_API_URL || "—"} mono />
+              <Row k=".env 文件" v={s.env_file ? "已配置" : "未配置"} />
+              <Row k="运行时 LLM_API_URL" v={s.runtime.LLM_API_URL === "configured" ? "已配置" : "未配置"} />
               <Row k="运行时 LLM_MODEL" v={s.runtime.LLM_MODEL || "—"} mono />
-              <Row k="运行时 ROUTER_API_URL" v={s.runtime.ROUTER_API_URL || "—"} mono />
+              <Row k="运行时 ROUTER_API_URL" v={s.runtime.ROUTER_API_URL === "configured" ? "已配置" : "未配置"} />
             </dl>
           </section>
         </>
