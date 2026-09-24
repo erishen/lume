@@ -2,7 +2,7 @@
 # static embed library (libagenthttpd.a). Everything besides libc comes from
 # there.
 # 依赖锁定: git submodule agent-httpd (github.com/erishen/agent-httpd),
-# gitlink 锁定 19a594e (2026-09-24, 原生 SQLite 工具 + schema 注入 + 受检写入)。
+# gitlink 锁定 cea88bd (2026-09-24, 原生 SQLite 工具 + schema 注入,写默认只读)。
 # 升级后同步更新 .gitmodules 的 gitlink;CI 经 submodules: recursive 自动按
 # gitlink 拉取。
 AH          := agent-httpd
@@ -128,7 +128,9 @@ INVEST_SKILLS := weekly-investment
 # 在这一点上 —— 本地 tool 也被 HARNESS_TOOLS_ALLOW 过滤,漏了就像曾经的 add
 # 一样被静默丢弃。目录 iquest 的 IQUEST_REPORTS_DIR 指到 .data/reports,让
 # report_generate 的产物与仪表盘读的是同一处(容器里 compose 已注 /app/reports)。
-INVEST_TOOLS  := skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate,sql_query,sql_write,sql_tables,sql_schema
+INVEST_TOOLS  := skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate,sql_query,sql_tables,sql_schema
+# 写能力 sql_write 默认不放行(保守)。需要模型建分析表时手动加回:
+#   INVEST_TOOLS := $(INVEST_TOOLS),sql_write   (护栏见 agent-httpd sqlite_tool.c)
 # 原生 SQLite 取代 MCP sqlite 的读通道(只读 SELECT,SQLITE_DB 指向镜像库)。
 # 若需写分析表等写能力,可手动把 sqlite 加回这里(同时恢复
 # mcp-servers.json 的 sqlite 条目),但默认 invest 走原生只读。

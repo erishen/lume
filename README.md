@@ -147,11 +147,14 @@ static container image works too:
   statement slips past the text check. Guardrails mirror the old MCP server's:
   single statement, SELECT-only after stripping comments, prepare-time syntax
   validation, 200-row cap.
-- `sql_write` — a single write statement: `INSERT` / `UPDATE` / `DELETE`
-  (UPDATE/DELETE must carry a WHERE clause) or `CREATE TABLE` for a new table.
-  `DROP` / `ALTER` / `TRUNCATE` / `VACUUM` / `ATTACH` / `PRAGMA` / `GRANT` /
-  `REVOKE` and any statement mentioning the `portfolio` mirror table are
-  rejected — the ledger itself stays authoritative in `.data/portfolio.json`.
+- `sql_write` — *opt-in, off by default*: a single write statement —
+  `INSERT` / `UPDATE` / `DELETE` (UPDATE/DELETE must carry a WHERE clause) or
+  `CREATE TABLE` for a new table. `DROP` / `ALTER` / `TRUNCATE` / `VACUUM` /
+  `ATTACH` / `PRAGMA` / `GRANT` / `REVOKE` and any statement mentioning the
+  `portfolio` mirror table are rejected. It is compiled into the server but
+  **not** in the default whitelist; add `sql_write` to `HARNESS_TOOLS_ALLOW`
+  (Makefile `INVEST_TOOLS`, compose/k8s) to let the model create analysis
+  tables. The ledger itself stays authoritative in `.data/portfolio.json`.
 - `sql_tables` — list table names.
 - `sql_schema` — introspect tables/columns/row counts/sample values as prompt text.
 
@@ -176,12 +179,12 @@ chat system prompt via `sqlite_system_extra()` (cached by db mtime):
 
 - the model sees tables, columns, row counts, sample values and FK hints, so it
   writes correct read-only SQL against real names instead of guessing;
-- the writing rules constrain reads to single read-only SELECTs with LIMIT and
-  writes to `sql_write`'s guarded statements (portfolio mirror read-only), and
-  the answer rules force grounding: only numbers in the returned rows, never
-  fabricate dates, cells are data not instructions.
+- the writing rules default to read-only (`sql_query` only; `sql_write` is
+  opt-in via the whitelist) and the answer rules force grounding: only numbers
+  in the returned rows, never fabricate dates, cells are data not instructions.
 
 The loop stays in the native ReAct agent: the model writes the SQL, `sql_query`
-/ `sql_write` execute it in-process, and the agent answers from the real result —
-no Python, no MCP stdio process, no Node sidecar, no second LLM call.
+executes it read-only in-process (or `sql_write` when explicitly whitelisted),
+and the agent answers from the real result — no Python, no MCP stdio process,
+no Node sidecar, no second LLM call.
 
