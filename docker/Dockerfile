@@ -8,12 +8,12 @@
 # 四个示例 (demo/hello/invest/hub) 共用同一棵 docroot, compose 里每个
 # service 只换 examples/<name>.lume + 端口 + 白名单 env.
 #
-# 为什么 build context 必须是 research/ (父目录):
-#   lume 静态链 libagenthttpd.a (兄弟仓库 ../agent-httpd). 宿主机那份 .a
-#   是 Mach-O (macOS 上 make 编的), Linux 容器不能链接 —— 与 agent-httpd
-#   镜像同理, 必须在容器内把 lib 和 bin/lume 都重编. lume 的 Makefile 写死
-#   AH := ../agent-httpd, 所以:
-#       cd research && docker build -f lume/docker/Dockerfile -t lume:latest .
+# 为什么 build context 是 lume/ (仓库根):
+#   lume 静态链 libagenthttpd.a (submodule agent-httpd/, 见 .gitmodules).
+#   宿主机那份 .a 是 Mach-O (macOS 上 make 编的), Linux 容器不能链接 —— 与
+#   agent-httpd 镜像同理, 必须在容器内把 lib 和 bin/lume 都重编. lume 的
+#   Makefile 里 AH := agent-httpd (仓库内 submodule 目录), 所以:
+#       cd lume && docker build -f docker/Dockerfile -t lume:latest .
 #
 # 为什么没有前端阶段:
 #   www/ 是 esbuild --splitting 分包 + Tailwind 的**纯静态产物**, 平台无关,
@@ -41,21 +41,19 @@ FROM debian:bookworm-slim AS lume-build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc libc6-dev libcrypt-dev make m4 \
     && rm -rf /var/lib/apt/lists/*
-WORKDIR /build
+WORKDIR /build/lume
 COPY agent-httpd/ agent-httpd/
-COPY lume/ lume/
-# lume 的 Makefile AH := ../agent-httpd —— /build 下 lume/ 与
-# agent-httpd 平级, 原样命中; `make all` 先依赖编 ../agent-httpd/lib 再编
-# bin/lume, 与 make dev 自举同链。
-# lume 的每条 $(AH_LIB) 规则会去链 ../agent-httpd/bin/libagenthttpd.a。
-# 但上一行 COPY agent-httpd/ 把宿主机 Mach-O 版 .a (bin/ 整个带进来) 当
-# "已存在且最新" 让 make 幂等跳过容器内重编, 于是链接的是宿主 Mach-O ——
+COPY . .
+# lume 的 Makefile AH := agent-httpd —— /build/lume/agent-httpd 原样命中;
+# `make all` 先依赖编 agent-httpd/lib 再编 bin/lume, 与 make dev 自举同链。
+# 注意: .dockerignore 已排除 *.a 与根级 build/ bin/, 但 agent-httpd 的
+# bin/ build/ 是子目录仍会被 COPY 进来(含宿主机 Mach-O 版 .a 等非 *.a
+# 文件), make 会误判"已存在且最新"而跳过容器内重编, 于是链接宿主 Mach-O ——
 # Linux ld 收不了 (file 实证: "current ar archive random library" = Darwin)。
-# 与 agent-httpd/Dockerfile:20-22 同仇: "Makefile 按平台区分, Linux 容器内
-# 自动带上"。故容器内先清掉宿主 Mach-O 产物, 逼 $(AH_LIB) 真触发 make -C
-# ../agent-httpd lib 重编出 ELF .a (其 Makefile:15-20 Linux 分支已豁免
-# gcc12 glibc 专属警告族), 再链接, 才能得到容器可跑的 bin/lume。
-RUN rm -rf agent-httpd/bin agent-httpd/build && make -C lume all
+# 故容器内先清掉宿主产物, 逼 $(AH_LIB) 真触发 make -C agent-httpd lib
+# 重编出 ELF .a (其 Makefile:15-20 Linux 分支已豁免 gcc12 glibc 专属警告族),
+# 再链接, 才能得到容器可跑的 bin/lume。
+RUN rm -rf agent-httpd/bin agent-httpd/build && make all
 
 # ---------- 阶段 3: 运行时 ----------
 FROM debian:bookworm-slim AS runtime
@@ -75,12 +73,12 @@ WORKDIR /app
 COPY --from=lume-build /build/lume/bin/lume bin/
 # www/ 全树 (共享分包 chunk + invest 聊天 bundle + 各 views 子目录) ←
 # 四示例共用同一棵 docroot, 平台无关直接 COPY。
-COPY lume/www/ www/
-COPY lume/skills/ skills/
-COPY lume/examples/ examples/
+COPY www/ www/
+COPY skills/ skills/
+COPY examples/ examples/
 # 启动入口:把 .env 的 LUME_AUTH_PASSWORD 换成 /app/auth/htpasswd, 再 exec 主程序。
 # 必须在 USER lume 之前 COPY —— COPY 以 root 执行, 保留宿主可执行位。
-COPY lume/docker/entrypoint.sh docker/entrypoint.sh
+COPY docker/entrypoint.sh docker/entrypoint.sh
 # chown 必须在全部 COPY 之后: COPY 以 root 运行, 会把 www/ skills/ examples/
 # 连同子目录建成 root 属主, 容器里 lume 用户就写不进去。其中 skills/ 必须
 # 可写 —— llm-router 同步要把 SKILL.md 落到 skills/router/<name>/ 下, 写不进

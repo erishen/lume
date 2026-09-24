@@ -1,7 +1,7 @@
 # Lume 开发文档
 
 Lume 是一门内嵌的可强类型脚本 DSL，宿主语言为 C11，运行时驱动
-[agent-httpd](../agent-httpd/) 的静态链接库 `libagenthttpd.a`，用来配置
+[agent-httpd](agent-httpd/) 的静态链接库 `libagenthttpd.a`，用来配置
 HTTP 路由、注册 agent 工具、声明服务器参数，然后调用 `run()` 把进程交给
 agent-httpd 的嵌入接口。
 
@@ -64,7 +64,7 @@ ln -s "$PWD/editor/lume-vscode" ~/.vscode/extensions/cnb.lume-0.1.0
 ## 常规操作
 
 ```bash
-make                  # 构建 bin/lume（缺 lib 时自动编译 ../agent-httpd）
+make                  # 构建 bin/lume（缺 lib 时自动编译 agent-httpd）
 make check            # 类型检查 demo.lume
 make dump             # 打印 AST
 make dev              # demo → http://localhost:8081（阻塞, Ctrl-C 停）
@@ -322,10 +322,10 @@ UI 分两层：**服务端是 Lume**（SSR 壳 + JSON API），**客户端是标
    `text/html`。客户端 `fetchJSON()` 消费。静态资源（css/js/html）由框架从
    `server{ docroot="./www"; }` 伺服；框架的 static handler 还实现了
    **无扩展名路径回退到 `.html`**（`GET /items` → `www/hello/items.html`，
-   `../agent-httpd/src/http/static.c`），所以静态页面 URL 可以省掉 `.html`。
+   `agent-httpd/src/http/static.c`），所以静态页面 URL 可以省掉 `.html`。
    **`views`(可选)**：`server{ views = "<名字>"; }` 在 docroot 底下再挂一层
    页面子目录。分发顺序固定是 **DSL 路由表 → views 静态根 → docroot 静态根**
-   （`../agent-httpd/src/http/http_route.c`：`handle_views_file` 0 已服务 /
+   （`agent-httpd/src/http/http_route.c`：`handle_views_file` 0 已服务 /
    -1 已拒绝 / 1 未中 → 回落 `handle_static_file`）。views 根里的文件以根 URL
 伺服：`/dashboard.js` 命中 `www/invest/dashboard.js`、`/hub-home.js` 命中
     `www/hub/hub-home.js`,而 views 里没有的共享资产（`chunk-*.js`、

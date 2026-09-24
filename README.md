@@ -5,9 +5,9 @@
 没有 nginx、没有独立 React 后端——静态页直接 COPY 进二进制旁,聊天走进程内
 SSE,工具注册在进程内。
 
-Lume 是 DSL 层,HTTP/聊天/MCP/会话由兄弟仓库 [agent-httpd](../agent-httpd/)
-提供,静态链 `libagenthttpd.a`。agent-httpd 基线 commit 锁定在
-`Makefile` 头部注释与 `.github/workflows/ci.yml` 两处(升级后同步改)。
+Lume 是 DSL 层,HTTP/聊天/MCP/会话由 [agent-httpd](agent-httpd/) submodule
+提供,静态链 `libagenthttpd.a`。agent-httpd 版本由 gitlink 锁定(见 `.gitmodules`),
+clone 用 `git clone --recurse-submodules`,或 clone 后 `git submodule update --init`。
 
 ## 快速开始
 
@@ -59,9 +59,10 @@ cd research && docker compose -f lume/docker/docker-compose.yml up -d --build
 
 单镜像 `lume:latest`,compose 里 `invest`(宿主 `127.0.0.1:18082`)/ `hub`
 (`127.0.0.1:18083`)两个 service 各自只换 `examples/<name>.lume` + 端口 +
-白名单 env,共用同一棵 docroot。构建 context 必须是 `research/` 父目录——Lume
-要静态链 `../agent-httpd` 的 `libagenthttpd.a`,而宿主编出来的是 Mach-O,
-必须在 Linux 容器内重编。
+白名单 env,共用同一棵 docroot。构建 context 是 `lume/` 仓库根(agent-httpd
+是 submodule,在仓库内),context 里 `cd lume && docker build -f docker/Dockerfile`
+即可——Lume 要静态链 `agent-httpd` 的 `libagenthttpd.a`,而宿主编出来的是
+Mach-O,必须在 Linux 容器内重编。
 
 镜像不带 `.env`(由 compose `env_file` 注入),也不带 `.data/` 会话;
 `skills/router/` 的同步副本**会**进镜像——它是启动时 `llm-router` 同步的

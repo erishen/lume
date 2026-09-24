@@ -1,10 +1,10 @@
 # Lume — a strongly-typed DSL that compiles against the sibling project's
 # static embed library (libagenthttpd.a). Everything besides libc comes from
 # there.
-# 依赖锁定: 静态链 ../agent-httpd (github.com/erishen/agent-httpd)。
-# 当前基线 commit: f46d03d655a65c165fdd36969e48edcc5dace3b0 (2026-09-24)。
-# 升级兄弟仓库后同步更新本行;CI 按同一 commit 检出(见 .github/workflows/ci.yml)。
-AH          := ../agent-httpd
+# 依赖锁定: git submodule agent-httpd (github.com/erishen/agent-httpd),
+# gitlink 锁定 a99d492 (2026-09-24, 含 router.c 隐私补丁)。升级后同步
+# 更新 .gitmodules 的 gitlink;CI 经 submodules: recursive 自动按 gitlink 拉取。
+AH          := agent-httpd
 AH_LIB      := $(AH)/bin/libagenthttpd.a
 AH_INC      := $(AH)/src $(AH)/src/core $(AH)/src/agent
 
@@ -13,7 +13,7 @@ CFLAGS   ?= -std=c11 -Wall -Wextra -O2 -g
 CFLAGS   += -I src $(addprefix -I, $(AH_INC))
 LDFLAGS  +=
 
-# --- 平台 feature-test: 与 ../agent-httpd/Makefile:8-22 逐字同款 ---
+# --- 平台 feature-test: 与 agent-httpd/Makefile:8-22 逐字同款 ---
 # main.c 用 sigaction/sigemptyset (--watch 热重载的信号处理), 它们是 POSIX
 # 199309 定义; glibc 不会默认放行, 要 -D_GNU_SOURCE 才显; macOS clang 则
 # 默认全量 BSD 声明 (宿主 make 从不需要)。行为两侧必须一致 —— 宿主 make

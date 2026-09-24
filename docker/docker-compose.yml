@@ -55,9 +55,9 @@ name: lume-stack
 x-lume-common: &lume-common
   image: lume:latest
   build:
-    context: ../..            # research/ —— 见 Dockerfile 头:lume 要
-                              # ../agent-httpd 一起重编,context 必须父目录
-    dockerfile: lume/docker/Dockerfile
+    context: ..               # lume/(仓库根)—— agent-httpd 是 submodule,
+                              # 在仓库内;dockerfile 相对 context 解析
+    dockerfile: docker/Dockerfile
   # LLM 上游坐标: 容器内 → host.docker.internal (宿主网关 :19070)。
   # 实际 URL/MODEL/KEY 从项目根 .env 注入 (LLM_API_URL/LLM_MODEL/
   # LLM_API_KEY), compose 只把 localhost 换成容器坐标。
