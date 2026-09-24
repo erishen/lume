@@ -6,7 +6,38 @@ All notable changes to Lume are documented here. The format follows
 
 ## [Unreleased]
 
-- (placeholder)
+### Added
+
+- `lock_file(path, wait_ms?)` / `unlock_file()` built-ins: flock-based
+  advisory lock (auto-released on process death), used by invest to serialize
+  ledger read-modify-write across workers.
+- `write_file` is now atomic: payload goes to a sibling `.tmp.<pid>` file
+  renamed over the target, so a crash mid-write never truncates the ledger /
+  `.env` / reports; created files are `fchmod`'d 0600 (private even when
+  `IQUEST_REPORTS_DIR` points outside `.data`).
+- invest weekly reports get a `YYYYMMDD_HHMM` timestamp — same-day
+  regenerations no longer overwrite each other; pricing line states how many
+  positions were valued at cost when prices only partially cover holdings.
+- Kubernetes manifests (`docker/k8s/`): invest / hub deployments for the local
+  k3s loop, with Basic Auth password taken from a Kubernetes Secret.
+
+### Security
+
+- Same-origin guard now covers the **GET** product endpoints too
+  (`/api/reports`, `/api/reports/*`, `/api/settings`): cross-origin browser
+  reads are rejected 403 (DNS-rebinding style theft), `Origin: null` rejected,
+  origin-less curl / local scripts still work.
+- invest server binds `127.0.0.1` by default (loopback only); dead `write_file`
+  entry removed from the invest tool allow-list; cross-border data disclosure
+  banner + privacy policy added to the invest settings page, including the
+  pse-review model chain.
+- Portfolio ledger load failure now prints an explicit corruption warning
+  instead of silently continuing with an empty ledger.
+
+### Changed
+
+- `examples/invest.lume` and the frontend report/date handling accept the new
+  timestamped report names.
 
 ## [0.1.0] - 2026-09-24
 

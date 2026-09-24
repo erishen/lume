@@ -106,3 +106,6 @@ Mach-O,必须在 Linux 容器内重编。
   只读展示不受影响)。
 - invest 账本(`.data/portfolio.json`)写入带每进程 flock 锁 + 原子 rename:
   并发 worker 不会互相覆盖丢更新,写一半崩溃也不会留下半截文件。
+- **产品 API 同源守卫**:`/api/reports*` 与 `/api/settings`(GET 与 POST)对
+  跨源浏览器请求一律 403——别的站点无法从 `localhost:8082` 窃读你的周报
+  (防 DNS-rebinding 型窃读);无 Origin 的调用(curl/本机脚本)照常放行。

@@ -130,8 +130,10 @@ DSL 世界（Value/Node/VM）与 agent-httpd 世界（C 路由/工具）的翻�
 - 工具注册：`tool "name", "desc", params, func` → `agenthttpd_tool(...)`；
   参数 schema 经 `upgrade_tool_params` 把裸类型关键字升级为 `{"a":{"type":"int"}}`。
 - 内建函数种子：`run/print/str/int/float/bool/string/len/keys/get/json/stringify/now`
-  以及发现类 `env/files/read_file/tools/skills/mcps`（后三者枚举 agent-httpd
-  的注册表与 `.data/mcp-servers-router.json`）。
+  以及发现/IO 类 `env/files/read_file/write_file/mkdir/lock_file/unlock_file/
+  strftime/put/tools/skills/mcps`（后三者枚举 agent-httpd 的注册表与
+  `.data/mcp-servers-router.json`；`write_file` 原子写 + 0600，`lock_file`
+  flock 排他锁，见[安全边界](#6-安全边界)）。
 - shim 守则：返回 0 = 已处理（框架负责序列化）；不设 `res->handled`
   （该标志跳过响应序列化，只用于自流式 handler）。
 
@@ -264,7 +266,9 @@ LLM/会话层接真实模型，流式事件逐条推送。
 | 层 | 措施 |
 |---|---|
 | 监听地址 | `server{ bind }` → agent-httpd `bind_host`（NULL = 0.0.0.0）；**invest 默认 127.0.0.1**，本地不向 LAN 暴露（容器内由 compose 映射端口对外） |
-| 文件权限 | `.data/` 700；`.data/mcp-servers*.json` 600（router.c `fchmod`）；`native_mkdir` 0700 |
+| 文件权限 | `.data/` 700；`.data/mcp-servers*.json` 600（router.c `fchmod`）；`native_mkdir` 0700；`write_file` **原子写**（先写 `.tmp.<pid>` 再 `rename`，崩溃不留半截文件）且 `fchmod 0600`（账本/周报即使写到 `.data` 外也不随 umask 落 0644） |
+| 跨源守卫 | `/api/reports`、`/api/reports/*`、`/api/settings` 的 **GET 与 POST 一律过 `origin_ok`**：有 Origin 且非 `http://<Host>` 同源 → 403（拦截跨源网页窃读周报/设置，防 DNS-rebinding 型攻击）；无 Origin（curl/本机脚本）放行；`Origin: null` 拒绝 |
+| 账本并发 | `lock_file(path, wait_ms)` / `unlock_file()`（flock 排他锁，进程死自动释放）：invest 的 `portfolio_add/remove` 在整段读-改-写持锁，workers>1 时不丢更新；同进程单锁，再次 lock 替换旧锁 |
 | settings API | `GET /api/settings` 对 `env_file`/`LLM_API_URL`/`ROUTER_API_URL` **redact**（"configured"/null，`LLM_MODEL` 保留原值）；`POST` provider 含控制字符（<0x20/0x7f）→ 400；无 `IQUEST_ENV_FILE` → 写回 500 拒绝 |
 | 环境变量 | `IQUEST_ENV_FILE` 缺省 NULL——现有 `.env` 未显式配置时 invest 设置页写回会被拒绝（属预期行为） |
 | 能力收敛 | 白名单三件套（skills/tools/MCP）把运行时收敛到示例所需能力 |

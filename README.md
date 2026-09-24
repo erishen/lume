@@ -129,3 +129,8 @@ stays git-ignored.
 - The invest account ledger (`.data/portfolio.json`) is written with a
   per-process flock + atomic rename: concurrent workers cannot lose an update,
   and a crash mid-write never leaves a truncated file.
+- **Same-origin guard on the product API**: `/api/reports*` and `/api/settings`
+  (GET and POST) reject cross-origin browser requests with 403 — a page from
+  another site cannot read your reports off `localhost:8082`
+  (DNS-rebinding style theft). Origin-less callers (curl, local scripts) keep
+  working.
