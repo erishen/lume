@@ -260,10 +260,14 @@ tests/tools-bin-asan: tests/tools_driver.c $(ASAN_CORE_OBJS) build-asan/tests | 
 
 asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 	@echo "==> ASan/UBSan: --check 全部示例 + lang-basics 直跑 + 单测 + 工具派发"
-	@for f in $(EXAMPLES); do ./$(ASAN_TARGET) --check $$f || exit 1; done
-	@./$(ASAN_TARGET) examples/lang-basics.lume >/dev/null || exit 1
-	@./tests/smoke-bin-asan || exit 1
-	@./tests/tools-bin-asan || exit 1
+	# detect_leaks=0: Type 对象生命周期=进程(AST/符号表持有,无释放函数是设计);
+	# --watch reload 走 fork+exec 子进程重启, 无累积路径。LSan 会把无主的
+	# 临时检查类型(ck_expr 中间结果)当泄漏, 对一次性/exec 隔离进程是误报,
+	# 故豁免; ASan/UBSan 的越界/UB 检测保持全开。
+	@for f in $(EXAMPLES); do ASAN_OPTIONS=detect_leaks=0 ./$(ASAN_TARGET) --check $$f || exit 1; done
+	@ASAN_OPTIONS=detect_leaks=0 ./$(ASAN_TARGET) examples/lang-basics.lume >/dev/null || exit 1
+	@ASAN_OPTIONS=detect_leaks=0 ./tests/smoke-bin-asan || exit 1
+	@ASAN_OPTIONS=detect_leaks=0 ./tests/tools-bin-asan || exit 1
 	@echo "ok   ASan/UBSan all passed"
 
 .PHONY: all check dump dev dev-minimal invest hub invest-watch hub-watch run ui ui-items vsix image image-push test clean asan
