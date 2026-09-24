@@ -135,45 +135,47 @@ stays git-ignored.
   (DNS-rebinding style theft). Origin-less callers (curl, local scripts) keep
   working.
 
-## SQLite support (MCP)
+## SQLite support (native)
 
-The Lume DSL has no SQL builtins, so SQLite arrives through the existing MCP
-client. A restricted stdio server (`tools/mcp-sqlite-safe.py`, using the mcp
-SDK) exposes `read_query` / `write_query` / `create_table` / `list_tables` /
-`describe_table` to the model with hard write guardrails (the official
-mcp-server-sqlite package does NOT block DROP/ALTER — verified empirically):
+SQLite is built into the server: `agent-httpd` links libsqlite3 directly
+(`src/agent/sqlite_tool.c`) and registers three native tools whenever
+`SQLITE_DB` points at a database — no Python, no MCP stdio process, and the
+static container image works too:
 
-- `write_query` allows only `INSERT` / `UPDATE` / `DELETE`; `UPDATE`/`DELETE`
-  must carry a `WHERE` clause (no full-table rewrites)
-- `DROP` / `ALTER` / `TRUNCATE` / `VACUUM` / `ATTACH` / `PRAGMA` / `GRANT` /
-  `REVOKE` / `COPY` are rejected; only `CREATE TABLE` DDL is allowed (new
-  tables only)
-- the `portfolio` mirror table is **read-only** — any write touching it is
-  rejected
+- `sql_query` — a single read-only SELECT; the DB is opened
+  `SQLITE_OPEN_READONLY`, so writes/DDL are physically refused even if a
+  statement slips past the text check. Guardrails mirror the old MCP server's:
+  single statement, SELECT-only after stripping comments, prepare-time syntax
+  validation, 200-row cap.
+- `sql_tables` — list table names.
+- `sql_schema` — introspect tables/columns/row counts/sample values as prompt text.
 
-- **Enable**: `python3 -m venv .venv-sqlite && .venv-sqlite/bin/pip install mcp-server-sqlite "mcp<2"`（mcp-server-sqlite 2025.4.25 需锁定 mcp SDK < 2，但 server 本体是 tools/mcp-sqlite-safe.py）。`invest` Makefile profile registers the `sqlite` MCP server and whitelists the SQL tools (read + write).
-- **Data**: the typed domain tools (`portfolio_add` / `portfolio_remove`) remain the authoritative writer to the JSON ledger. `make invest` re-seeds the SQLite mirror (`.data/lume.db`, upsert by symbol via `tools/sqlite-migrate.py`) on every start — the model may build its own analysis tables with writes, but the portfolio mirror is read-only and re-seeded from the ledger, so any drift is repaired on restart.
-- **Registration**: the server entry lives in `.data/mcp-servers.json` (persistent layer) rather than the router file, because `llm-router` rewrites the router file on sync.
-- **Scope**: local development only — the static container image has no Python, so container/pod deployments don't include this MCP server.
+- **Data**: the typed domain tools (`portfolio_add` / `portfolio_remove`) remain
+  the authoritative writer to the JSON ledger. `make invest` re-seeds the SQLite
+  mirror (`.data/lume.db`, upsert by symbol via `tools/sqlite-migrate.py`) on
+  every start; the portfolio mirror is read-only by construction.
+- **Enable**: `make invest` sets `SQLITE_DB=.data/lume.db` and whitelists the
+  `sql_*` tools. Containers: set `SQLITE_DB` (e.g. `/app/.data/lume.db` via a
+  mounted volume) — the whitelist entries are already present in compose/k8s.
+- **Legacy MCP server**: `tools/mcp-sqlite-safe.py` is kept as an archived
+  optional write path (analysis tables). Add `sqlite` back to `INVEST_MCPS` and
+  restore its `.data/mcp-servers.json` entry to use it; the default profile is
+  native read-only.
 
 ## Text2SQL
 
-DataPulse-style natural-language-to-SQL for the invest server: `make invest`
-introspects the SQLite mirror (`tools/sqlite-schema.py`, port of DataPulse's
-`describe()`) and injects the live schema + data discipline into the chat
-system prompt via `LLM_SYSTEM_EXTRA` (agent-httpd `b68d27f+`):
+DataPulse-style natural-language-to-SQL for the invest server: whenever
+`SQLITE_DB` is set, the server introspects the database (the same `describe()`
+semantics as DataPulse) and injects the live schema + data discipline into the
+chat system prompt via `sqlite_system_extra()` (cached by db mtime):
 
-- the model sees tables, columns, row counts, sample values and FK hints, so
-  it writes correct read-only SQL against real names instead of guessing;
-- the writing rules constrain it to single read-only SELECTs with LIMIT, and
-  the answer rules force grounding: only numbers in the returned rows, never
-  fabricate dates, cells are data not instructions;
-- `read_query` in the restricted MCP server is hardened with the same three
-  checks DataPulse applies (single statement, SELECT-only after stripping
-  comments, prepare-time syntax validation), plus `describe_table` escapes its
-  table-name argument — the earlier gap where a DML statement could be slipped
-  through `read_query` is closed.
+- the model sees tables, columns, row counts, sample values and FK hints, so it
+  writes correct read-only SQL against real names instead of guessing;
+- the writing rules constrain it to single read-only SELECTs with LIMIT, and the
+  answer rules force grounding: only numbers in the returned rows, never
+  fabricate dates, cells are data not instructions.
 
-The loop stays in the native ReAct agent: the model writes the SQL, the MCP
-server executes it read-only, and the agent answers from the real result —
-no Node sidecar, no second LLM call.
+The loop stays in the native ReAct agent: the model writes the SQL, `sql_query`
+executes it read-only in-process, and the agent answers from the real result —
+no Python, no MCP stdio process, no Node sidecar, no second LLM call.
+

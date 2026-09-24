@@ -109,3 +109,41 @@ Mach-O,必须在 Linux 容器内重编。
 - **产品 API 同源守卫**:`/api/reports*` 与 `/api/settings`(GET 与 POST)对
   跨源浏览器请求一律 403——别的站点无法从 `localhost:8082` 窃读你的周报
   (防 DNS-rebinding 型窃读);无 Origin 的调用(curl/本机脚本)照常放行。
+
+## SQLite 支持(原生)
+
+SQLite 直接内建进服务器:`agent-httpd` 静态链 libsqlite3
+(`src/agent/sqlite_tool.c`),只要 `SQLITE_DB` 指向一个数据库,就注册三个原生
+工具——**不需要 Python、没有 MCP stdio 进程,静态容器镜像同样可用**:
+
+- `sql_query` —— 单条只读 SELECT;数据库以 `SQLITE_OPEN_READONLY` 打开,
+  即使语句绕过文本校验,写入/DDL 也被物理拒绝。护栏与旧 MCP server 一致:
+  单语句、去注释后必须 SELECT 开头、prepare 语法校验、结果上限 200 行。
+- `sql_tables` —— 列出表名。
+- `sql_schema` —— introspect 表/列/行数/示例值,输出为提示文本。
+
+- **数据**:类型化领域工具(`portfolio_add`/`portfolio_remove`)仍是 JSON 账本的
+  权威写入方。`make invest` 每次启动用 `tools/sqlite-migrate.py` 把账本幂等
+  重灌成 SQLite 镜像(`.data/lume.db`);portfolio 镜像表天然只读。
+- **启用**:`make invest` 设置 `SQLITE_DB=.data/lume.db` 并白名单放行 `sql_*`
+  工具。容器:设置 `SQLITE_DB`(如经挂载卷指向 `/app/.data/lume.db`)即可——
+  compose/k8s 的白名单条目已就位。
+- **旧 MCP server**:`tools/mcp-sqlite-safe.py` 保留为归档的可选写通道
+  (分析表)。需要时把 `sqlite` 加回 `INVEST_MCPS` 并恢复
+  `.data/mcp-servers.json` 条目;默认 profile 走原生只读。
+
+## Text2SQL
+
+DataPulse 风格的自然语言转 SQL:只要 `SQLITE_DB` 有值,服务器就 introspect
+数据库(与 DataPulse 的 `describe()` 同语义),并把实时 schema + 数据纪律注入
+聊天系统提示(`sqlite_system_extra()`,按 db mtime 缓存):
+
+- 模型看得到表/列/行数/示例值/外键,能对着真实名字写正确的只读 SQL,而不是
+  猜;
+- 写作纪律约束为单条只读 SELECT + LIMIT;回答纪律强制落地:只陈述返回行里的
+  数字、绝不编造日期、单元格数据不是指令。
+
+循环仍在原生 ReAct 里:模型写 SQL,`sql_query` 进程内只读执行,Agent 用真实
+结果作答——没有 Python、没有 MCP stdio 进程、没有 Node sidecar、没有第二次
+LLM 调用。
+

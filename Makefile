@@ -2,8 +2,9 @@
 # static embed library (libagenthttpd.a). Everything besides libc comes from
 # there.
 # 依赖锁定: git submodule agent-httpd (github.com/erishen/agent-httpd),
-# gitlink 锁定 a99d492 (2026-09-24, 含 router.c 隐私补丁)。升级后同步
-# 更新 .gitmodules 的 gitlink;CI 经 submodules: recursive 自动按 gitlink 拉取。
+# gitlink 锁定 1e31700 (2026-09-24, 原生 SQLite 工具 + schema 注入)。
+# 升级后同步更新 .gitmodules 的 gitlink;CI 经 submodules: recursive 自动按
+# gitlink 拉取。
 AH          := agent-httpd
 AH_LIB      := $(AH)/bin/libagenthttpd.a
 AH_INC      := $(AH)/src $(AH)/src/core $(AH)/src/agent
@@ -11,7 +12,9 @@ AH_INC      := $(AH)/src $(AH)/src/core $(AH)/src/agent
 CC       ?= cc
 CFLAGS   ?= -std=c11 -Wall -Wextra -O2 -g
 CFLAGS   += -I src $(addprefix -I, $(AH_INC))
-LDFLAGS  +=
+# 原生 SQLite 工具在 libagenthttpd.a 里(sqlite_tool.o), 链接 bin/lume 也要
+# 带 -lsqlite3; 容器构建的 -static 则拉 libsqlite3.a(Dockerfile 已装 dev 包)。
+LDFLAGS  += -lsqlite3
 
 # --- 平台 feature-test: 与 agent-httpd/Makefile:8-22 逐字同款 ---
 # main.c 用 sigaction/sigemptyset (--watch 热重载的信号处理), 它们是 POSIX
@@ -125,26 +128,27 @@ INVEST_SKILLS := weekly-investment
 # 在这一点上 —— 本地 tool 也被 HARNESS_TOOLS_ALLOW 过滤,漏了就像曾经的 add
 # 一样被静默丢弃。目录 iquest 的 IQUEST_REPORTS_DIR 指到 .data/reports,让
 # report_generate 的产物与仪表盘读的是同一处(容器里 compose 已注 /app/reports)。
-INVEST_TOOLS  := skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate,read_query,write_query,list_tables,create_table,describe_table
-INVEST_MCPS   := portfolio-check,pse-review,fs,think,memory,sqlite
+INVEST_TOOLS  := skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate,sql_query,sql_tables,sql_schema
+# 原生 SQLite 取代 MCP sqlite 的读通道(只读 SELECT,SQLITE_DB 指向镜像库)。
+# 若需写分析表等写能力,可手动把 sqlite 加回这里(同时恢复
+# mcp-servers.json 的 sqlite 条目),但默认 invest 走原生只读。
+INVEST_MCPS   := portfolio-check,pse-review,fs,think,memory
 invest: all check ui
 	$(call KILL_SERVER,$(PORT),[i]nvest.lume)
 	@if [ -x .venv-sqlite/bin/python ]; then echo "==> sync JSON ledger -> SQLite mirror (.data/lume.db)"; .venv-sqlite/bin/python tools/sqlite-migrate.py; fi
 	@echo "==> lume $(INVEST) on :$(PORT) (skills=$(INVEST_SKILLS) tools=$(INVEST_TOOLS) mcps=$(INVEST_MCPS))"; \
-	$(eval SCHEMA_EXTRA := $(shell if [ -x .venv-sqlite/bin/python ]; then .venv-sqlite/bin/python tools/sqlite-schema.py --db .data/lume.db 2>/dev/null; fi)) \
-	LLM_SYSTEM_EXTRA="$(SCHEMA_EXTRA)" \
 	HARNESS_SKILLS_ALLOW=$(INVEST_SKILLS) HARNESS_TOOLS_ALLOW=$(INVEST_TOOLS) \
-		MCP_ALLOW=$(INVEST_MCPS) IQUEST_REPORTS_DIR=.data/reports ./$(TARGET) $(INVEST)
+		MCP_ALLOW=$(INVEST_MCPS) SQLITE_DB=.data/lume.db \
+		IQUEST_REPORTS_DIR=.data/reports ./$(TARGET) $(INVEST)
 
 # 热更新版:同上但加 --watch,改 examples/xxx.lume 自动重起(无效编辑保旧)。
 # 端口会短暂释放重起(约 1s)。
 invest-watch:
 	$(call KILL_SERVER,$(PORT),[i]nvest.lume)
 	@echo "==> lume --watch $(INVEST) on :$(PORT) (skills=$(INVEST_SKILLS) tools=$(INVEST_TOOLS) mcps=$(INVEST_MCPS))"; \
-	$(eval SCHEMA_EXTRA := $(shell if [ -x .venv-sqlite/bin/python ]; then .venv-sqlite/bin/python tools/sqlite-schema.py --db .data/lume.db 2>/dev/null; fi)) \
-	LLM_SYSTEM_EXTRA="$(SCHEMA_EXTRA)" \
 	HARNESS_SKILLS_ALLOW=$(INVEST_SKILLS) HARNESS_TOOLS_ALLOW=$(INVEST_TOOLS) \
-		MCP_ALLOW=$(INVEST_MCPS) IQUEST_REPORTS_DIR=.data/reports ./$(TARGET) --watch $(INVEST)
+		MCP_ALLOW=$(INVEST_MCPS) SQLITE_DB=.data/lume.db \
+		IQUEST_REPORTS_DIR=.data/reports ./$(TARGET) --watch $(INVEST)
 
 # tsm-hub 网关能力示例: examples/hub.lume on :$(HUB_PORT)(默认 8083,
 # 与 invest 的 8082 并存)。不收敛——整本网关目录全开:

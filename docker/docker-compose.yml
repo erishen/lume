@@ -114,10 +114,13 @@ services:
       # portfolio-check/pse-review 桥 harness 语料, 容器内缺 → 白名单
       # 含也不炸, DSL 按白名单只拉起能在容器里活的)。
       HARNESS_SKILLS_ALLOW: "weekly-investment"
-      # 领域工具(portfolio_get/add/remove、report_generate)与 Makefile
+      # 领域工具(portfolio_get/add/remove、report_generate、sql_*)与 Makefile
       # INVEST_TOOLS 对齐 —— 本地 tool 也被 HARNESS_TOOLS_ALLOW 过滤,漏了
       # 会像曾经的 add 一样被静默丢弃(只有一行 stderr)。
-      HARNESS_TOOLS_ALLOW: "skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate"
+      # sql_query/sql_tables/sql_schema 是原生 SQLite 工具(无需 Python):
+      # 设置 SQLITE_DB(如 /app/.data/lume.db, 需挂卷或 COPY 入镜像)即启用;
+      # 不设置时工具不注册, 白名单条目无害。
+      HARNESS_TOOLS_ALLOW: "skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate,sql_query,sql_tables,sql_schema"
       MCP_ALLOW: "fs,think,memory"
       # iquest 产品 API(settings/reports)的可写落点: 容器内用 /app 下的
       # 路径, 避免默认值里宿主的绝对路径 (Dockerfile 已建 /app/reports 并
