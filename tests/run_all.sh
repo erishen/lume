@@ -185,7 +185,7 @@ pass "GC stress (300 requests)"
 #     perl keeps this portable across macOS BSD sed / Linux GNU sed.
 WATCH_PORT=8997
 WATCH_PID=0
-trap 'kill $SERVER_PID $WATCH_PID 2>/dev/null; pkill -f "[b]in/lume /tmp/lume-watch-test" 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
+trap 'kill $SERVER_PID 2>/dev/null; pkill -f "[b]in/lume /tmp/lume-watch-test" 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
 sed "s|port = [0-9]*;|port = $WATCH_PORT;|" examples/demo.lume > /tmp/lume-watch-test.lume
 ./bin/lume --watch /tmp/lume-watch-test.lume > "$SERVER_LOG" 2>&1 &
 WATCH_PID=$!
