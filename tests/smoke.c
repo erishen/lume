@@ -1,6 +1,7 @@
 #include "lume.h"
 #include "tools.h"
 #include "skills.h"
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -461,6 +462,63 @@ check("skills: index enumeration includes the scratch skill",
           "print(str(ok));\n"
           "print(read_file(\"/tmp/lume-smoke-data/a/b/x.txt\"));",
           "true\nhibytes\n");
+
+    /* flock lock builtins: acquire, same-process re-acquire (replaces the old
+     * lock), release, re-acquire. Cross-process mutual exclusion is exercised
+     * by the runtime test suite (run_all.sh). */
+    check("lock_file/unlock_file: acquire/replace/release cycle",
+          "let a = lock_file(\"/tmp/lume-smoke-data/lock\", 100);\n"
+          "let b = lock_file(\"/tmp/lume-smoke-data/lock\", 100);\n"
+          "unlock_file();\n"
+          "let c = lock_file(\"/tmp/lume-smoke-data/lock\", 100);\n"
+          "unlock_file();\n"
+          "print(str(a)); print(str(b)); print(str(c));",
+          "true\ntrue\ntrue\n");
+
+    /* write_file atomicity + permissions (checked from C, outside the DSL):
+     * the sibling .tmp.<pid> must be gone after the write, and the target must
+     * be 0600 — not umask 0644 (ledger/reports must stay private even outside
+     * .data/). */
+    {
+        tests_run++;
+        const char *dir = "/tmp/lume-smoke-data/a/b";
+        char target[512];
+        snprintf(target, sizeof target, "%s/x.txt", dir);
+        struct stat st;
+        int perm_ok = stat(target, &st) == 0 &&
+                      (st.st_mode & 0777) == 0600;
+        DIR *d = opendir(dir);
+        int tmp_leftover = 0;
+        if (d) {
+            struct dirent *e;
+            while ((e = readdir(d))) {
+                if (strstr(e->d_name, ".tmp.")) tmp_leftover = 1;
+            }
+            closedir(d);
+        }
+        if (perm_ok && !tmp_leftover) {
+            printf("ok   write_file: atomic (no .tmp) + 0600\n");
+        } else {
+            fprintf(stderr,
+                    "FAIL write_file: atomic (no .tmp) + 0600 (perm_ok=%d tmp=%d)\n",
+                    perm_ok, tmp_leftover);
+            tests_failed++;
+        }
+    }
+
+    /* lock_file creates the flock target with 0600. */
+    {
+        tests_run++;
+        struct stat st;
+        int ok = stat("/tmp/lume-smoke-data/lock", &st) == 0 &&
+                 (st.st_mode & 0777) == 0600;
+        if (ok) {
+            printf("ok   lock_file: lock file created 0600\n");
+        } else {
+            fprintf(stderr, "FAIL lock_file: lock file created 0600\n");
+            tests_failed++;
+        }
+    }
 
     /* ---- type checker rejects ---- */
 
