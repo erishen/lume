@@ -117,7 +117,7 @@ INVEST_SKILLS := weekly-investment
 # 在这一点上 —— 本地 tool 也被 HARNESS_TOOLS_ALLOW 过滤,漏了就像曾经的 add
 # 一样被静默丢弃。目录 iquest 的 IQUEST_REPORTS_DIR 指到 .data/reports,让
 # report_generate 的产物与仪表盘读的是同一处(容器里 compose 已注 /app/reports)。
-INVEST_TOOLS  := skill-run,read_file,write_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate
+INVEST_TOOLS  := skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate
 INVEST_MCPS   := portfolio-check,pse-review,fs,think,memory
 invest: all check ui
 	$(call KILL_SERVER,$(PORT),[i]nvest.lume)

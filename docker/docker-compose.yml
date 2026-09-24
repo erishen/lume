@@ -117,7 +117,7 @@ services:
       # 领域工具(portfolio_get/add/remove、report_generate)与 Makefile
       # INVEST_TOOLS 对齐 —— 本地 tool 也被 HARNESS_TOOLS_ALLOW 过滤,漏了
       # 会像曾经的 add 一样被静默丢弃(只有一行 stderr)。
-      HARNESS_TOOLS_ALLOW: "skill-run,read_file,write_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate"
+      HARNESS_TOOLS_ALLOW: "skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate"
       MCP_ALLOW: "fs,think,memory"
       # iquest 产品 API(settings/reports)的可写落点: 容器内用 /app 下的
       # 路径, 避免默认值里宿主的绝对路径 (Dockerfile 已建 /app/reports 并

@@ -215,11 +215,14 @@ LLM/会话层接真实模型，流式事件逐条推送。
 ### 5.1 配置优先级
 
 ```
-.lume 字面量 > .env / 环境变量 > 框架默认（端口 18080、fork-per-connection、docroot ./www）
+.lume 字面量 > .env / 环境变量 > 框架默认（端口 18080、fork-per-connection、docroot ./www、绑定 0.0.0.0）
 ```
 
 想由环境变量接管端口/worker，就**别在 `server{}` 里写该字段**（字面量优先
-无法覆盖）。`.env` 在 CWD 读取，和 LLM 配置共用同一文件。
+无法覆盖）。`.env` 在 CWD 读取，和 LLM 配置共用同一文件。监听地址由
+`server{ bind = "x.x.x.x" }` 指定（透传到 agent-httpd `bind_host`，
+缺省 NULL = 0.0.0.0 所有接口）；**invest.lume 显式 `bind = "127.0.0.1"`**，
+本机仪表盘/聊天只绑回环，不向局域网暴露。
 
 ### 5.2 环境变量族
 
@@ -237,9 +240,9 @@ LLM/会话层接真实模型，流式事件逐条推送。
 每个示例 = 一个 `examples/xxx.lume` + 一个 make 目标，用环境变量把运行时
 收敛到该任务所需的一小撮能力：
 
-- `make invest`（:8082）：技能 `weekly-investment`；工具 12 个（
-  `skill-run,read_file,write_file,get_time,query_exchange_rate,fetch_url,recall,
-  remember,portfolio_get,portfolio_add,portfolio_remove,report_generate`）；
+- `make invest`（:8082，**只绑 127.0.0.1**）：技能 `weekly-investment`；工具 11 个（
+  `skill-run,read_file,get_time,query_exchange_rate,fetch_url,recall,remember,
+  portfolio_get,portfolio_add,portfolio_remove,report_generate`）；
   MCP 5 个（`portfolio-check,pse-review,fs,think,memory`）。
 - `make hub`（:8083）：网关能力台，整本网关目录全开（5 技能 / 10 工具 / 5 MCP）。
 - `make dev`（:8081）：demo 试验台；`make dev-minimal`（:8082）：hello 最小入门。
@@ -260,6 +263,7 @@ LLM/会话层接真实模型，流式事件逐条推送。
 
 | 层 | 措施 |
 |---|---|
+| 监听地址 | `server{ bind }` → agent-httpd `bind_host`（NULL = 0.0.0.0）；**invest 默认 127.0.0.1**，本地不向 LAN 暴露（容器内由 compose 映射端口对外） |
 | 文件权限 | `.data/` 700；`.data/mcp-servers*.json` 600（router.c `fchmod`）；`native_mkdir` 0700 |
 | settings API | `GET /api/settings` 对 `env_file`/`LLM_API_URL`/`ROUTER_API_URL` **redact**（"configured"/null，`LLM_MODEL` 保留原值）；`POST` provider 含控制字符（<0x20/0x7f）→ 400；无 `IQUEST_ENV_FILE` → 写回 500 拒绝 |
 | 环境变量 | `IQUEST_ENV_FILE` 缺省 NULL——现有 `.env` 未显式配置时 invest 设置页写回会被拒绝（属预期行为） |

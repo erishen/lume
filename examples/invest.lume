@@ -18,6 +18,10 @@
 server {
   port = 8082;
   workers = 2;
+  // 只绑回环:本机仪表盘/聊天不向局域网暴露(此前 README 的 127.0.0.1 保护
+  // 只覆盖 compose 容器,本地 make invest 默认 0.0.0.0 会让 LAN 裸奔)。
+  // 需要对外提供时改成 bind = "0.0.0.0" 或删掉该行。
+  bind = "127.0.0.1";
   docroot = "./www";
   views = "invest";   // docroot 下的页面子目录:/ → www/invest/index.html 等
                       // (URL 仍然 /、/chat、/reports.html、/settings.html)

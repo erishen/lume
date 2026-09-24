@@ -471,6 +471,7 @@ void bridge_run(VM *vm) {
         /* string fields are strdup'd: agenthttpd_run blocks for the process
          * lifetime, so these intentionally leak. */
         struct { const char *key; const char **dst; } strs[] = {
+            {"bind", &cfg.bind_host},
             {"docroot", &cfg.docroot},
             {"views", &cfg.views},
             {"cgi_bin", &cfg.cgi_bin},
