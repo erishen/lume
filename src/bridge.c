@@ -2,6 +2,7 @@
 #include "iquest.h"
 #include "minijson.h"
 #include "llm.h"
+#include <stdlib.h> /* getenv(LUME_BIND) */
 
 /* bridge.c — the language's runtime translated into libagenthttpd.a calls.
  *
@@ -488,6 +489,16 @@ void bridge_run(VM *vm) {
                 char *copy = strdup(s);
                 if (copy) *strs[i].dst = copy;
             }
+        }
+
+        /* LUME_BIND 环境变量覆盖脚本里的 bind: 本地默认 127.0.0.1 是安全
+         * 基线(防止裸跑 invest.lume 时对网卡全接口暴露), 容器编排场景
+         * (k8s NodePort 从 pod 网络栈访问 pod IP) 需要监听 0.0.0.0,
+         * 暴露面由编排层(Namespace/NodePort 绑定)控制。 */
+        const char *env_bind = getenv("LUME_BIND");
+        if (env_bind && env_bind[0]) {
+            char *copy = strdup(env_bind);
+            if (copy) cfg.bind_host = copy;
         }
     }
 

@@ -43,6 +43,11 @@ spec:
                   key: password
             - name: HTPASSWD_FILE
               value: "/app/auth/htpasswd"
+            # k8s pod 需监听所有接口(NodePort 从 pod 网络栈访问 pod IP);
+            # 脚本默认 127.0.0.1 是本地安全基线, 这里显式覆盖。暴露面由
+            # Namespace + NodePort 本地绑定控制。
+            - name: LUME_BIND
+              value: "0.0.0.0"
             # LLM 上游：容器坐标 host.docker.internal（实测 k3s Pod 可达宿主）
             - name: LLM_API_URL
               value: "http://host.docker.internal:19070/v1"
