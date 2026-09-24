@@ -15,9 +15,8 @@
       <header class="hero chat-hero">
         <h1>SQLite 写能力演示</h1>
         <p>
-          examples/sqlite-write.lume（:8084）：该 profile 显式放行 <b>sql_write</b>——
-          模型可建分析表、写入、查询。portfolio 镜像表只读；DROP / ALTER / TRUNCATE /
-          PRAGMA 等被护栏拒绝。对照：<code>make invest</code>（:8082）默认不含 sql_write。
+          本 profile 显式放行 <b>sql_write</b>——模型可建分析表、写入、查询；
+          portfolio 镜像表只读，DROP / ALTER / TRUNCATE / PRAGMA 等被护栏拒绝。
         </p>
       </header>
       <section class="chat shell" id="chat-root">
