@@ -85,11 +85,11 @@ x-lume-common: &lume-common
     # http_route.c), 容器就绪判据与宿主 make dev 的轮询一致。
     # 认证开启时 /health 返回 401 而非 200 —— 401 表示「服务在跑且鉴权
     # 生效」, 同样算健康; 只有连不上或非 200/401 才算不健康。密码不能写进
-    # compose 里给 curl 用(那等于把凭据落库), 所以这里只认状态码。
-    # 必须写 $$c 而不是 $c: compose 渲染时会把裸 $c 当未定义变量展开成空串
-    # (警告 "The c variable is not set"), 整条判断退化成 [ "" = 200 ],
-    # 健康检查就永远假失败。
-    test: ["CMD-SHELL", "c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${LUME_HEALTH_PORT:-8082}/health); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]
+    # compose 里用(那等于把凭据落库), 所以这里只认状态码。
+    # 镜像已无 curl(scratch/busybox), 用 busybox wget -S 打印状态行 +
+    # sed 提取码; 必须写 $$c 而不是 $c: compose 渲染时会把裸 $c 当未定义
+    # 变量展开成空串 (警告 "The c variable is not set"), 判断退化成假失败。
+    test: ["CMD-SHELL", "c=$(/bin/wget -S -q -O /dev/null http://127.0.0.1:${LUME_HEALTH_PORT:-8082}/health 2>&1 | sed -n 's/.*HTTP\\/[^ ]* \\([0-9]\\{3\\}\\).*/\\1/p' | sed -n '1p'); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]
     interval: 5s
     timeout: 2s
     retries: 20
@@ -128,7 +128,7 @@ services:
       - "127.0.0.1:18082:8082"   # 绑回环 + Basic Auth, 见文件头「访问控制」
     healthcheck:
       # 认证开启 → 401 也算健康, 理由见 x-lume-common 的 healthcheck 注释
-      test: ["CMD-SHELL", "c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8082/health); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]
+      test: ["CMD-SHELL", "c=$(/bin/wget -S -q -O /dev/null http://127.0.0.1:8082/health 2>&1 | sed -n 's/.*HTTP\\/[^ ]* \\([0-9]\\{3\\}\\).*/\\1/p' | sed -n '1p'); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]
 
   hub:
     <<: *lume-common
@@ -145,4 +145,4 @@ services:
       - "127.0.0.1:18083:8083"   # 绑回环 + Basic Auth, 见文件头「访问控制」
     healthcheck:
       # 认证开启 → 401 也算健康, 理由见 x-lume-common 的 healthcheck 注释
-      test: ["CMD-SHELL", "c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8083/health); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]
+      test: ["CMD-SHELL", "c=$(/bin/wget -S -q -O /dev/null http://127.0.0.1:8083/health 2>&1 | sed -n 's/.*HTTP\\/[^ ]* \\([0-9]\\{3\\}\\).*/\\1/p' | sed -n '1p'); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]

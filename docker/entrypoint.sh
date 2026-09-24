@@ -1,26 +1,21 @@
 #!/bin/sh
-# 容器启动入口:把 .env 里的明文密码换成容器内的 htpasswd 文件,然后 exec 主程序。
+# scratch/busybox 版启动入口：把 .env 的明文密码换成 /app/auth/htpasswd，然后 exec 主程序。
 #
-# 为什么在这里生成而不是宿主机:
-#   密码只有 .env 这一个来源。宿主侧再生成一份 auth/htpasswd 就要多维护一个
-#   派生产物 —— 改了 .env 忘记重跑就会得到一把对不上的钥匙。放在容器启动时
-#   生成,`docker compose up` 之后立刻就是 .env 里的当前值。
+# 与 apache2-utils 版(htpasswd -cbB, bcrypt)等价：busybox `cryptpw -m sha512`
+# 输出 $6$ 格式 —— agent-httpd 的 load_htpasswd 只认 $5$/$6$/bcrypt 强哈希，
+# 明文与弱哈希($1$ MD5 / $apr1$ / DES 13 位)加载即失败退出（弱文件永远不可能
+# 变成"放行所有"）。$6$ 是 SHA-512 crypt，与 bcrypt 同属强档。
 #
-# 语义:
-#   LUME_AUTH_PASSWORD 空  -> 不生成文件,服务端 htpasswd 为空 -> 认证关闭
-#   LUME_AUTH_PASSWORD 非空 -> 生成 /app/auth/htpasswd(0600),认证开启
-#
-# 哈希格式必须是 crypt(3) 强哈希:框架的 load_htpasswd 只认 $5$/$6$/bcrypt,
-# 明文与弱哈希($1$ MD5 / $apr1$ / DES 13 位)加载即失败退出 —— 弱文件永远
-# 不可能变成"放行所有",见 ../agent-httpd/src/security/auth.c 头注释。
-# 这里用 htpasswd -B 出 bcrypt($2y$)。
+# 密码只有 .env 这一个来源。LUME_AUTH_PASSWORD 空 -> 不生成文件，认证关闭。
 
 set -eu
 
 if [ -n "${LUME_AUTH_PASSWORD:-}" ]; then
     user="${LUME_AUTH_USER:-admin}"
     mkdir -p /app/auth
-    htpasswd -cbB /app/auth/htpasswd "$user" "$LUME_AUTH_PASSWORD" >/dev/null
+    # cryptpw 从 stdin 读密码、自动生成随机盐；printf 不引入尾换行。
+    hash="$(printf '%s' "$LUME_AUTH_PASSWORD" | /bin/busybox cryptpw -m sha512)"
+    printf '%s:%s\n' "$user" "$hash" > /app/auth/htpasswd
     chmod 600 /app/auth/htpasswd
 fi
 
