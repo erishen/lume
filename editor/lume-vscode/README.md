@@ -1,52 +1,59 @@
-# Lume — VS Code 语法高亮
+# Lume — VS Code Syntax Highlighting
 
-本地扩展,给 `.lume` 文件提供语法高亮、注释切换、括号配对与自动闭合。
-不需要联网下载,不需要 vsce 打包。
+[English](README.md) | [简体中文](README.zh.md)
 
-## 结构
+A local extension providing syntax highlighting, comment toggling, bracket
+pairing and auto-closing for `.lume` files. No network download needed, no
+vsce packaging required for local use.
+
+## Structure
 
 ```
 editor/lume-vscode/
-├── package.json                    # 语言 id "lume"、.lume 后缀、grammar 登记
-├── language-configuration.json     # // 与 /* */ 注释、{}()[] 配对
-└── syntaxes/lume.tmLanguage.json   # TextMate 语法(高亮规则)
+├── package.json                    # language id "lume", .lume extension, grammar registration
+├── language-configuration.json     # // and /* */ comments, {}()[] pairs
+└── syntaxes/lume.tmLanguage.json   # TextMate grammar (highlighting rules)
 ```
 
-## 安装(两种方式)
+## Install (two ways)
 
-### 方式 A:软链进扩展目录(推荐,改文件即生效)
+### Option A: symlink into the extensions dir (recommended — edits take effect on reload)
 
 ```bash
 VSCODE_EXT=~/.vscode/extensions
 ln -s ../work/research/lume/editor/lume-vscode "$VSCODE_EXT/cnb.lume-0.1.0"
 ```
 
-然后重启 VS Code(或 `Cmd+Shift+P` → "Developer: Reload Window")。
-改 syntaxes/*.json 后 reload 即可,无需重装。
+Then reload VS Code (`Cmd+Shift+P` → "Developer: Reload Window"). After
+editing `syntaxes/*.json`, reload — no reinstall needed.
 
-> 若用 Cursor / VSCode Insiders / Remote-SSH,把 `~/.vscode/extensions`
-> 换成对应目录:`~/.cursor/extensions`、`~/.vscode-insiders/extensions`、
-> `~/.vscode-server/extensions`。
+> For Cursor / VS Code Insiders / Remote-SSH, replace `~/.vscode/extensions`
+> with `~/.cursor/extensions`, `~/.vscode-insiders/extensions`, or
+> `~/.vscode-server/extensions`.
 
-### 方式 B:打包成 .vsix(可分发)
+### Option B: package a .vsix (distributable)
 
 ```bash
-cd editor/lume-vscode
-npx @vscode/vsce package
-# 生成 cnb.lume-0.1.0.vsix,VS Code "Extensions: Install from VSIX..." 安装
+make vsix        # from the repo root
+# → editor/lume-vscode/lume-0.1.0.vsix
 ```
 
-## 高亮覆盖
+Install the vsix via VS Code "Extensions: Install from VSIX...". Bumping a
+version? Increment `version` in `package.json` first.
 
-- 关键字:`server route tool func let return if else while`
-- 类型:`type int float string bool Result`(storage.type,TS 风格)
-- 字面量:`true false null`、数字、字符串(含 `\n \t \\ \"` 转义)
-- 内建函数:`print str len keys get json stringify now`
-- 逻辑/比较/赋值运算符、`?`
-- 注释与自动配对
+## Highlight coverage
 
-## 已知取舍
+- Keywords: `server route tool func let return if else while`
+- Types: `type int float string bool Result` (storage.type, TS-style)
+- Literals: `true false null`, numbers, strings (with `\n \t \\ \"` escapes)
+- Built-ins: `print str len keys get json stringify now`
+- Logic / comparison / assignment operators, `?`
+- Comments and auto-pairing
 
-- `type/int/...` 等类型关键字同时可作普通标识符(如字段名、`int("42")`),
-  高亮统一按类型关键字显示 —— 仅观感差异,不影响使用。
-- 类型关键字不作内建函数高亮,`int(...)` 中的 `int` 显示为类型。
+## Known trade-offs
+
+- Type keywords (`type/int/...`) can also be ordinary identifiers (field
+  names, `int("42")`); they are always highlighted as type keywords — purely
+  cosmetic, no functional impact.
+- Type keywords are not highlighted as built-ins; `int` inside `int(...)`
+  renders as a type.
