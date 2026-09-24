@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hub Agent · tsm-hub 网关</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body data-page="chat" data-gateway>
+    <nav>
+      <a href="/" class="brand">Hub</a>
+      <a href="/">Home</a>
+      <a href="/chat" class="active">Agent</a>
+      <a href="/discovery.html">Discovery</a>
+      <a href="/catalog.html">Catalog</a>
+    </nav>
+    <main class="chat-page">
+      <header class="hero chat-hero">
+        <h1>网关 Agent</h1>
+        <p>
+          tsm-hub 全量能力聊天入口:技能(skill-run)、fs/memory/think 与
+          投资 MCP、汇率/计算/抓页工具都在这里;聊天框上方的发现条会列出
+          当前实际加载的能力。
+        </p>
+      </header>
+      <section class="chat shell" id="chat-root">
+        <p class="muted">loading agent…</p>
+      </section>
+    </main>
+    <script type="module" src="/invest/app.js"></script>
+  </body>
+</html>

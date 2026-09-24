@@ -1,0 +1,148 @@
+# ============================================================================
+# lume —— 单镜像 docker 应用 (compose, 全部自足单镜像)。
+#   cd research && docker compose -f lume/docker/docker-compose.yml up
+#
+# 单镜像 lume:latest, service 各自把 examples/<name>.lume 伺服成
+# 独立应用,共用同一棵 docroot(www/,含 invest 聊天 bundle + esbuild 分包
+# chunk + Tailwind 壳样式),各自端口 + 技能/工具/MCP 白名单。
+#
+# 端口(镜像内 DSL 写死,compose 宿主端口错开,均绑 127.0.0.1):
+#   service   .lume           容器内    宿主
+#   invest    invest.lume     8082      127.0.0.1:18082
+#   hub       hub.lume        8083      127.0.0.1:18083
+#
+# 访问控制:Lume 服务端本身没有鉴权模块,server{} 里 htpasswd 留空即完全
+#   无认证 —— /api/reports(投资周报)、/react/api/chat、/discovery 都是
+#   裸端点,聊天里还能经 fs 工具读写文件。这里用两层防护:
+#   1. 宿主端口绑 127.0.0.1 而非 0.0.0.0 —— 服务不进 LAN,只对宿主机可见。
+#   2. Basic Auth —— server{} 里 htpasswd = env("HTPASSWD_FILE"),本文件给
+#      容器注 HTPASSWD_FILE=/app/auth/htpasswd。该文件不挂载,由镜像的
+#      entrypoint 在容器启动时从 .env 的 LUME_AUTH_PASSWORD 现场生成
+#      (见 lume/docker/entrypoint.sh)。实测无凭证 401 +
+#      WWW-Authenticate: Basic realm="lume"。
+#   密码只有 .env 一个来源,改 .env 后 `docker compose up -d` 即生效。
+#   框架只认 $5$/$6$/bcrypt 强哈希,明文与弱哈希加载即失败退出。
+#   临时关掉容器认证:把 service 的 HTPASSWD_FILE 和 .env 的
+#   LUME_AUTH_PASSWORD 一起删掉(两边留一个就是不一致状态)。
+#   本机 make invest 不注这些 env → server{} 取到 null → 认证保持关闭,
+#   开发体验不变。
+#   注意:框架不豁免 /health,所以认证开启时它返回 401 —— healthcheck 因此
+#   同时接受 200 和 401,见 x-lume-common。
+#
+# LLM 上游:容器内 localhost 是容器自己,不是宿主 —— 用 extra_hosts 把
+#   host.docker.internal 指回宿主网关 (LLM_API_URL 由宿主 .env 写
+#   http://localhost:19070/v1,compose 重写成容器视角的
+#   http://host.docker.internal:19070/v1 —— 与 agent-httpd 同款容器化
+#   坐标,见 agent-httpd/docker-compose.yml 的 LLM_API_URL 覆盖注释)。
+#
+# 技能/工具/MCP:镜像带整棵 skills/(DSL 技能检索树)+ examples/,
+#   compose 按示例给 env(与 Makefile 的 <NAME>_SKILLS/TOOLS/MCPS 对齐):
+#   - demo/hello   DSL 自带微型工具,不注白名单(默认全开)。
+#   - invest       weekly-investment 技能 + 投资工具 + portfolio/pse MCP
+#   - hub          code-review / rust-review / hot-news-post 等网关技能
+#                  + fs/memory/think + portfolio-check/pse-review
+#   (白名单值见 Makefile 顶部 INVEST_* / HUB_* —— compose 这里内联一份
+#   镜像内能自给自足的;MCP 服务器走 npx @modelcontextprotocol/*, 而宿主
+#   那份 skills/.data 依赖绝对路径 ../harness —— 容器里没有的那几个 MCP
+#   (portfolio-check / pse-review 桥到 harness 的技能语料)不炸, 而是 DSL
+#   侧按 MCP_ALLOW 白名单决定起不起; 你想在容器里跑完整 invest 周报,
+#   把宿主 harness 技能树挂进镜像 (compose 注释里有卷位) 即可 —— 见
+#   docs/DEVELOPMENT.md「容器化」一节)。
+# ============================================================================
+
+name: lume-stack
+
+x-lume-common: &lume-common
+  image: lume:latest
+  build:
+    context: ../..            # research/ —— 见 Dockerfile 头:lume 要
+                              # ../agent-httpd 一起重编,context 必须父目录
+    dockerfile: lume/docker/Dockerfile
+  # LLM 上游坐标: 容器内 → host.docker.internal (宿主网关 :19070)。
+  # 实际 URL/MODEL/KEY 从项目根 .env 注入 (LLM_API_URL/LLM_MODEL/
+  # LLM_API_KEY), compose 只把 localhost 换成容器坐标。
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  env_file:
+    - path: ../.env            # lume/.env (相对本 compose 文件目录解析; 可选)
+      required: false
+  environment:
+    # 模板里 lume 读 .env(LLM_API_URL 等)。这里是容器坐标覆盖:
+    # 宿主 .env 写 localhost:19070, 容器内必须是 host.docker.internal。
+    # KEY/MODEL 仍走 .env, 不落镜像。
+    LLM_API_URL: "${LLM_API_URL:-http://host.docker.internal:19070/v1}"
+    # ROUTER_API_URL 同理:漏覆盖时容器内去连 localhost:19070(容器自己),
+    # llm-router 同步静默失败 -> .data/mcp-servers-router.json 不生成 ->
+    # /discovery 的 mcps 为空、MCP 服务器(fs/memory/think)全不注册。
+    # 同步日志里 base 打的是实际解析值,可据此判断有没有被覆盖。
+    ROUTER_API_URL: "${ROUTER_API_URL:-http://host.docker.internal:19070/v1}"
+  working_dir: /app
+  # htpasswd 不挂载: 由镜像的 entrypoint 在容器内从 .env 的
+  # LUME_AUTH_PASSWORD 生成(见 lume/docker/entrypoint.sh)。镜像里既不带
+  # 哈希也不带明文 —— 密码只有 .env 这一个来源, 改一处即可。
+  healthcheck:
+    # lume 自带 /health(与 agent-httpd 同源, 见 ../agent-httpd/src/http/
+    # http_route.c), 容器就绪判据与宿主 make dev 的轮询一致。
+    # 认证开启时 /health 返回 401 而非 200 —— 401 表示「服务在跑且鉴权
+    # 生效」, 同样算健康; 只有连不上或非 200/401 才算不健康。密码不能写进
+    # compose 里给 curl 用(那等于把凭据落库), 所以这里只认状态码。
+    # 必须写 $$c 而不是 $c: compose 渲染时会把裸 $c 当未定义变量展开成空串
+    # (警告 "The c variable is not set"), 整条判断退化成 [ "" = 200 ],
+    # 健康检查就永远假失败。
+    test: ["CMD-SHELL", "c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${LUME_HEALTH_PORT:-8082}/health); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]
+    interval: 5s
+    timeout: 2s
+    retries: 20
+    start_period: 8s
+  restart: unless-stopped
+
+services:
+  invest:
+    <<: *lume-common
+    command: ["./bin/lume", "examples/invest.lume"]
+    environment:
+      # 服务自己的 environment 会整块替换 x-lume-common 的 environment,
+      # 所以锚点里的 LLM_API_URL / ROUTER_API_URL 覆盖必须在这里重复一遍
+      # 才生效(实测只写锚点时容器内仍是 .env 的 localhost,router 同步静默失败)。
+      LLM_API_URL: "${LLM_API_URL:-http://host.docker.internal:19070/v1}"
+      ROUTER_API_URL: "${ROUTER_API_URL:-http://host.docker.internal:19070/v1}"
+      # 认证开关: 指向 entrypoint 在容器内生成的 htpasswd。删掉这一行即回到
+      # 无认证 —— 与 server{} 里 env("HTPASSWD_FILE") 为 null 时框架禁用
+      # 认证的语义一致, 不会误伤本机 make invest 的开发体验。
+      HTPASSWD_FILE: "/app/auth/htpasswd"
+      # 白名单与 Makefile INVEST_* 对齐(镜像内能自足的技能/工具/MCP;
+      # portfolio-check/pse-review 桥 harness 语料, 容器内缺 → 白名单
+      # 含也不炸, DSL 按白名单只拉起能在容器里活的)。
+      HARNESS_SKILLS_ALLOW: "weekly-investment"
+      # 领域工具(portfolio_get/add/remove、report_generate)与 Makefile
+      # INVEST_TOOLS 对齐 —— 本地 tool 也被 HARNESS_TOOLS_ALLOW 过滤,漏了
+      # 会像曾经的 add 一样被静默丢弃(只有一行 stderr)。
+      HARNESS_TOOLS_ALLOW: "skill-run,read_file,write_file,get_time,query_exchange_rate,fetch_url,recall,remember,portfolio_get,portfolio_add,portfolio_remove,report_generate"
+      MCP_ALLOW: "fs,think,memory"
+      # iquest 产品 API(settings/reports)的可写落点: 容器内用 /app 下的
+      # 路径, 避免默认值里宿主的绝对路径 (Dockerfile 已建 /app/reports 并
+      # 归 lume 用户写)。.env 由设置页在容器内重写, 不进镜像。
+      IQUEST_REPORTS_DIR: "/app/reports"
+      IQUEST_ENV_FILE: "/app/.env"
+    ports:
+      - "127.0.0.1:18082:8082"   # 绑回环 + Basic Auth, 见文件头「访问控制」
+    healthcheck:
+      # 认证开启 → 401 也算健康, 理由见 x-lume-common 的 healthcheck 注释
+      test: ["CMD-SHELL", "c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8082/health); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]
+
+  hub:
+    <<: *lume-common
+    command: ["./bin/lume", "examples/hub.lume"]
+    environment:
+      # 同 invest:服务级 environment 整块替换锚点, 覆盖必须重复一遍才生效。
+      LLM_API_URL: "${LLM_API_URL:-http://host.docker.internal:19070/v1}"
+      ROUTER_API_URL: "${ROUTER_API_URL:-http://host.docker.internal:19070/v1}"
+      HTPASSWD_FILE: "/app/auth/htpasswd"   # 与 invest 同款, 见上
+      HARNESS_SKILLS_ALLOW: "code-review,rust-review,post-comment,hot-news-post,weekly-investment"
+      HARNESS_TOOLS_ALLOW: "calc,echo,fetch_url,get_time,query_exchange_rate,recall,remember,skill-run,system_info"
+      MCP_ALLOW: "fs,memory,think"
+    ports:
+      - "127.0.0.1:18083:8083"   # 绑回环 + Basic Auth, 见文件头「访问控制」
+    healthcheck:
+      # 认证开启 → 401 也算健康, 理由见 x-lume-common 的 healthcheck 注释
+      test: ["CMD-SHELL", "c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8083/health); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]

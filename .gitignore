@@ -1,0 +1,54 @@
+# ============================================================================
+# 构建产物: make clean 全清,不入库。Makefile 的 build/ 与 bin/ 是 C 侧产物,
+# tests/*-bin 由 make test 编出(dSYM 是 macOS 调试符号,同样可重编)。
+# =============================================================================
+build/
+bin/
+*.o
+*.d
+tests/smoke-bin
+tests/smoke-bin.dSYM/
+tests/tools-bin
+tests/tools-bin.dSYM/
+
+# --- 前端依赖与产物 ---------------------------------------------------------
+# 源码在 frontend/src/;make ui 用 esbuild/Tailwind 把 bundle 与 CSS 写进
+# ../www。pnpm-lock.yaml 入库以保证可复现(与 agent-httpd 同款约定)。
+frontend/node_modules/
+# vscode 扩展的 vsix 包是 vsce package 产物,可重编,不入库。
+editor/lume-vscode/*.vsix
+# www/ 里只有两类文件:手写的 HTML 壳(www/*/index.html、chat.html …)入库,
+# React bundle / esbuild 分包 chunk / Tailwind 产物忽略。新增 www/ 下的
+# 手写资源请用非 js/css 扩展名,或按下面的否定模式显式放行。
+/www/**/*.js
+/www/**/*.css
+
+# --- 运行时状态 -------------------------------------------------------------
+# 含对话内容、会话 id 与本机绝对路径,一律不入库:
+#   .data/        agent-httpd 会话与 MCP 注册(.data/sessions)
+#   .sandbox/     fs MCP 沙箱根(MCP_FS_ROOT,见 .env.example)
+#   skills/router llm-router 启动时同步的目录副本(拉 /v1/skills 落这里)
+# 三者都在启动/同步时重建,删掉不影响仓库自洽性。
+.data/
+.sandbox/
+skills/router/
+
+# --- 运行日志 ---------------------------------------------------------------
+# 访问日志由 agent-httpd 直接写 ./logs/access.log,是纯流量记录。
+logs/
+*.log
+
+# --- 密钥 ------------------------------------------------------------------
+# Repo 级忽略:靠本机 ~/.gitignore_global 兜不住换 checkout / CI 场景,
+# 这里显式忽略所有 .env 变体,再单独放行模板。
+.env
+.env.*
+!.env.example
+!*.env.example
+# Basic Auth 密码只在 .env(上面的规则已覆盖);htpasswd 由镜像 entrypoint
+# 在容器内从 .env 现场生成,不落宿主,所以这里没有第二个凭据文件要忽略。
+# 见 docker/entrypoint.sh 与 docker/docker-compose.yml「访问控制」。
+
+# --- macOS 噪声 -------------------------------------------------------------
+.DS_Store
+._*

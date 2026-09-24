@@ -1,0 +1,258 @@
+// Lume demo: an embedded agent-httpd server configured and extended from a
+// strongly-typed DSL, with a real "React-like" UI on both sides.
+//
+//   make && bin/lume examples/demo.lume    (or: make dev)
+//   browse http://localhost:8081/  (home UI), /counter (interactive),
+//   /chat (agent), /hello (plain API)
+//
+// UI is built two ways and they compose: el(tag, props, ...children) makes a
+// vnode tree; html("...{0}...", a, b) is a template string where {N} replaces
+// scalars (escaped) or vnodes (rendered structurally). render() serializes a
+// pure vnode tree; html() is the shell that mixes markup and slots. The same
+// component shape is mirrored client-side in www/invest/app.js (its own tiny
+// vdom with diff/patch reconciliation).
+//
+// NOTE on shared state: agent-httpd serves GET/HEAD on the master's fast
+// path and everything else on prefork workers; each process has its own VM
+// copy. Stateful routes here are therefore GET-only so the master's VM is
+// the single authority. (Cross-process state = storage, out of scope.)
+
+type User = {
+  name: string,
+  age: int,
+};
+
+type Reply = {
+  status: int,
+  type: string,
+  body: string,
+};
+
+server {
+  port = 8081;
+  workers = 4;
+  docroot = "./www";   // static UI assets: invest/app.js + app.css + chunks
+}
+
+// mutable server-side state, shared by every handler in this process
+let app_state = { count: 0, hits: 0, started: now() };
+
+// ------------------------------------------------ server-side components
+// Note: components are deliberately untyped (loose) — a vnode tree is a
+// dynamic structure, and render() knows how to walk it.
+func cls(active: string, name: string): string {
+  let c: string = "nav";
+  if (active == name) { c = c + " active"; }
+  return c;
+}
+
+func nav(active) {
+  return el("nav", {},
+    el("a", { class: cls(active, "home"), href: "/" }, "Home"),
+    el("a", { class: cls(active, "counter"), href: "/counter" }, "Counter"),
+    el("a", { class: cls(active, "chat"), href: "/chat" }, "Agent"),
+    el("a", { class: cls(active, "hello"), href: "/hello" }, "API"));
+}
+
+func card(icon, title, body, color) {
+  return el("div", { class: "card" },
+    el("span", { class: "dot", style: "background:" + color }),
+    el("h3", {}, icon + " " + title),
+    el("p", {}, body));
+}
+
+// template-string shell: {0}=title {4}=body slots, scalar (title) escaped,
+// vnode slots (nav, body list) rendered structurally
+func page(title, page_id, body) {
+  return html("<!doctype html><html><head>"
+    + "<meta charset='utf-8'>"
+    + "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+    + "<title>{0} · Lume</title>"
+    + "<link rel='stylesheet' href='/app.css'>"
+    + "<script type='module' src='/invest/app.js'></script></head>"
+    + "<body data-page='{1}'>"
+    + "<a class='skip' href='#top'>skip to content</a>"
+    + "{2}"
+    + "<main id='top'>{3}</main>"
+    + "<footer>{4}</footer>"
+    + "</body></html>",
+    title, page_id, nav(page_id), body, "Lume · strongly-typed C DSL on agent-httpd");
+}
+
+func home_page(req) {
+  return page("Home", "home", [
+    el("section", { class: "hero" },
+      el("h1", {}, "Lume."),
+      el("p", {}, "Write the server in a strongly typed DSL. The page wakes "
+        + "up with a tiny client runtime."),
+      el("pre", {}, el("code", {},
+        "route \"GET\", \"/\", func(req) {\n"
+        + "  return home_page(req);\n"
+        + "};")),
+      el("a", { class: "btn", href: "/counter" }, "Try the counter →")),
+    el("section", { class: "grid" },
+      card("1", "Typed", "int, float, string, bool, Result — checked at compile time.", "#38bdf8"),
+      card("2", "Handlers", "route and tool register closures; '?' propagates {err}.", "#a3e635"),
+      card("3", "JSON", "json(), stringify(), get() cross the C boundary.", "#f472b6")),
+    el("section", { class: "clock" },
+      el("span", { id: "clock" }, "--:--:--"),
+      el("small", {}, "client-side tick — no server round-trip")),
+  ]);
+}
+
+func counter_page(req) {
+  return page("Counter", "counter", [
+    html("<section class='hero'>"
+      + "<h1>Server state</h1>"
+      + "<p>The count lives in a global map on the master VM. All stateful "
+      + "routes are GET so the fast path keeps them consistent.</p></section>"),
+    html("<section class='counter' id='counter-root'>"
+      + "<big id='count'>{0}</big>"
+      + "<button id='inc'>+1</button>"
+      + "<small id='status'>syncing… tap the button</small></section>",
+      str(app_state.count)),
+    html("<section class='stats'>calls: <b id='hits'>{0}</b></section>",
+      str(app_state.hits)),
+  ]);
+}
+
+// ------------------------------------------------ JSON APIs
+// GET-only so read+write share the master VM (see the note at the top).
+// A map with no `body` key is served as-is: 200 + application/json, no
+// stringify/status/type needed.
+route "GET", "/api/count", func(req) {
+  return { count: app_state.count };
+};
+
+route "GET", "/api/inc", func(req) {
+  app_state.count = app_state.count + 1;
+  app_state.hits = app_state.hits + 1;
+  return { count: app_state.count, hits: app_state.hits };
+};
+
+route "GET", "/", home_page;
+route "GET", "/counter", counter_page;
+
+// ------------------------------------------------ agent chat page
+// The chat itself is served by the framework's native /react/api/chat
+// (src/agent/llm.c in libagenthttpd) — the SSR page only supplies the shell
+// and a mount point for the React client. Configure a real model in .env:
+//   cp .env.example .env   # set LLM_API_URL / LLM_MODEL / LLM_API_KEY
+func chat_page(req) {
+  return page("Agent", "chat", [
+    html("<section class='hero'>"
+      + "<h1>Agent</h1>"
+      + "<p>Talk to the embedded agent. It answers over the server's native "
+      + "SSE loop (note/delta/done events) and remembers the conversation on "
+      + "a session id. Empty LLM_API_KEY = offline demo engine; fill .env for "
+      + "the real model loop — its tool calls hit the Lume <code>tool</code> "
+      + "registry (try <b>greet</b>).</p></section>"),
+    html("<section class='chat' id='chat-root'>"
+      + "<ul class='msgs' id='msgs'>"
+      + "<li class='note'>loading agent…</li></ul>"
+      + "<form id='chat-form' class='input'>"
+      + "<input id='chat-in' type='text' placeholder='ask the agent…' autocomplete='off'>"
+      + "<button id='send' type='submit'>Send</button></form></section>"),
+  ]);
+}
+
+route "GET", "/chat", chat_page;
+
+// ------------------------------------------------ classic plain endpoints
+func hello(req): Reply {
+  // req: { method, path, remote_addr, host, content_type, ... } (loose)
+  return {
+    status: 200,
+    type: "text/plain",
+    body: "hello from lume, you asked for " + req.path + " (" + req.method + ")",
+  };
+}
+route "GET", "/hello", hello;
+
+func make_greeting(u: User): string {
+  return "hi, " + u.name + " (age " + str(u.age) + ")";
+}
+
+// inline handler — a reusable JSON echo endpoint (map -> JSON, defaults apply)
+route "POST", "/echo", func(req) {
+  return {
+    method: req.method,
+    path: req.path,
+    got_body: req.body,
+    ts: now(),
+  };
+};
+
+// dynamic response with plain string result (defaults text/html)
+route "GET", "/sum", func(req) {
+  let a: int = 40;
+  let b: int = 2;
+  return "40 + 2 = " + str(a + b);
+};
+
+// ------------------------------------------------ method shorthands
+// get/post/put/patch/delete/head/options "path", handler
+//   ≡  route "GET"/..., "path", handler
+// (registered routes are dispatched before the framework's method gate, so
+//  any verb serves here — no /cgi-bin path needed.)
+get "/ping", (req) => {
+  return { status: 200, type: "text/plain", body: "pong" };
+};
+
+put "/api/things", (req) => {
+  return { method: req.method, updated: true };
+};
+
+delete "/api/things", (req) => {
+  return { method: req.method, deleted: true };
+};
+
+// `write` is a built-in method group (POST/PUT/PATCH/DELETE): one statement
+// registers a route per method, and req.label carries the conventional label.
+write "/api/item", (req) => {
+  return { method: req.method, via: req.label };
+};
+
+// The handler is optional: `write "/api/ack";` uses the default JSON ack.
+write "/api/ack";
+
+// ------------------------------------------------ language showcase
+// Result-style error handling (no generics: { ok: ... } / { err: ... })
+func maybe_div(a: int, b: int): Result {
+  if (b == 0) { return { err: "division by zero" }; }
+  return { ok: a / b };
+}
+
+func use_result(): Result {
+  let r = maybe_div(10, 2)?;      // `?` unwraps ok, propagates err
+  print("quotient is " + str(r));
+  return { ok: 1 };
+}
+
+// agent tool: visible to the embedded LLM agent as a callable tool. Params
+// follow the DSL's { name: "string" } sugar — the bridge upgrades them to
+// {"type":"..."} schemas at registration so strict upstreams don't 400. The
+// handler's `arg` is typed by that same schema, so `arg.name` / `arg.age`
+// read declared fields directly; an omitted key reads as the type's zero.
+tool "greet", "Say hello to a person by their name", { name: string, age: int }, func(arg) {
+  return { greeting: make_greeting({ name: arg.name, age: arg.age }) };
+};
+
+// ------------------------------------------------ /discovery
+// What llm-router integration found at boot, in one JSON glance: the live
+// tool registry (builtins + DSL tools + MCP <server>/<tool> + router
+// proxies), the indexed skill catalog, and the mcps the sync wrote. GET-only
+// so it runs on the master VM. `mcps()` is a builtin: read+parse of
+// .data/mcp-servers-router.json, null when no sync ran yet.
+get "/discovery", (req) => {
+  return {
+    endpoints: discovery_endpoints(),   // 只报配置状态与模型名, 不暴露内网 URL,
+    skills: skills(),
+    tools: tools(),
+    mcps: mcps(),
+  };
+};
+
+print("demo.lume: ui + routes registered, starting server on :8081 ...");
+use_result();
+run();

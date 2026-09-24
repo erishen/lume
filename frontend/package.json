@@ -1,0 +1,34 @@
+{
+  "name": "lume-demo-ui",
+  "private": true,
+  "version": "0.3.0",
+  "description": "Client runtime for the Lume demo: real React + TypeScript, bundled by esbuild and styled with Tailwind CSS into ../www (the framework docroot).",
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build:js": "esbuild src/invest/app.tsx src/invest/dashboard.tsx src/invest/reports.tsx src/invest/settings.tsx src/hub/hub-home.tsx src/hub/hub-catalog.tsx src/hub/hub-discovery.tsx --bundle --minify --format=esm --splitting --outdir=../www --outbase=src",
+    "build:css": "tailwindcss -i src/app.css -o ../www/app.css --minify",
+    "build:items:js": "esbuild src/hello/items.tsx --bundle --minify --format=iife --outfile=../www/hello/items.js",
+    "build:items:css": "tailwindcss -i src/hello/items.css -o ../www/hello/items.css --minify",
+    "build": "pnpm run typecheck && pnpm run build:js && pnpm run build:css",
+    "build:items": "pnpm run typecheck && pnpm run build:items:js && pnpm run build:items:css",
+    "dev:js": "esbuild src/invest/app.tsx src/invest/dashboard.tsx src/invest/reports.tsx src/invest/settings.tsx src/hub/hub-home.tsx src/hub/hub-catalog.tsx src/hub/hub-discovery.tsx --bundle --format=esm --splitting --outdir=../www --outbase=src --watch",
+    "dev:items:js": "esbuild src/hello/items.tsx --bundle --format=iife --outfile=../www/hello/items.js --watch",
+    "dev:items:css": "tailwindcss -i src/hello/items.css -o ../www/hello/items.css --watch",
+    "dev:css": "tailwindcss -i src/app.css -o ../www/app.css --watch",
+    "dev": "pnpm run dev:js & pnpm run dev:items:js & pnpm run dev:items:css & pnpm run dev:css & wait",
+    "dev:items": "pnpm run dev:items:js & pnpm run dev:items:css & wait"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "esbuild": "^0.24.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.7.2"
+  }
+}

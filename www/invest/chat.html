@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent · Lume</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body data-page="chat">
+    <nav>
+      <a href="/" class="brand">Lume</a>
+      <a href="/">Home</a>
+      <a href="/chat" class="active">Agent</a>
+      <a href="/reports">Reports</a>
+      <a href="/settings">Settings</a>
+    </nav>
+    <main class="chat-page">
+      <header class="hero chat-hero">
+        <h1>本地投资助手</h1>
+        <p>
+          连接本地模型、技能与工具：Weekly Investment 周报管线、portfolio-check 体检、
+          自动记忆与沙箱文件访问。所有输出均来自本地快照，含真实持仓金额，
+          请勿外发或提交到版本库。
+        </p>
+      </header>
+      <section class="chat shell" id="chat-root">
+        <p class="muted">loading agent…</p>
+      </section>
+    </main>
+    <script type="module" src="/invest/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,23 @@
+# Lume 构建上下文排除项 —— 与 agent-httpd/.dockerignore 同款意图:
+# 镜像里只重编 C, 前端 www/ 直接 COPY 宿主已构建产物, 所以宿主编译产物、
+# 运行时状态、依赖与秘密一律不送进构建层。
+
+# --- 宿主 C 产物(容器内重编) ---
+build/
+bin/
+*.o
+*.a
+
+# --- 前端依赖(宿主 make ui 产物直接 COPY www/) ---
+frontend/node_modules/
+**/node_modules/
+
+# --- 运行时会话 / 沙箱 / 日志 ---
+.data/
+.sandbox/
+logs/
+
+# --- 秘密: .env 由 compose env_file 注入, 不进镜像 ---
+.env
+.env.*
+!.env.example

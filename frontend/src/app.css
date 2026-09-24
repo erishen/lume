@@ -1,0 +1,260 @@
+/* Lume demo styles — now authored as Tailwind v4.
+ *
+ * The Lume SSR shell (examples/demo.lume) emits semantic class names
+ * (.hero/.card/.msg/…) that a C string cannot turn into utilities at runtime,
+ * so those live in the components layer (still built from theme tokens). The
+ * React bundle is free to use utilities directly and shares the same tokens.
+ *
+ * Build:  cd frontend && pnpm run build:css   -> ../www/app.css
+ * Watch:  cd frontend && pnpm run dev:css
+ */
+@import "tailwindcss" source(none);
+@import "./theme.css";
+
+/* Only the client sources and static shells are scanned; SSR markup uses the
+ * semantic classes defined below, so examples/*.lume does not need to be a
+ * content source.  Layout mirrors examples/ (src/<example>/: invest.lume,
+ * hub.lume, hello.lume); this shared stylesheet stays at the root
+ * because every www shell links /app.css. */
+@source "./invest/app.tsx";
+@source "./invest/reports.tsx";
+@source "./invest/settings.tsx";
+@source "./invest/dashboard.tsx";
+@source "./hub/hub-shared.tsx";
+@source "./hub/hub-home.tsx";
+@source "./hub/hub-catalog.tsx";
+@source "./hub/hub-discovery.tsx";
+@source "../../www/invest/index.html";
+@source "../../www/invest/chat.html";
+@source "../../www/invest/reports.html";
+@source "../../www/invest/settings.html";
+@source "../../www/hub/index.html";
+@source "../../www/hub/chat.html";
+@source "../../www/hub/catalog.html";
+@source "../../www/hub/discovery.html";
+
+@layer base {
+  body { @apply bg-bg font-sans text-ink leading-body; }
+}
+
+@layer components {
+  /* ---------------------------------------------------------------- shell */
+  nav { @apply sticky top-0 z-10 flex gap-2 border-b border-line bg-bg/90 px-5.5 py-3.5; }
+  nav a { @apply rounded-full border border-transparent px-3.5 py-1.5 text-muted no-underline; }
+  nav a:hover { @apply text-ink; }
+  nav a.active { @apply border-line bg-accent/10 text-accent; }
+  main { @apply mx-auto max-w-225 px-5.5 pt-10 pb-20; }
+  footer { @apply border-t border-line px-5.5 py-4.5 text-center text-[13px] text-muted; }
+  .skip { @apply sr-only focus:not-sr-only focus:absolute focus:z-50 focus:rounded focus:bg-accent focus:px-4 focus:py-2 focus:font-bold focus:text-accent-ink; }
+
+  /* --------------------------------------------------------------- home */
+  .hero h1 { @apply mb-1.5 mt-0 text-[56px] tracking-[1px] text-accent; }
+  /* Preflight zeros the browser's default p/pre margins; restore the spacing
+   * the original hand-written CSS got for free. */
+  .hero p { @apply my-4 max-w-[46ch] text-muted; }
+  .hero pre {
+    @apply my-4 overflow-x-auto rounded-[10px] border border-line bg-panel px-4 py-3 font-mono text-[13px] text-[#9fe8a2];
+  }
+  .btn { @apply mt-3 inline-block rounded-full bg-accent px-5 py-2.5 font-bold text-accent-ink no-underline hover:brightness-110; }
+  .grid {
+    @apply mt-8.5 grid gap-3.5;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .card { @apply rounded-xl border border-line bg-panel p-4.5; }
+  .card h3 { @apply mb-1 mt-2; }
+  .card p { @apply m-0 text-sm text-muted; }
+  .dot { @apply inline-block h-2.5 w-2.5 rounded-full; }
+  .clock { @apply mt-10 text-center text-muted; }
+  .clock span { @apply block text-[44px] tabular-nums text-ink; }
+
+  /* ------------------------------------------------------------ counter */
+  .counter { @apply rounded-[14px] border border-line bg-panel p-8.5 text-center; }
+  .counter big { @apply block text-[88px] leading-none tabular-nums text-accent; }
+  .counter button {
+    @apply mt-4.5 cursor-pointer rounded-full border-0 bg-accent px-6.5 py-3 text-[15px] font-bold text-accent-ink hover:brightness-110;
+  }
+  .counter small { @apply mt-3 block text-muted; }
+  .stats { @apply mt-4.5 block text-center text-muted; }
+
+  /* ---------------------------------------------------------------- chat */
+  /* Nav brand mark */
+  nav a.brand { @apply mr-1 font-black tracking-[0.2em] text-accent; }
+
+  .chat-page { @apply max-w-4xl px-5.5 pt-7 pb-24; }
+  .chat-hero h1 { @apply text-[34px] leading-tight; }
+  .chat-hero p { @apply mb-0 text-[15px] leading-[1.6]; }
+
+  /* floating action strip above the transcript */
+  .chat-fab {
+    @apply mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[14px] border border-line bg-panel/70 px-3.5 py-2 text-[13px] text-muted;
+  }
+  .fab-brand { @apply flex items-center gap-1.5 text-xs font-bold tracking-[0.18em] text-ink; }
+  .fab-brand::before { @apply inline-block h-2 w-2 rounded-full bg-accent; content: ""; box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18); }
+  .fab-session {
+    @apply flex-1 truncate text-[11.5px];
+    font-variant-numeric: tabular-nums;
+  }
+  .fab-session code { @apply ml-1 rounded-md border border-line bg-panel px-1.5 py-px font-mono text-accent; }
+  .fab-actions { @apply flex items-center gap-2; }
+  .chat-fab button.ghost {
+    @apply cursor-pointer rounded-full border border-line bg-transparent px-3.5 py-1.5 text-xs font-semibold text-muted hover:border-accent hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:border-line disabled:hover:text-muted;
+  }
+
+  .msgs {
+    @apply m-0 flex max-h-[68vh] min-h-[32rem] list-none flex-col gap-3 overflow-y-auto rounded-[16px] border border-line bg-[linear-gradient(180deg,#121a30,#0d1426)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)];
+    scrollbar-width: thin;
+    scrollbar-color: #22304f transparent;
+  }
+  .msg { @apply break-words text-[15px] leading-[1.6]; }
+  .msg .text { @apply whitespace-pre-wrap; }
+  .msg.user {
+    @apply self-end max-w-[82%] rounded-[14px_14px_4px_14px] border border-sky-400/40 bg-[linear-gradient(180deg,#0ea5e9,#0284c7)]
+      px-4 py-3 font-medium text-white shadow-[0_4px_14px_-6px_rgba(56,189,248,0.55)];
+  }
+  .msg.agent {
+    @apply self-start max-w-[95%] rounded-[14px_14px_14px_4px] border border-line bg-panel/70 px-4 py-3 text-ink/95;
+  }
+
+  /* tool/status lines: little chips above the reply */
+  .note-strip { @apply mb-2 flex flex-col items-start gap-1; }
+  .msg .note {
+    @apply inline-flex max-w-full items-center gap-1.5 overflow-hidden text-ellipsis rounded-md border border-line bg-bg/60 px-2 py-0.5 whitespace-nowrap font-mono text-[11.5px] text-muted;
+  }
+  .msg .note::before { @apply inline-block h-1 w-1 shrink-0 rounded-full bg-accent; content: ""; }
+
+  /* Markdown shapes the agent renders (renderMarkdown in app.tsx) */
+  .msg .text p { @apply my-1 first:mt-0 last:mb-0; }
+  .msg .text ul,
+  .msg .text ol { @apply my-1 pl-4.5; }
+  .msg .text ul { @apply list-disc; }
+  .msg .text ol { @apply list-decimal; }
+  .msg .text li { @apply my-0.5 pl-0.5 marker:text-muted; }
+  .msg .text strong { @apply font-semibold text-ink; }
+  .msg .text em { @apply not-italic text-sky-200; }
+  .msg .text code { @apply rounded bg-bg/70 px-1 py-px font-mono text-[0.92em] text-sky-300; }
+  .msg .text pre {
+    @apply my-1.5 overflow-x-auto rounded-lg border border-line bg-bg/70 px-2.5 py-2;
+  }
+  .msg .text pre code { @apply whitespace-pre-wrap bg-transparent p-0 text-[0.92em] text-ink; }
+  .msg .text h1, .msg .text h2, .msg .text h3 { @apply my-1.5 font-bold leading-tight text-ink; }
+  .msg .text h1 { @apply mt-2.5 text-[1.16em]; }
+  .msg .text h2 { @apply mt-2.5 border-b border-line/70 pb-0.5 text-[1.08em]; }
+  .msg .text h3 { @apply text-[1.02em]; }
+  .msg .text blockquote { @apply my-1 border-l-2 border-line pl-2.5 text-muted; }
+
+  /* tables (weekly report 关键发现 etc.) */
+  .msg .text table.md-table {
+    @apply my-1.5 w-full border-collapse overflow-hidden rounded-lg text-[13px] leading-snug;
+  }
+  .msg .text .md-tcell { @apply border-y border-line/70 px-2.5 py-1.5 align-top; }
+  .msg .text thead .md-tcell { @apply bg-bg/50 font-semibold text-sky-300; }
+  .msg .text tbody tr:first-child .md-tcell { @apply border-t-0; }
+
+  li.note { @apply self-center text-center text-xs text-muted; }
+
+  /* "agent is thinking…" — bouncing dots + elapsed + last action */
+  li.note.busy {
+    @apply flex flex-wrap items-center justify-center gap-2 text-xs text-muted;
+  }
+  .busy-dots { @apply inline-flex gap-1; }
+  .busy-dots i {
+    @apply inline-block h-1.5 w-1.5 rounded-full bg-accent;
+    animation: lume-bounce 1.2s infinite ease-in-out;
+  }
+  .busy-dots i:nth-child(2) { animation-delay: 0.15s; }
+  .busy-dots i:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes lume-bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-3px); opacity: 1; }
+  }
+  .busy-elapsed { @apply font-mono font-semibold text-ink/80; font-variant-numeric: tabular-nums; }
+  .busy-last {
+    @apply inline-flex max-w-[46%] items-center gap-1 overflow-hidden text-ellipsis rounded-md border border-line bg-bg/60 px-2 py-0.5 whitespace-nowrap font-mono text-[10.5px];
+  }
+
+  .input { @apply mt-3.5 mb-8 flex items-center gap-2; }
+  .input input {
+    @apply flex-1 rounded-full border border-line bg-panel px-5 py-3.5 font-[inherit] text-[16px] text-ink shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]
+      placeholder:text-muted/70 focus:border-accent/80 focus:shadow-[0_0_0_3px_rgba(56,189,248,0.15)] focus:outline-none;
+  }
+  .input button {
+    @apply cursor-pointer rounded-full border-0 bg-[linear-gradient(180deg,#38bdf8,#0ea5e9)] px-8 py-3.5 text-base font-bold text-accent-ink shadow-[0_4px_14px_-4px_rgba(56,189,248,0.6)]
+      hover:brightness-110 disabled:cursor-default disabled:opacity-45 disabled:hover:brightness-100;
+  }
+
+  /* ---------------------------------------------------- /chat discovery */
+  .disco { @apply mb-3 rounded-[14px] border border-dashed border-line bg-panel/60 px-4 py-2.5 text-xs text-muted; }
+  .disco-summary { @apply cursor-pointer list-none select-none; }
+  .disco-summary::-webkit-details-marker { display: none; }
+  .disco-body { @apply mt-2.5 flex flex-col gap-1.75; }
+  .disco-row { @apply flex flex-wrap items-baseline gap-x-2.5 gap-y-1; }
+  .disco-label { @apply w-19 shrink-0 font-semibold text-ink/75; }
+  .disco-chips { @apply flex flex-wrap gap-1.5; }
+  .disco-chip {
+    @apply rounded-md border border-line bg-panel px-1.5 py-px font-mono text-[10.5px] text-ink/90;
+  }
+
+  /* ----------------------------------------------------------- articles
+   * renderMarkdown output outside the chat transcript (weekly reports on
+   * the dashboard and the archives page): readable prose column with proper
+   * headings / lists / tables / code. */
+  .md-body { @apply text-[15px] leading-[1.7] text-ink; }
+  .md-body > p:first-child { @apply mt-0; }
+  .md-body p { @apply my-2.5; }
+  .md-body ul { @apply my-2.5 list-disc pl-5; }
+  .md-body ol { @apply my-2.5 list-decimal pl-5; }
+  .md-body li { @apply my-1 pl-1 marker:text-muted/70; }
+  .md-body strong { @apply font-semibold text-ink; }
+  .md-body em { @apply text-sky-200 not-italic; }
+  .md-body code { @apply rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[0.9em] text-sky-300; }
+  .md-body pre { @apply my-2.5 overflow-x-auto rounded-lg border border-line bg-bg/70 px-3.5 py-2.5; }
+  .md-body pre code { @apply bg-transparent p-0 text-[0.9em] whitespace-pre text-ink; }
+  .md-body h1, .md-body h2, .md-body h3 { @apply my-3 leading-tight font-bold text-ink; }
+  .md-body h1 { @apply text-[1.35em] mt-5; }
+  .md-body h2 { @apply mt-6 border-b-2 border-accent/20 pb-1 text-[1.12em]; }
+  .md-body h3 { @apply mt-4 text-[1.02em] text-ink/90; }
+  .md-body blockquote { @apply my-2.5 border-l-[3px] border-accent/40 pl-3.5 text-muted; }
+  .md-body table.md-table {
+    @apply my-2.5 w-full max-w-full overflow-x-auto rounded-lg text-[13px] leading-snug;
+    display: block;
+    border-collapse: collapse;
+  }
+  .md-body .md-tcell { @apply border-y border-line/70 px-2.5 py-1.5 align-top; }
+  .md-body thead .md-tcell { @apply border-b-2 border-accent/25 bg-accent/10 font-semibold text-sky-200; }
+  .md-body tbody tr:first-child .md-tcell { @apply border-t-0; }
+  .md-body tbody tr:nth-child(even) { background-color: rgba(56, 189, 248, 0.04); }
+
+  /* weekly-report article shell (dashboard 全文 + /reports) */
+  .report-article {
+    @apply rounded-2xl border border-line bg-panel px-8 py-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_6px_24px_-12px_rgba(0,0,0,0.6)];
+  }
+  .report-article .report-head {
+    @apply mb-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-line pb-3;
+  }
+  .report-article .report-date { @apply text-lg font-bold tracking-tight text-ink; }
+  .report-article .report-meta { @apply font-mono text-[11px] text-muted; }
+
+  /* --------------------------------------------------------- hub pages */
+  /* tsm-hub gateway UI (frontend/src/hub/hub-home|catalog|discovery.tsx):
+   * catalog tables + landing. The old inline <style> blocks here moved out
+   * of .lume/C into the bundle. */
+  .hub-stats { @apply grid gap-3; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  .hub-stat { @apply rounded-xl border border-line bg-panel px-3.5 py-3; }
+  .hub-stat b { @apply block text-[26px] leading-tight tabular-nums text-ink; }
+  .hub-stat span { @apply text-[12px] text-muted; }
+  .hub-cta { @apply my-3 flex flex-wrap justify-center gap-3; }
+  .hub-cta .btn { @apply mt-0; }
+  .btn-ghost { @apply border border-line bg-transparent font-semibold text-muted hover:border-accent hover:text-ink; }
+  .link { @apply text-accent no-underline hover:underline; }
+  .foot { @apply mx-auto max-w-2xl text-[12.5px] leading-[1.7] text-muted/80; }
+  .cat-section { @apply my-4; }
+  .cat-section h2 { @apply mb-2 text-[15px]; }
+  .cat-table { @apply w-full border-collapse text-[13px]; }
+  .cat-table th, .cat-table td { @apply border-b border-line/70 px-2.5 py-1.5 text-left align-top; }
+  .cat-table th { @apply font-semibold text-muted; }
+  .cat-table .mono { @apply font-mono; }
+  .cat-path { @apply break-all font-mono text-[12px] text-muted/80; }
+  .cat-schema { @apply m-0 break-all font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-sky-300; }
+  .cat-chip { @apply mr-1.5 mb-1.5 inline-block rounded-full border border-line px-2.5 py-0.5 font-mono text-[12px] text-muted; }
+  .chips { @apply m-0; }
+}

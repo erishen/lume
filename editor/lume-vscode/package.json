@@ -1,0 +1,36 @@
+{
+  "name": "lume",
+  "displayName": "Lume",
+  "description": "Syntax highlighting for the Lume scripting DSL",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publisher": "cnb",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "lume",
+        "aliases": [
+          "Lume",
+          "lume"
+        ],
+        "extensions": [
+          ".lume"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lume",
+        "scopeName": "source.lume",
+        "path": "./syntaxes/lume.tmLanguage.json"
+      }
+    ]
+  }
+}
