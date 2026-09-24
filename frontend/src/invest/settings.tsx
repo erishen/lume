@@ -18,7 +18,7 @@ type Settings = {
 };
 
 const PROVIDERS = [
-  { value: "router", label: "router(默认,免费,llm-router 网关)" },
+  { value: "router", label: "router(默认,免费,tsm-hub 网关)" },
   { value: "agnes", label: "agnes(免费,直连 apihub,偶发抽风)" },
   { value: "deepseek", label: "deepseek(付费约 ¥0.1–1/次,需先开审批)" },
 ] as const;

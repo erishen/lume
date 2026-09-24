@@ -17,7 +17,7 @@ function HubHome() {
       <main className="chat-page">
         <header className="hero chat-hero">
           <h1>tsm-hub 网关能力演示</h1>
-          <p>把 llm-router(:19070)的全量目录铺平成一组页面,直接对话使唤。</p>
+          <p>把 tsm-hub(:19070)的全量目录铺平成一组页面,直接对话使唤。</p>
         </header>
         <section className="hub-stats">
           <div className="hub-stat"><b>{(data?.skills ?? []).length}</b><span>Skills · skill-run 加载执行</span></div>
