@@ -182,6 +182,31 @@ ui-items:
 vsix:
 	@cd editor/lume-vscode && npx -y @vscode/vsce package
 
+# --- 镜像构建/发布 (docker) -----------------------------------------------
+# 发布到云机器之前先出容器镜像。镜像从 scratch + 静态 lume + busybox/musl
+# curl 依赖拼成 ~17.7MB(比旧 debian-slim 116MB 省 100MB 磁盘/台),仓库与
+# 云拉取带宽都省。
+#   make image         本地构建(当前架构),产出 IMAGE_REPO:IMAGE_TAG
+#   make image-push    buildx 多架构构建 + 直接推送 registry(先 docker login)
+# 推送命名:镜像名含 registry 前缀时整体生效,例:
+#   make image-push IMAGE_REPO=erishen/lume IMAGE_TAG=v1.0.0      # docker hub
+#   make image-push IMAGE_REPO=registry.example.com/lume IMAGE_TAG=v1.0.0
+# 构建上下文是仓库根(agent-httpd submodule 与 frontend 都会编进镜像),
+# -f docker/Dockerfile 与 compose 一致。
+IMAGE_REPO ?= lume
+IMAGE_TAG  ?= latest
+IMAGE_PLAT ?= linux/amd64,linux/arm64
+
+image:
+	@echo "==> docker build -t $(IMAGE_REPO):$(IMAGE_TAG) (local arch)"; \
+	docker build -f docker/Dockerfile -t $(IMAGE_REPO):$(IMAGE_TAG) .
+
+image-push:
+	@docker buildx create --use --name lume-$(IMAGE_TAG) >/dev/null 2>&1 || true; \
+	docker buildx build --platform $(IMAGE_PLAT) \
+		-f docker/Dockerfile -t $(IMAGE_REPO):$(IMAGE_TAG) --push .; \
+	echo "==> pushed $(IMAGE_REPO):$(IMAGE_TAG) for [$(IMAGE_PLAT)]"
+
 CORE_OBJS := $(filter-out build/main.o, $(OBJS))
 
 build/tests:
@@ -235,4 +260,4 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 	@./tests/tools-bin-asan || exit 1
 	@echo "ok   ASan/UBSan all passed"
 
-.PHONY: all check dump dev dev-minimal invest hub invest-watch hub-watch run ui ui-items vsix test clean asan
+.PHONY: all check dump dev dev-minimal invest hub invest-watch hub-watch run ui ui-items vsix image image-push test clean asan
