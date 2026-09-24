@@ -237,7 +237,7 @@ LLM/会话层接真实模型，流式事件逐条推送。
 每个示例 = 一个 `examples/xxx.lume` + 一个 make 目标，用环境变量把运行时
 收敛到该任务所需的一小撮能力：
 
-- `make invest`（:8082）：技能 `weekly-investment`；工具 11 个（
+- `make invest`（:8082）：技能 `weekly-investment`；工具 12 个（
   `skill-run,read_file,write_file,get_time,query_exchange_rate,fetch_url,recall,
   remember,portfolio_get,portfolio_add,portfolio_remove,report_generate`）；
   MCP 5 个（`portfolio-check,pse-review,fs,think,memory`）。

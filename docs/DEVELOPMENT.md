@@ -16,7 +16,7 @@ lexer -> parser(AST) -> type checker(compile-time) -> tree-walk interpreter -> b
 ```
 lume/
 ├── src/
-│   ├── al.h          # 全部公共头：tokens、Type、Node、Value/Obj/GC、VM、桥接原型
+│   ├── lume.h        # 全部公共头：tokens、Type、Node、Value/Obj/GC、VM、桥接原型
 │   ├── token.c       # 枚举 -> 名字表（错误信息用）
 │   ├── lexer.c       # 源码 -> Token 数组
 │   ├── parser.c      # Token -> AST（递归下降），含类型标注/`type` 声明/`?`
@@ -24,6 +24,8 @@ lume/
 │   ├── value.c       # Value/Obj、GC（mark-sweep）、map/env/string、json 编解码
 │   ├── interp.c      # 树遍历解释器（value stack + jmp_buf 返回展开）+ 内建函数
 │   ├── bridge.c      # DSL <-> libagenthttpd 翻译层（route/tool/run shim）
+│   ├── iquest.c      # 投资助手产品 API（reports/settings 端点，settings 脱敏）
+│   ├── iquest.h      # iquest 注册接口：必须在 agenthttpd_run() 之前调用
 │   └── main.c        # CLI：--check / --dump / 直接执行脚本
 ├── examples/         # 每个是一个完整示例；invest/hub/hello 各带前端
 │   ├── demo.lume         # E2E 试验台（SSR + 路由 + 工具），:8081，make dev
@@ -43,7 +45,7 @@ lume/
 │   ├── invest/          # chat 的聊天 bundle 也住这（app.js），hub 的 /chat 复用
 │   ├── hub/  hello/    # 每示例自己的壳 <html> 和 bundle <js>
 ├── tests/
-│   ├── smoke.c        # 解释器 + 类型检查单测（49 check + 11 reject = 60）
+│   ├── smoke.c        # 解释器 + 类型检查单测（53 check + 11 reject = 64）
 │   ├── tools_driver.c # 工具注册 + tools_dispatch JSON 往返
 │   └── run_all.sh     # 端到端：构建、单测、live HTTP、300 请求 GC 压测
 ├── Makefile          # make / check / dump / dev / invest / hub / test / ui
@@ -121,7 +123,7 @@ write "/items", (req) => { return { method: req.method, action: req.label }; };
 // 返回 { action, method, got }，见 interp.c / value.c 的 GC root）。
 write "/ack";
 
-// 自定义方法组用 `verbs` 声明（见 al.h TOK_VERBS/N_VERBS、interp.c N_ROUTE alias
+// 自定义方法组用 `verbs` 声明（见 lume.h TOK_VERBS/N_VERBS、interp.c N_ROUTE alias
 // 分支）：列表 = 纯方法；映射 = 方法 -> 标签，标签经 RouteRec.label 注入 req.label
 verbs crud = { POST: "created", DELETE: "removed" };
 crud "/things", (req) => { return { method: req.method, action: req.label }; };
@@ -222,9 +224,9 @@ struct（`tool_param_struct`，把 `int`/`float`/`string`/`bool` 关键字或字
 3. typecheck.c 的 `BUILTINS[]` 已默认按 `any` 放行，无需改。
 
 ### 加一种新语句/关键字
-1. `al.h`：加 `TokenType` 枚举项；token.c 好 `TOKEN_NAMES` 的对应名字。
+1. `lume.h`：加 `TokenType` 枚举项；token.c 好 `TOKEN_NAMES` 的对应名字。
 2. `lexer.c`：`KEYWORDS[]` 或标点分支。
-3. `parser.c`：`parse_statement` 分支生成新 `NodeType`；`al.h` 扩 AST union；
+3. `parser.c`：`parse_statement` 分支生成新 `NodeType`；`lume.h` 扩 AST union；
    `node_print` 加调试输出。
 4. `typecheck.c`：`ck_stmt`/`ck_expr` 处理新节点（编译期强类型就在这保证）。
 5. `interp.c`：`exec_statement`/`eval_expr` 给运行时语义。
@@ -232,7 +234,7 @@ struct（`tool_param_struct`，把 `int`/`float`/`string`/`bool` 关键字或字
    （类型错误路径）。
 
 ### 加一个新内置类型（如 date）
-- `al.h TypeKind` / `typecheck.c` 的 `ck_expr` literal 与 `type_compat`、
+- `lume.h TypeKind` / `typecheck.c` 的 `ck_expr` literal 与 `type_compat`、
   `ty_str/tp_inner` 都要同步加分支。
 
 ---
@@ -241,7 +243,7 @@ struct（`tool_param_struct`，把 `int`/`float`/`string`/`bool` 关键字或字
 
 - `make test` 起一个真服务器（默认 :8999，`tests/run_all.sh` 里 PORT），依次：
   1. `make` + `./bin/lume --check examples/demo.lume`
-  2. `tests/smoke-bin`（60 项：解析+类型检查+执行，stdout 逐字节比对）
+  2. `tests/smoke-bin`（64 项：解析+类型检查+执行，stdout 逐字节比对）
   3. `tests/tools-bin`（工具表 + `tools_dispatch` JSON 往返 + `session` 透传）
   4. live HTTP：GET /hello、GET /sum、POST /echo、
      `POST /react/api/chat`（agent demo SSE）+ 300 次请求 GC 压测

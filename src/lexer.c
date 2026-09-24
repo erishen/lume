@@ -240,7 +240,7 @@ Token *lex_all(const char *source, char *errbuf, size_t errbuf_size,
     return o.toks;
 }
 
-/* Re-exported through al.h's parse_program; the token array is caller-freed. */
+/* Re-exported through lume.h's parse_program; the token array is caller-freed. */
 Token *al_lex(const char *source, char *errbuf, size_t errbuf_size,
               int *out_count) {
     return lex_all(source, errbuf, errbuf_size, out_count);
