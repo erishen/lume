@@ -38,9 +38,18 @@ spec:
                   key: password
             - name: HTPASSWD_FILE
               value: "/app/auth/htpasswd"
-            # LLM 上游：容器坐标 host.docker.internal（实测 k3s Pod 可达宿主）
+            # LLM 上游：容器坐标 host.docker.internal（实测 k3s Pod 可达宿主）。
+            # agent_round 把 LLM_API_URL 直接当 chat/completions 端点用，必须给
+            # 全路径；key 走 Secret（sk-tr-… 由 tsm-hub 网关签发，勿明文入 yaml）。
             - name: LLM_API_URL
-              value: "http://host.docker.internal:19070/v1"
+              value: "http://host.docker.internal:19070/v1/chat/completions"
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lume-hub-llm
+                  key: apikey
+            - name: LLM_MODEL
+              value: "auto"
             - name: ROUTER_API_URL
               value: "http://host.docker.internal:19070/v1"
             # 白名单与 Makefile HUB_* 对齐
