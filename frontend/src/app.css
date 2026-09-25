@@ -144,6 +144,17 @@
   .msg .text pre {
     @apply my-1.5 overflow-x-auto rounded-lg border border-line bg-bg/70 px-2.5 py-2;
   }
+
+  /* /dsl write-up sample: long lines wrap (pre-wrap) instead of forcing a
+   * horizontal scrollbar; when a token is unbreakable the scrollbar stays
+   * thin and theme-matched. */
+  .code-panel {
+    scrollbar-width: thin;
+    scrollbar-color: #22304f transparent;
+  }
+  .code-panel::-webkit-scrollbar { height: 6px; }
+  .code-panel::-webkit-scrollbar-thumb { background: #22304f; border-radius: 3px; }
+  .code-panel::-webkit-scrollbar-track { background: transparent; }
   .msg .text pre code { @apply whitespace-pre-wrap bg-transparent p-0 text-[0.92em] text-ink; }
   .msg .text h1, .msg .text h2, .msg .text h3 { @apply my-1.5 font-bold leading-tight text-ink; }
   .msg .text h1 { @apply mt-2.5 text-[1.16em]; }

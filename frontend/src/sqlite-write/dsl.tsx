@@ -16,13 +16,17 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 const DSL_EXAMPLE = `// 只读查询:值走 ? 占位符绑定,不拼进 SQL(注入无效)
-let holdings = sql_query("select symbol, units, avg_cost from portfolio where units >= ?", [1]);
+let holdings = sql_query(
+  "select symbol, units, avg_cost from portfolio where units >= ?", [1]);
 
 // 护栏写:UPDATE/DELETE 必须带 WHERE;值同样走 ? 绑定
-let n = sql_write("update analysis set cost_value = ? where symbol = ?", [2000, "AAPL"]);
+let n = sql_write(
+  "update analysis set cost_value = ? where symbol = ?", [2000, "AAPL"]);
 
 // 幂等建表:表存在则跳过(重复启动不报错)
-let has = len(sql_query("select name from sqlite_master where type = 'table' and name = ?", ["analysis"]));
+let has = len(sql_query(
+  "select name from sqlite_master where type = 'table' and name = ?",
+  ["analysis"]));
 if (has == 0) {
   sql_write("create table analysis (symbol text, cost_value real, note text)");
   sql_write("insert into analysis values (?, ?, ?)", ["AAPL", 1500, "dsl-demo"]);
@@ -148,7 +152,7 @@ function DslPage() {
         <h2 className="text-[15px] font-bold text-ink">
           写法示例<span className="ml-2 font-mono text-[11px] font-normal text-muted">脚本层直接调用,不经 LLM</span>
         </h2>
-        <pre className="mt-3 overflow-x-auto rounded-lg border border-line bg-[linear-gradient(180deg,#121a30,#0d1426)] px-4 py-3.5 font-mono text-[12.5px] leading-[1.65] text-[#9fe8a2]">
+        <pre className="code-panel mt-3 overflow-x-auto rounded-lg border border-line bg-[linear-gradient(180deg,#121a30,#0d1426)] px-4 py-3.5 font-mono text-[12.5px] leading-[1.65] whitespace-pre-wrap text-[#9fe8a2]">
           {DSL_EXAMPLE}
         </pre>
       </section>
