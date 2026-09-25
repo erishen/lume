@@ -22,6 +22,14 @@
 // 只读对照:make invest(8082)默认不含 sql_write —— 需要模型建分析表的
 // 场景才放行。SQLITE_DB 指向镜像库 .data/lume.db,每次启动由
 // tools/sqlite-migrate.py 从 .data/portfolio.json 幂等重灌(portfolio 表只读)。
+//
+// DSL 直连示例(本文件下方 /dsl 路由):除 chat 工具外,脚本层也可直接查/写
+// 同一个库 —— sql_query / sql_write 内建(2026-09-25 新增):
+//   sql_query(sql) / sql_query(path, sql)   只读 SELECT → 行 map 列表
+//   sql_write(sql) / sql_write(path, sql)   护栏写 → 影响行数(DDL 为 0)
+// 单参形式用环境变量 SQLITE_DB(make demo-sqlite 已注入 .data/lume.db);
+// 护栏与 chat 工具同源(单语句、SELECT-only 物理只读、UPDATE/DELETE 必须带
+// WHERE、DROP/ALTER/PRAGMA 与 portfolio 镜像表拒绝),代码只此一份。
 // ============================================================================
 
 server {
@@ -42,5 +50,38 @@ route "GET", "/", func(req) {
   return { status: 302, type: "text/plain", body: "/chat" };
 };
 
+// ============================================================================
+// DSL 直连示例 —— 不经过 LLM,脚本直接查/写 SQLite(与 chat 工具同一个库、
+// 同一套护栏)。浏览器开 http://localhost:8084/dsl 看效果。
+// ============================================================================
+
+// 幂等建 analysis 表并写入演示数据(重复启动不报错:表已存在则跳过)
+func seed_analysis() {
+  let has = len(sql_query(
+    "select name from sqlite_master where type = 'table' and name = 'analysis'"));
+  if (has == 0) {
+    sql_write("create table analysis (symbol text, cost_value real, note text)");
+    sql_write("insert into analysis values ('AAPL', 1500, 'dsl-demo')");
+    sql_write("insert into analysis values ('NVDA', 900, 'dsl-demo')");
+  }
+}
+
+// 只读查持仓镜像表 + analysis 表往返,合并成一个 JSON 响应。
+// 注意 sql_query 返回行 map 列表,可直接 get()/len()/遍历:
+//   len(sql_query("select * from portfolio")) → 行数
+//   get(sql_query("select * from analysis"), 0) → 第一行 map
+route "GET", "/dsl", func(req) {
+  seed_analysis();
+  let holdings = sql_query(
+    "select symbol, units, avg_cost from portfolio order by symbol");
+  let analysis = sql_query("select * from analysis order by symbol");
+  return { status: 200, type: "application/json", body: stringify({
+    holdings: holdings,
+    analysis: analysis,
+    row_count: len(holdings),
+  }) };
+};
+
 print("sqlite-write.lume: on :8084 — 打开 /chat,问\"建一张 analysis 表存持仓成本市值\"试试");
+print("  DSL 直连示例:打开 /dsl,看 sql_query/sql_write 内建直接查/写同一个库");
 run();
