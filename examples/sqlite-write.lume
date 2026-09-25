@@ -77,17 +77,17 @@ func sql_table(rows, cols) {
 }
 
 let dsl_example =
-  "// 只读查询 → 行 map 列表,可 get()/len()/遍历\n" +
-  "let holdings = sql_query(\"select symbol, units, avg_cost from portfolio order by symbol\");\n" +
-  "\n" +
-  "// 护栏写 → 影响行数(DDL 为 0);UPDATE/DELETE 必须带 WHERE\n" +
-  "let n = sql_write(\"update analysis set cost_value = 2000 where symbol = 'AAPL'\");\n" +
-  "\n" +
-  "// 幂等建表:表存在则跳过(重复启动不报错)\n" +
-  "let has = len(sql_query(\"select name from sqlite_master where type = 'table' and name = 'analysis'\"));\n" +
-  "if (has == 0) {\n" +
-  "  sql_write(\"create table analysis (symbol text, cost_value real, note text)\");\n" +
-  "  sql_write(\"insert into analysis values ('AAPL', 1500, 'dsl-demo')\");\n" +
+  "// 只读查询 → 行 map 列表,可 get()/len()/遍历\n"
+  "let holdings = sql_query(\"select symbol, units, avg_cost from portfolio order by symbol\");\n"
+  "\n"
+  "// 护栏写 → 影响行数(DDL 为 0);UPDATE/DELETE 必须带 WHERE\n"
+  "let n = sql_write(\"update analysis set cost_value = 2000 where symbol = 'AAPL'\");\n"
+  "\n"
+  "// 幂等建表:表存在则跳过(重复启动不报错)\n"
+  "let has = len(sql_query(\"select name from sqlite_master where type = 'table' and name = 'analysis'\"));\n"
+  "if (has == 0) {\n"
+  "  sql_write(\"create table analysis (symbol text, cost_value real, note text)\");\n"
+  "  sql_write(\"insert into analysis values ('AAPL', 1500, 'dsl-demo')\");\n"
   "}";
 
 // 可视化页面:portfolio 只读查询 + analysis 表往返,合并成一个 HTML 响应。
