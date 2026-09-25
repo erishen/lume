@@ -341,8 +341,8 @@ func use(): Result {
 | `map(fn, list)` | 对每个元素调用 fn → 新列表(fn 可传具名 `func`、`func (x) { ... }` lambda 或 `(x) => { ... }` 箭头函数,`filter`/`reduce` 同理) |
 | `filter(fn, list)` | 保留 fn(item) 为真的元素 → 新列表 |
 | `reduce(fn, list, init)` | 从左折叠:fn(累加值, 元素),返回最终值 |
-| `sql_query(sql)` / `sql_query(path, sql)` | 只读 SELECT → 行 map 列表(与 chat 工具同源护栏:单语句、仅 SELECT,库物理只读;缺省用 `SQLITE_DB` 环境变量) |
-| `sql_write(sql)` / `sql_write(path, sql)` | 护栏写:INSERT / UPDATE / DELETE(须带 WHERE)/ CREATE TABLE → 影响行数(DDL 为 0);DROP/ALTER/PRAGMA 等与 portfolio 镜像表一律拒绝 |
+| `sql_query(sql[, params])` / `sql_query(path, sql[, params])` | 只读 SELECT → 行 map 列表(与 chat 工具同源护栏:单语句、仅 SELECT,库物理只读;缺省用 `SQLITE_DB` 环境变量);`params` 为 `?` 占位符绑定值列表(null 绑定 SQL NULL,值不进入 SQL 文本,杜绝注入) |
+| `sql_write(sql[, params])` / `sql_write(path, sql[, params])` | 护栏写:INSERT / UPDATE / DELETE(须带 WHERE)/ CREATE TABLE → 影响行数(DDL 为 0);DROP/ALTER/PRAGMA 等与 portfolio 镜像表一律拒绝;`params` 同 `sql_query`( `?` 占位符绑定,值可含任意 SQL 片段但只当字面值处理) |
 | `json(s)` | JSON 字符串 → Lume 值(map/list/标量) |
 | `stringify(v)` | Lume 值 → JSON 字符串(JSON 响应、调试用) |
 | `now()` | 当前时间戳 |

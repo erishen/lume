@@ -552,18 +552,18 @@ check("skills: index enumeration includes the scratch skill",
         char err[256] = {0};
         sbuf b = {0};
         if (sqlite_query_json("/tmp/lume-smoke-data/sql.db",
-                              "select count(*) as n from t",
+                              "select count(*) as n from t", NULL, 0,
                               &b, err, sizeof err) == 0 &&
             strstr(b.p ? b.p : "", "\"n\":2")) ok++;
         free(b.p);
         b.p = NULL;
         if (sqlite_query_json("/tmp/lume-smoke-data/sql.db",
-                              "drop table t", &b, err, sizeof err) != 0 &&
+                              "drop table t", NULL, 0, &b, err, sizeof err) != 0 &&
             strstr(err, "only SELECT")) ok++;
         free(b.p);
         b.p = NULL;
         if (sqlite_query_json("/tmp/lume-smoke-data/sql.db",
-                              "select * from t; drop table t",
+                              "select * from t; drop table t", NULL, 0,
                               &b, err, sizeof err) != 0 &&
             strstr(err, "multiple statements")) ok++;
         free(b.p);
@@ -571,14 +571,14 @@ check("skills: index enumeration includes the scratch skill",
         int affected = 0;
         char werr[256] = {0};
         if (sqlite_write_exec("/tmp/lume-smoke-data/sql.db",
-                              "drop table t", &affected, werr, sizeof werr) != 0 &&
+                              "drop table t", NULL, 0, &affected, werr, sizeof werr) != 0 &&
             strstr(werr, "dangerous")) ok++;
         if (sqlite_write_exec("/tmp/lume-smoke-data/sql.db",
-                              "update t set name = 'x'", &affected,
+                              "update t set name = 'x'", NULL, 0, &affected,
                               werr, sizeof werr) != 0 &&
             strstr(werr, "WHERE")) ok++;
         if (sqlite_write_exec("/tmp/lume-smoke-data/sql.db",
-                              "delete from portfolio", &affected,
+                              "delete from portfolio", NULL, 0, &affected,
                               werr, sizeof werr) != 0 &&
             strstr(werr, "portfolio")) ok++;
         if (ok == 6) printf("ok   sql guardrails (C-level)\n");

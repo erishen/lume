@@ -20,15 +20,22 @@ All notable changes to Lume are documented here. The format follows
 - Adjacent string literals merge JS-style: `"a" "b"` is `"ab"` (merged at
   parse time pre-escape, so `\n` / `\"` inside either part keep meaning
   across the join). Non-string neighbours still error as before.
-- SQL builtins: `sql_query(sql)` / `sql_query(path, sql)` (read-only SELECT
-  returning a list of row maps) and `sql_write(sql)` / `sql_write(path, sql)`
-  (guarded INSERT / UPDATE / DELETE with mandatory WHERE, or CREATE TABLE for
-  a new table; returns affected rows, 0 for DDL). The single-statement
-  checks, SELECT-only read and write allow-list are shared with the agent
-  chat tools via agent-httpd's exported `sqlite_query_json` /
-  `sqlite_write_exec` — one guardrail implementation, no duplication. The
+- SQL builtins: `sql_query(sql[, params])` / `sql_query(path, sql[, params])`
+  (read-only SELECT returning a list of row maps) and `sql_write(sql[,
+  params])` / `sql_write(path, sql[, params])` (guarded INSERT / UPDATE /
+  DELETE with mandatory WHERE, or CREATE TABLE for a new table; returns
+  affected rows, 0 for DDL). `params` binds `?` placeholders via
+  sqlite3_bind_* — values never enter the SQL text, so the guardrails see
+  only the statement skeleton and injection through a parameter value is
+  impossible (quotes, `;`, `--`, DDL keywords in a value are inert). The
+  single-statement checks, SELECT-only read and write allow-list are shared
+  with the agent chat tools via agent-httpd's exported `sqlite_query_json`
+  / `sqlite_write_exec` — one guardrail implementation, no duplication. The
   default database comes from env `SQLITE_DB`; an explicit path opens any
   SQLite file (read-only for queries).
+- Typecheck: un-annotated list literals may mix element types (element
+  type falls back to `any`), needed for heterogeneous `?` parameter lists
+  like `[3, "c"]`; annotated lists stay homogeneous.
 
 ## [0.1.1] - 2026-09-25
 

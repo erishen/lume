@@ -327,8 +327,14 @@ static Type *ck_list(Checker *c, Node *n, Type *expected) {
         expect_compat(c, ti, elem, n->as.list.items[i]->line, "list element");
         if (!type_compat(c, ti, t0, n->as.list.items[i]->line) &&
             !type_compat(c, t0, ti, n->as.list.items[i]->line)) {
-            ck_fail(c, n->line, "list literal has incompatible element types");
-            return type_list(any_type());
+            if (elem) {   /* annotated lists stay homogeneous */
+                ck_fail(c, n->line, "list literal has incompatible element types");
+                return type_list(any_type());
+            }
+            /* un-annotated heterogeneous list is fine; the element type
+             * falls back to any (needed for ? parameter lists, e.g.
+             * sql_write(sql, [3, "c"])). */
+            t0 = any_type();
         }
     }
     if (elem) return expected;   /* annotated list: honor the expected type */

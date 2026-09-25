@@ -13,17 +13,17 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-const DSL_EXAMPLE = `// 只读查询 → 行 map 列表,可 get()/len()/遍历
-let holdings = sql_query("select symbol, units, avg_cost from portfolio order by symbol");
+const DSL_EXAMPLE = `// 只读查询:值走 ? 占位符绑定,不拼进 SQL(注入无效)
+let holdings = sql_query("select symbol, units, avg_cost from portfolio where units >= ?", [1]);
 
-// 护栏写 → 影响行数(DDL 为 0);UPDATE/DELETE 必须带 WHERE
-let n = sql_write("update analysis set cost_value = 2000 where symbol = 'AAPL'");
+// 护栏写:UPDATE/DELETE 必须带 WHERE;值同样走 ? 绑定
+let n = sql_write("update analysis set cost_value = ? where symbol = ?", [2000, "AAPL"]);
 
 // 幂等建表:表存在则跳过(重复启动不报错)
-let has = len(sql_query("select name from sqlite_master where type = 'table' and name = 'analysis'"));
+let has = len(sql_query("select name from sqlite_master where type = 'table' and name = ?", ["analysis"]));
 if (has == 0) {
   sql_write("create table analysis (symbol text, cost_value real, note text)");
-  sql_write("insert into analysis values ('AAPL', 1500, 'dsl-demo')");
+  sql_write("insert into analysis values (?, ?, ?)", ["AAPL", 1500, "dsl-demo"]);
 }`;
 
 type Cell = string | number;

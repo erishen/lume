@@ -58,12 +58,13 @@ route "GET", "/", func(req) {
 
 // 幂等建 analysis 表并写入演示数据(重复启动不报错:表已存在则跳过)
 func seed_analysis() {
+  // 值一律走 ? 占位符绑定(参数不进入 SQL 文本,杜绝注入)
   let has = len(sql_query(
-    "select name from sqlite_master where type = 'table' and name = 'analysis'"));
+    "select name from sqlite_master where type = 'table' and name = ?", ["analysis"]));
   if (has == 0) {
     sql_write("create table analysis (symbol text, cost_value real, note text)");
-    sql_write("insert into analysis values ('AAPL', 1500, 'dsl-demo')");
-    sql_write("insert into analysis values ('NVDA', 900, 'dsl-demo')");
+    sql_write("insert into analysis values (?, ?, ?)", ["AAPL", 1500, "dsl-demo"]);
+    sql_write("insert into analysis values (?, ?, ?)", ["NVDA", 900, "dsl-demo"]);
   }
 }
 
