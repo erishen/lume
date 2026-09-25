@@ -141,14 +141,28 @@ stays git-ignored.
   `resolve_within`; `MCP_FS_ROOT` points at `.sandbox`, and startup warns if
   that root would scan into `.env` / `.data`; MCP children `unsetenv` the
   `LLM_API_KEY/URL/MODEL` before spawning.
-- **Sessions have a 30-day TTL** (`session_prune_old(30.0)`) and 0600 file
-  permissions.
+- **Sessions have a 30-day TTL by default** (configurable via
+  `SESSION_TTL_DAYS`, `0` disables the sweep; memory.json is never pruned)
+  and 0600 file permissions.
 - `GET /discovery` `endpoints` report only config state and model names, never
   internal URLs; MCP entries publish `args` (which may carry local absolute
   paths) as `<redacted>`.
 - Sensitive directories never enter git: `.data/` (sessions), `.sandbox/`
   (fs-MCP sandbox root), `.env` (secrets; the `.env.example` template is
   committed).
+- **Chat data goes upstream**: with `LLM_API_KEY` set, user messages, session
+  memory and the configured SQLite database's schema ride along in the model
+  request (`LLM_SYSTEM_EXTRA` appends deployment guidance). Point
+  `LLM_API_URL` only at endpoints you trust with that data (a public provider
+  is a PIPL-style "provision to a third party" — disclose and minimize).
+- **Scripts are trusted code**: `.lume` files can read any file and any env
+  var, so only run scripts you authored or audited. Credential-named env vars
+  (`*API_KEY`, `*TOKEN`, `*SECRET`, `*PASSWORD`, ...) are masked (null) from
+  the script surface; the runtime still reads them itself. The DSL has no
+  outbound HTTP builtin, so a script cannot exfiltrate what it reads.
+- **Startup guard**: binding a non-loopback address with Basic Auth off prints
+  a one-time WARNING (stderr) that /chat, /dsl and the SQL data behind them
+  are reachable by any host that can reach the port.
 - `examples/invest.lume` must be started via `make invest` — the allow-list
   env is only injected there; running `./bin/lume` directly prints a warning
   and exposes the full capability catalog.

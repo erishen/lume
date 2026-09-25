@@ -6,6 +6,22 @@ All notable changes to Lume are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- `env()` masks credential-named environment variables (`*API_KEY`, `*TOKEN`,
+  `*SECRET`, `*PASSWORD`, `*CREDENTIAL`, case-insensitive, word-boundary
+  match) from `.lume` scripts — they read as `null`. The runtime still reads
+  them itself; config-like names (`HTPASSWD_FILE`, ...) are unaffected.
+- Startup prints a one-time stderr WARNING when the server binds a
+  non-loopback address with Basic Auth off, noting that /chat, /dsl and the
+  SQL data behind them are reachable by any host that can reach the port.
+- Session retention is configurable via `SESSION_TTL_DAYS` (default 30,
+  `0` disables the sweep; memory.json is never pruned).
+- README/README.zh.md document the privacy posture: chat + SQLite schema ride
+  along to the configured `LLM_API_URL` endpoint; `.lume` files are trusted
+  code (only run authored/audited scripts); data backup/deletion is
+  user-managed.
+
 ### Changed
 
 - /dsl page UI overhaul: sections now render as cards, a status badge

@@ -121,11 +121,21 @@ Mach-O,必须在 Linux 容器内重编。
 - **模型可及范围收窄**:`read_file` 用 `resolve_within` 锁在 web root;
   `MCP_FS_ROOT` 指到 `.sandbox`,启动时若该根扫进 `.env`/`.data` 会告警;
   MCP 子进程启动前 `unsetenv` 掉 `LLM_API_KEY/URL/MODEL`。
-- **会话有 30 天 TTL**(`session_prune_old(30.0)`)自动清理,文件权限 600。
+- **会话默认 30 天 TTL**(可用 `SESSION_TTL_DAYS` 调整,`0` 关闭清理;memory.json 永不清理),文件权限 600。
 - `GET /discovery` 的 `endpoints` 只报配置状态与模型名,不返回内网 URL;
   MCP 条目的 `args`(可能含本机绝对路径)统一以 `<redacted>` 发布。
 - 敏感目录不进 git:`.data/`(会话)、`.sandbox/`(fs MCP 沙箱根)、
   `.env`(密钥,模板 `.env.example` 入库)。
+- **聊天数据会上行**:设置 `LLM_API_KEY` 后,用户消息、会话记忆与所配 SQLite
+  库的 schema 会随模型请求发往 `LLM_API_URL` 端点(`LLM_SYSTEM_EXTRA` 可附加
+  部署指引)。只把 `LLM_API_URL` 指向你信任该数据的端点(公网提供商即构成
+  "向第三方提供个人信息",需告知并最小化)。
+- **脚本是可信代码**:`.lume` 可读任意文件与任意环境变量,只运行你亲自编写
+  或审计过的脚本。凭据命名的环境变量(`*API_KEY`/`*TOKEN`/`*SECRET`/
+  `*PASSWORD` 等)对脚本层脱敏(返回 null),运行时自身仍可读取;DSL 无出站
+  HTTP 内建,脚本无法把读到的内容外泄。
+- **启动守护**:绑定非回环地址且未开 Basic Auth 时,启动会在 stderr 打印一次
+  WARNING,提示 /chat、/dsl 及其背后 SQL 数据对可达该端口的任意主机开放。
 - `examples/invest.lume` 需要 `make invest` 起——白名单 env 只在那里注入,
   直跑 `./bin/lume` 会打印告警并暴露完整能力目录。
 - 要让 invest 设置页的审批开关真正管住付费复盘模型,`IQUEST_ENV_FILE` 需指向

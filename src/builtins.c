@@ -8,6 +8,7 @@
 #include "tools.h"
 #include "skills.h"
 #include "sqlite_tool.h"
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -395,12 +396,55 @@ static int skill_entry_cmp(const void *a, const void *b) {
     return strcmp(x->name, y->name);
 }
 
+/* Case-insensitive word-boundary match (avoids strcasestr's _GNU_SOURCE
+ * requirement on glibc; builtins.c is compiled on both Linux and macOS).
+ * A keyword only matches when both sides are non-alphanumeric, so
+ * credential-ish substrings inside configuration names stay readable:
+ * HTPASSWD_FILE must not match PASSWD (auth path is not a secret), while
+ * LLM_API_KEY / ROUTER_API_KEY / MY_TOKEN / LUME_AUTH_PASSWORD do. */
+static int str_ci_contains_word(const char *hay, const char *needle) {
+    size_t hn = strlen(hay), nn = strlen(needle);
+    if (nn > hn) return 0;
+    for (size_t i = 0; i + nn <= hn; i++) {
+        if (i > 0 && isalnum((unsigned char)hay[i - 1])) continue;
+        size_t j = 0;
+        for (; j < nn; j++) {
+            if (tolower((unsigned char)hay[i + j]) !=
+                tolower((unsigned char)needle[j]))
+                break;
+        }
+        if (j == nn &&
+            (i + nn >= hn || !isalnum((unsigned char)hay[i + nn])))
+            return 1;
+    }
+    return 0;
+}
+
+/* Credential environment variables are masked from .lume scripts. The DSL
+ * layer can read any env(), and an untrusted script must not be able to
+ * exfiltrate keys (LLM_API_KEY, ROUTER_API_URL bearer creds, ...) via
+ * read_file/env. The runtime itself reads these via getenv directly
+ * (llm.c), so masking only affects the script surface. Match is a
+ * case-insensitive substring on credential keywords — deliberately
+ * conservative: configuration names (PORT, DOCROOT, HTPASSWD_FILE,
+ * IQUEST_*, ...) never contain these keywords. */
+static int env_is_sensitive(const char *k) {
+    static const char *const KW[] = {
+        "API_KEY", "SECRET", "PASSWORD", "PASSWD", "TOKEN", "CREDENTIAL",
+    };
+    for (size_t i = 0; i < sizeof KW / sizeof KW[0]; i++) {
+        if (str_ci_contains_word(k, KW[i])) return 1;
+    }
+    return 0;
+}
+
 static void native_env(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "env() needs a variable name"); return; }
     const char *k = NULL;
     if (!arg_string(vm, args[0], &k)) return;
     const char *v = getenv(k);
-    *out = v ? make_string_cstr(vm, v) : val_null();
+    /* Sensitive names read as unset (null), same shape as a missing var. */
+    *out = (v && !env_is_sensitive(k)) ? make_string_cstr(vm, v) : val_null();
 }
 
 /* Sorted directory listing; directories carry a trailing "/". Missing or

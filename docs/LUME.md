@@ -346,7 +346,7 @@ func use(): Result {
 | `json(s)` | JSON 字符串 → Lume 值(map/list/标量) |
 | `stringify(v)` | Lume 值 → JSON 字符串(JSON 响应、调试用) |
 | `now()` | 当前时间戳 |
-| `env(k)` | 环境变量值;未设置 → `null` |
+| `env(k)` | 环境变量值;未设置 → `null`。凭据命名的变量(`*API_KEY`/`*TOKEN`/`*SECRET`/`*PASSWORD`/`*CREDENTIAL` 等,大小写不敏感、词边界匹配)对脚本层脱敏 → `null`(运行时自身读取不受影响);`HTPASSWD_FILE` 这类含 PASSWD 但语义非密钥的配置名不受影响 |
 | `files(dir)` | 目录条目列表(排序;目录带尾部 `/`;缺失 → `[]`) |
 | `read_file(path)` | 整个文件内容;缺失/不可读 → `null`(上限 16 MiB) |
 | `write_file(path, s)` | 写文件(**原子写**:先写同目录 `.tmp.<pid>` 再 rename,崩溃不会留半截文件);成功 → `true` |
