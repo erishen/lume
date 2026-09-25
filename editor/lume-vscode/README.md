@@ -2,9 +2,10 @@
 
 [English](README.md) | [简体中文](README.zh.md)
 
-A local extension providing syntax highlighting, comment toggling, bracket
-pairing and auto-closing for `.lume` files. No network download needed, no
-vsce packaging required for local use.
+A syntax-highlighting extension for `.lume` files, published on the VS Code
+Marketplace as [Lume DSL](https://marketplace.visualstudio.com/items?itemName=erishen.lume)
+(extension ID `erishen.lume`). It also works fully locally — no network
+download needed, no vsce packaging required for local use.
 
 ## Structure
 
@@ -15,9 +16,14 @@ editor/lume-vscode/
 └── syntaxes/lume.tmLanguage.json   # TextMate grammar (highlighting rules)
 ```
 
-## Install (two ways)
+## Install
 
-### Option A: symlink into the extensions dir (recommended — edits take effect on reload)
+### Marketplace (easiest): search "Lume DSL"
+
+In VS Code, open the Extensions view (`Cmd/Ctrl+Shift+X`), search
+**"Lume DSL"** (ID `erishen.lume`), and install.
+
+### Option A: symlink into the extensions dir (edits take effect on reload)
 
 ```bash
 VSCODE_EXT=~/.vscode/extensions

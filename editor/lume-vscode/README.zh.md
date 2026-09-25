@@ -2,8 +2,10 @@
 
 [English](README.md) | [简体中文](README.zh.md)
 
-本地扩展,给 `.lume` 文件提供语法高亮、注释切换、括号配对与自动闭合。
-不需要联网下载,不需要 vsce 打包(本地用)。
+`.lume` 语法高亮扩展,已发布到 VS Code 扩展市场:
+[Lume DSL](https://marketplace.visualstudio.com/items?itemName=erishen.lume)
+(扩展 ID `erishen.lume`)。也可以完全本地使用——不需要联网下载,
+不需要 vsce 打包(本地用)。
 
 ## 结构
 
@@ -14,9 +16,14 @@ editor/lume-vscode/
 └── syntaxes/lume.tmLanguage.json   # TextMate 语法(高亮规则)
 ```
 
-## 安装(两种方式)
+## 安装
 
-### 方式 A:软链进扩展目录(推荐,改文件即生效)
+### 市场(最省事):搜「Lume DSL」
+
+VS Code 里打开扩展视图(`Cmd/Ctrl+Shift+X`),搜 **「Lume DSL」**
+(ID `erishen.lume`),点安装即可。
+
+### 方式 A:软链进扩展目录(改文件即生效)
 
 ```bash
 VSCODE_EXT=~/.vscode/extensions

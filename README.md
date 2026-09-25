@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh.md)
 
+> Pronounced **lu-MÉ** — `/luˈmeɪ/`, two syllables, stress on the second.
+
 ![CI](https://github.com/erishen/lume/actions/workflows/ci.yml/badge.svg)
 
 A self-contained agent DSL server: business logic lives in `.lume` scripts,
@@ -103,7 +105,7 @@ Quick start and Containers sections.
 | `www/` | docroot: hand-written HTML shells + build artifacts (mixed; don't delete wholesale) |
 | `tests/` | C unit tests (`smoke.c`) + tool dispatch (`tools_driver.c`) + end-to-end (`run_all.sh`) |
 | `docker/` | Two-stage Dockerfile (C rebuilt in-container) + compose (invest / hub services) |
-| `editor/lume-vscode/` | VS Code syntax-highlighting extension |
+| `editor/lume-vscode/` | VS Code extension — search "Lume DSL" (`erishen.lume`) in the Extensions view |
 | `docs/` | Full docs, see below |
 
 ## Documentation

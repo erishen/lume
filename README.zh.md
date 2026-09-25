@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh.md)
 
+> 读音：**lu-mé**（/luˈmeɪ/，两音节，重音在后）。
+
 ![CI](https://github.com/erishen/lume/actions/workflows/ci.yml/badge.svg)
 
 自足 agent DSL 服务器:业务逻辑写在 `.lume` 脚本里,一个 C11 二进制直接伺服
@@ -88,7 +90,7 @@ cd ~/.local/share/lume && ~/.local/bin/lume examples/sqlite-write.lume
 | `www/` | docroot:手写 HTML 壳 + 构建产物(混合,勿整体删) |
 | `tests/` | C 单测(`smoke.c`) + 工具派发(`tools_driver.c`) + 端到端(`run_all.sh`) |
 | `docker/` | 两阶段 Dockerfile(容器内重编 C)+ compose(invest / hub 两个 service) |
-| `editor/lume-vscode/` | 本地 VS Code 语法高亮扩展 |
+| `editor/lume-vscode/` | VS Code 语法高亮扩展——扩展市场搜「Lume DSL」(ID `erishen.lume`) |
 | `docs/` | 完整文档,见下 |
 
 ## 文档
