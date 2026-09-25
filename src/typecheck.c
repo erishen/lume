@@ -161,6 +161,7 @@ typedef struct {
     StructDef *structs;
     Type *cur_ret;       /* enclosing function return type; NULL outside func */
     bool in_func;        /* inside a function body */
+    int loop_depth;      /* nested for/while depth (for break/continue) */
     Type *param_hint;    /* one-shot: force a literal's first unannotated param */
     char *errbuf;
     size_t errbuf_size;
@@ -591,12 +592,15 @@ static void ck_fn(Checker *c, char **names, Type *ft, Node *body) {
     CScope *saved = c->scope;
     Type *ret_saved = c->cur_ret;
     bool in_saved = c->in_func;
+    int loop_saved = c->loop_depth;
     c->scope = scope_new(saved);
     for (int i = 0; i < ft->count; i++)
         scope_put(c->scope, names[i], ft->types[i]);
     c->cur_ret = ft->ret;
     c->in_func = true;
+    c->loop_depth = 0;
     ck_blk(c, body);
+    c->loop_depth = loop_saved;
     c->in_func = in_saved;
     c->cur_ret = ret_saved;
     c->scope = saved;
@@ -679,9 +683,41 @@ static void ck_stmt(Checker *c, Node *n) {
         case N_WHILE: {
             Type *ct = ck_expr(c, n->as.whiles.cond, NULL);
             is_bool_ok(c, ct, n->line);
+            c->loop_depth++;
             ck_stmt(c, n->as.whiles.body);
+            c->loop_depth--;
             return;
         }
+        case N_FOR: {
+            if (n->as.fors.is_in) {
+                Type *it = ck_expr(c, n->as.fors.iterable, NULL);
+                Type *elem = NULL;
+                if (it && it->kind == TY_LIST) elem = it->elem;
+                /* maps/structs iterate their keys; anything else degrades to
+                 * `any` (the runtime enforces list-or-map) */
+                scope_put(c->scope, n->as.fors.var, elem ? elem : any_type());
+                c->loop_depth++;
+                ck_stmt(c, n->as.fors.body);
+                c->loop_depth--;
+                return;
+            }
+            if (n->as.fors.init) ck_stmt(c, n->as.fors.init);
+            if (n->as.fors.cond) {
+                Type *ct = ck_expr(c, n->as.fors.cond, NULL);
+                is_bool_ok(c, ct, n->line);
+            }
+            c->loop_depth++;
+            ck_stmt(c, n->as.fors.body);
+            c->loop_depth--;
+            if (n->as.fors.incr) ck_stmt(c, n->as.fors.incr);
+            return;
+        }
+        case N_BREAK:
+        case N_CONTINUE:
+            if (c->loop_depth <= 0)
+                ck_fail(c, n->line, "'%s' outside a loop",
+                        n->type == N_BREAK ? "break" : "continue");
+            return;
         case N_RETURN: {
             if (n->as.ret.expr) {
                 Type *rt = ck_expr(c, n->as.ret.expr, c->cur_ret);
@@ -787,6 +823,7 @@ bool type_check_program(Node *prog, char *errbuf, size_t errbuf_size) {
             "float", "bool", "string", "type", "Result", /* type words usable as idents */
             "write", "read", /* built-in verb groups (see seed_verb_groups) */
             "env", "files", "read_file", "write_file", "mkdir", "strftime", "put",
+            "range", "map", "filter", "reduce", /* collection tools */
             "lock_file", "unlock_file", /* flock advisory lock (invest ledger) */
             "tools", "skills", "mcps",
             "discovery_endpoints", "catalog", /* discovery builtins */

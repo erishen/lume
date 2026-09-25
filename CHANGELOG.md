@@ -6,6 +6,18 @@ All notable changes to Lume are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `for` loops in both forms: C-style `for (init; cond; incr)` (all three
+  optional) and iteration `for (x in xs)` / `for (let x in xs)` over a
+  list's items or a map's keys (sorted). `for (;;)` is an infinite loop.
+- `break` / `continue` in `for` and `while`; both are statically rejected
+  outside a loop (typechecker tracks loop nesting, function-local).
+- Collection builtins: `range(stop)` / `range(start, stop, step)`,
+  `map(fn, list)`, `filter(fn, list)`, `reduce(fn, list, init)` — the fn
+  forms accept named functions and lambdas and run through the shared call
+  machinery (GC-rooted, `return`/`?` unwinding intact).
+
 ## [0.1.1] - 2026-09-25
 
 ### Added

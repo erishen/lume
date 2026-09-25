@@ -30,6 +30,7 @@ static Node *nalloc(NodeType type, size_t line) {
 }
 
 static Token peek(const Parser *p)        { return p->toks[p->pos]; }
+static Token peek2(const Parser *p)       { return p->toks[p->pos + 1]; }
 static size_t previous_line(const Parser *p) { return p->toks[p->pos - 1].line; }
 static bool at_end(const Parser *p)       { return peek(p).type == TOK_EOF; }
 static bool check(const Parser *p, TokenType t) { return peek(p).type == t; }
@@ -267,6 +268,102 @@ static Node *parse_statement(Parser *p) {
         n->as.whiles.cond = cond;
         n->as.whiles.body = body;
         return n;
+    }
+    if (t.type == TOK_FOR) {
+        /* for (init; cond; incr) body  — C-style; init may be `let` or an
+         * expression, cond/incr optional (`for (;;)`) — and the two for-in
+         * forms: `for (x in xs)` / `for (let x in xs)`. */
+        advance(p);
+        if (!expect(p, TOK_LPAREN)) return NULL;
+        Node *n = nalloc(N_FOR, t.line);
+        if (check(p, TOK_LET)) {
+            /* `let` head: either `let x in xs` (for-in) or `let i = e` (C) */
+            advance(p);
+            if (!check(p, TOK_IDENT)) {
+                perror_at(p, peek(p).line, "expected variable name after 'let'", NULL);
+                return NULL;
+            }
+            Token vn = peek(p);
+            advance(p);
+            if (match(p, TOK_IN)) {
+                n->as.fors.is_in = true;
+                n->as.fors.var = ident_name(p, vn);
+                n->as.fors.iterable = parse_expression(p);
+                if (!n->as.fors.iterable) return NULL;
+                if (!expect(p, TOK_RPAREN)) return NULL;
+                n->as.fors.body = parse_statement(p);
+                if (!n->as.fors.body) return NULL;
+                return n;
+            }
+            Node *init = nalloc(N_LET, vn.line);
+            init->as.let.name = ident_name(p, vn);
+            if (match(p, TOK_COLON)) {
+                init->as.let.annot = parse_type(p);
+                if (!init->as.let.annot) return NULL;
+            }
+            if (!expect(p, TOK_EQ)) return NULL;
+            init->as.let.init = parse_expression(p);
+            if (!init->as.let.init) return NULL;
+            n->as.fors.init = init;
+            if (!expect(p, TOK_SEMI)) return NULL;
+            if (!check(p, TOK_SEMI)) {
+                n->as.fors.cond = parse_expression(p);
+                if (!n->as.fors.cond) return NULL;
+            }
+            if (!expect(p, TOK_SEMI)) return NULL;
+            if (!check(p, TOK_RPAREN)) {
+                Node *incr = nalloc(N_EXPR_STMT, peek(p).line);
+                incr->as.expr_stmt.expr = parse_expression(p);
+                if (!incr->as.expr_stmt.expr) return NULL;
+                n->as.fors.incr = incr;
+            }
+            if (!expect(p, TOK_RPAREN)) return NULL;
+            n->as.fors.body = parse_statement(p);
+            if (!n->as.fors.body) return NULL;
+            return n;
+        }
+        if (check(p, TOK_IDENT) && peek2(p).type == TOK_IN) {
+            Token vn = peek(p);
+            advance(p);
+            advance(p); /* in */
+            n->as.fors.is_in = true;
+            n->as.fors.var = ident_name(p, vn);
+            n->as.fors.iterable = parse_expression(p);
+            if (!n->as.fors.iterable) return NULL;
+            if (!expect(p, TOK_RPAREN)) return NULL;
+            n->as.fors.body = parse_statement(p);
+            if (!n->as.fors.body) return NULL;
+            return n;
+        }
+        /* C-style with an expression init (assignment / call / ...) */
+        if (!check(p, TOK_SEMI)) {
+            Node *init = nalloc(N_EXPR_STMT, peek(p).line);
+            init->as.expr_stmt.expr = parse_expression(p);
+            if (!init->as.expr_stmt.expr) return NULL;
+            n->as.fors.init = init;
+        }
+        if (!expect(p, TOK_SEMI)) return NULL;
+        if (!check(p, TOK_SEMI)) {
+            n->as.fors.cond = parse_expression(p);
+            if (!n->as.fors.cond) return NULL;
+        }
+        if (!expect(p, TOK_SEMI)) return NULL;
+        if (!check(p, TOK_RPAREN)) {
+            Node *incr = nalloc(N_EXPR_STMT, peek(p).line);
+            incr->as.expr_stmt.expr = parse_expression(p);
+            if (!incr->as.expr_stmt.expr) return NULL;
+            n->as.fors.incr = incr;
+        }
+        if (!expect(p, TOK_RPAREN)) return NULL;
+        n->as.fors.body = parse_statement(p);
+        if (!n->as.fors.body) return NULL;
+        return n;
+    }
+    if (t.type == TOK_BREAK || t.type == TOK_CONTINUE) {
+        TokenType kt = t.type;
+        advance(p);
+        if (!expect(p, TOK_SEMI)) return NULL;
+        return nalloc(kt == TOK_BREAK ? N_BREAK : N_CONTINUE, t.line);
     }
     if (t.type == TOK_LET) {
         advance(p);

@@ -4,7 +4,7 @@ static const char *const TOKEN_NAMES[] = {
     "end-of-file", "error",
     "identifier", "number", "string",
     "server", "route", "tool", "func", "return",
-    "if", "else", "while", "let",
+    "if", "else", "while", "for", "in", "break", "continue", "let",
     "true", "false", "null", "and", "or", "not",
     "type", "int", "float", "string", "bool", "Result",
     "get", "head", "post", "put", "patch", "delete", "options", "verbs",

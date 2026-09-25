@@ -64,7 +64,9 @@ static const struct {
 } KEYWORDS[] = {
     {"server", TOK_SERVER}, {"route",  TOK_ROUTE}, {"tool",    TOK_TOOL},
     {"func",   TOK_FUNC},   {"return", TOK_RETURN}, {"if",     TOK_IF},
-    {"else",   TOK_ELSE},   {"while",  TOK_WHILE}, {"let",    TOK_LET},
+    {"else",   TOK_ELSE},   {"while",  TOK_WHILE}, {"for",    TOK_FOR},
+    {"in",     TOK_IN},     {"break",  TOK_BREAK}, {"continue", TOK_CONTINUE},
+    {"let",    TOK_LET},
     {"true",   TOK_TRUE},   {"false",  TOK_FALSE}, {"null",   TOK_NULL},
     {"and",    TOK_AND},    {"or",     TOK_OR},    {"not",    TOK_NOT},
     {"type",   TOK_TYPE},   {"int",    TOK_INT},   {"float",  TOK_FLOAT},

@@ -79,6 +79,11 @@ static char *unescape_literal(const char *s, int n, int *out_len) {
 void call_function(VM *vm, Value callee, int argc) {
     if (vm->error) return;
 
+    /* Loop flags are lexical to the caller; a call must not leak a
+     * break/continue set inside the callee (a `return` longjmps past the
+     * loop's save/restore, so the flag would otherwise stay set). */
+    bool saved_brk = vm->loop_break, saved_cont = vm->loop_continue;
+
     int slot = vm->stack_count - argc - 1; /* callee slot */
 
     Obj *f = IS_OBJ(callee) ? AS_OBJ(callee) : NULL;
@@ -86,6 +91,8 @@ void call_function(VM *vm, Value callee, int argc) {
         vm_set_error(vm, "calling a non-function value");
         vm->stack_count = slot;
         vm_push(vm, val_null());
+        vm->loop_break = saved_brk;
+        vm->loop_continue = saved_cont;
         return;
     }
 
@@ -93,6 +100,8 @@ void call_function(VM *vm, Value callee, int argc) {
         Value result = f->as.native.fn(vm, argc, &vm->stack[slot + 1]);
         vm->stack_count = slot;
         vm_push(vm, vm->error ? val_null() : result);
+        vm->loop_break = saved_brk;
+        vm->loop_continue = saved_cont;
         return;
     }
 
@@ -102,6 +111,8 @@ void call_function(VM *vm, Value callee, int argc) {
                      f->as.fn.name, f->as.fn.arity, argc);
         vm->stack_count = slot;
         vm_push(vm, val_null());
+        vm->loop_break = saved_brk;
+        vm->loop_continue = saved_cont;
         return;
     }
 
@@ -136,13 +147,17 @@ user_done:
     vm_pop(vm); /* drop the env root */
     vm->stack_count = slot;
     vm_push(vm, vm->error ? val_null() : vm->call_result);
+    vm->loop_break = saved_brk;
+    vm->loop_continue = saved_cont;
 }
 
 static void exec_block_walk(VM *vm, Node *block, Env *env) {
     if (!block) return;
     if (block->type == N_BLOCK) {
-        for (int i = 0; i < block->as.block.count && !vm->error; i++)
+        for (int i = 0; i < block->as.block.count && !vm->error; i++) {
             exec_statement(vm, block->as.block.stmts[i], env);
+            if (vm->loop_break || vm->loop_continue) break;
+        }
         return;
     }
     exec_statement(vm, block, env);
@@ -442,8 +457,10 @@ static void exec_statement(VM *vm, Node *n, Env *env) {
     if (vm->error) return;
     switch (n->type) {
         case N_BLOCK:
-            for (int i = 0; i < n->as.block.count && !vm->error; i++)
+            for (int i = 0; i < n->as.block.count && !vm->error; i++) {
                 exec_statement(vm, n->as.block.stmts[i], env);
+                if (vm->loop_break || vm->loop_continue) break;
+            }
             return;
         case N_LET: {
             eval_expr(vm, n->as.let.init, env);
@@ -460,14 +477,84 @@ static void exec_statement(VM *vm, Node *n, Env *env) {
             return;
         }
         case N_WHILE: {
+            bool saved_brk = vm->loop_break, saved_cont = vm->loop_continue;
+            vm->loop_break = vm->loop_continue = false;
             while (!vm->error) {
                 eval_expr(vm, n->as.whiles.cond, env);
-                if (vm->error) return;
-                if (!value_truthy(vm_pop(vm))) return;
+                if (vm->error) break;
+                if (!value_truthy(vm_pop(vm))) break;
                 exec_statement(vm, n->as.whiles.body, env);
+                if (vm->error) break;
+                if (vm->loop_break) { vm->loop_break = false; break; }
+                if (vm->loop_continue) vm->loop_continue = false;
             }
+            vm->loop_break = saved_brk;
+            vm->loop_continue = saved_cont;
             return;
         }
+        case N_FOR: {
+            bool saved_brk = vm->loop_break, saved_cont = vm->loop_continue;
+            vm->loop_break = vm->loop_continue = false;
+            if (n->as.fors.is_in) {
+                /* for (x in xs) — iterate a list's items or a map's keys */
+                eval_expr(vm, n->as.fors.iterable, env);
+                if (vm->error) goto for_done;
+                Value it = vm_pop(vm);
+                if (!IS_OBJ(it)) {
+                    vm_set_error(vm, "line %zu: for-in expects a list or map", n->line);
+                    goto for_done;
+                }
+                Obj *o = AS_OBJ(it);
+                int n_items = -1;
+                if (o->type == OBJ_LIST) n_items = o->as.list.count;
+                else if (o->type == OBJ_MAP) n_items = o->as.map.count;
+                if (n_items < 0) {
+                    vm_set_error(vm, "line %zu: for-in expects a list or map", n->line);
+                    goto for_done;
+                }
+                for (int i = 0; i < n_items && !vm->error; i++) {
+                    Value item = (o->type == OBJ_LIST)
+                                     ? o->as.list.items[i]
+                                     : make_string_cstr(vm, o->as.map.keys[i]);
+                    env_set(vm, env, n->as.fors.var, item);
+                    exec_statement(vm, n->as.fors.body, env);
+                    if (vm->error) break;
+                    if (vm->loop_break) { vm->loop_break = false; break; }
+                    if (vm->loop_continue) vm->loop_continue = false;
+                }
+            } else {
+                /* for (init; cond; incr) — C-style, all three optional */
+                if (n->as.fors.init) {
+                    exec_statement(vm, n->as.fors.init, env);
+                    if (vm->error) goto for_done;
+                }
+                while (!vm->error) {
+                    if (n->as.fors.cond) {
+                        eval_expr(vm, n->as.fors.cond, env);
+                        if (vm->error) goto for_done;
+                        if (!value_truthy(vm_pop(vm))) break;
+                    }
+                    exec_statement(vm, n->as.fors.body, env);
+                    if (vm->error) goto for_done;
+                    if (vm->loop_break) { vm->loop_break = false; break; }
+                    if (vm->loop_continue) vm->loop_continue = false;
+                    if (n->as.fors.incr) {
+                        exec_statement(vm, n->as.fors.incr, env);
+                        if (vm->error) goto for_done;
+                    }
+                }
+            }
+        for_done:
+            vm->loop_break = saved_brk;
+            vm->loop_continue = saved_cont;
+            return;
+        }
+        case N_BREAK:
+            vm->loop_break = true;
+            return;
+        case N_CONTINUE:
+            vm->loop_continue = true;
+            return;
         case N_EXPR_STMT:
             eval_expr(vm, n->as.expr_stmt.expr, env);
             if (!vm->error) vm_pop(vm);
@@ -702,6 +789,10 @@ void bridge_seed_builtins(VM *vm) {
         {"len", b_len},
         {"keys", b_keys},
         {"get", b_get},
+        {"range", b_range},
+        {"map", b_map},
+        {"filter", b_filter},
+        {"reduce", b_reduce},
         {"json", b_json},
         {"stringify", b_stringify},
         {"now", b_now},

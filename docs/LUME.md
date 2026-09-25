@@ -283,6 +283,17 @@ let g = (a, b) => { return a * b; };              // 箭头也可做路由 handl
 if (n > 0) { ... } else { ... }
 while (n < 10) { n = n + 1; }
 
+// for 的两种形态:
+for (let i = 0; i < 5; i = i + 1) { ... }   // C 风格: init; cond; incr 皆可省略 (for (;;))
+for (x in xs) { ... }                        // 迭代: 列表的元素 / map 的键(排序)
+for (let x in xs) { ... }                    // 显式 let 的 for-in 形式
+
+// break / continue 在 for 和 while 里都可用
+for (x in xs) {
+  if (x == null) { break; }     // 跳出循环
+  if (x == "")   { continue; }  // 跳过本轮,直接进下一次迭代
+}
+
 // 比较: == != < <= > >=    算术: + - * / %
 // 逻辑: and or not(严格 bool)
 ```
@@ -326,6 +337,10 @@ func use(): Result {
 | `len(x)` | 字符串长度或列表长度 |
 | `keys(m)` | map 的键列表 |
 | `get(m, k, 缺省?)` | 取 map 字段;缺键时返回第三个参数(否则 null)。**跨边界取值建议用它**,比如 agent 工具实参 |
+| `range(止)` / `range(起, 止)` / `range(起, 止, 步)` | 等差数列列表(整数元素保持 int);步长不能为 0 |
+| `map(fn, list)` | 对每个元素调用 fn → 新列表 |
+| `filter(fn, list)` | 保留 fn(item) 为真的元素 → 新列表 |
+| `reduce(fn, list, init)` | 从左折叠:fn(累加值, 元素),返回最终值 |
 | `json(s)` | JSON 字符串 → Lume 值(map/list/标量) |
 | `stringify(v)` | Lume 值 → JSON 字符串(JSON 响应、调试用) |
 | `now()` | 当前时间戳 |

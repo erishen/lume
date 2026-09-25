@@ -44,7 +44,8 @@ typedef enum {
 
     /* keywords */
     TOK_SERVER, TOK_ROUTE, TOK_TOOL, TOK_FUNC, TOK_RETURN,
-    TOK_IF, TOK_ELSE, TOK_WHILE, TOK_LET,
+    TOK_IF, TOK_ELSE, TOK_WHILE, TOK_FOR, TOK_IN, TOK_BREAK, TOK_CONTINUE,
+    TOK_LET,
     TOK_TRUE, TOK_FALSE, TOK_NULL, TOK_AND, TOK_OR, TOK_NOT,
     TOK_TYPE, TOK_INT, TOK_FLOAT, TOK_KW_STRING, TOK_BOOL, TOK_RESULT,
     TOK_GET, TOK_HEAD, TOK_POST, TOK_PUT, TOK_PATCH, TOK_DELETE, TOK_OPTIONS,
@@ -293,6 +294,9 @@ struct VM {
     bool error;
     char error_msg[512];
 
+    bool loop_break;       /* `break` inside a loop body */
+    bool loop_continue;    /* `continue` inside a loop body */
+
     Value call_result;        /* `return expr` target, set before unwind */
 
     /* bridge state */
@@ -311,7 +315,8 @@ struct VM {
  * lifetime (the program is parsed once before agenthttpd_run forks workers,
  * so per-request evaluation reuses the same immutable tree). */
 typedef enum {
-    N_PROGRAM, N_BLOCK, N_LET, N_IF, N_WHILE, N_RETURN, N_EXPR_STMT,
+    N_PROGRAM, N_BLOCK, N_LET, N_IF, N_WHILE, N_FOR, N_BREAK, N_CONTINUE,
+    N_RETURN, N_EXPR_STMT,
     N_SERVER, N_ROUTE, N_TOOL, N_VERBS, N_FUNC_DECL, N_TYPE_DECL,
     N_VAR, N_ASSIGN, N_ASSIGN_MEMBER,
     N_LITERAL, N_MAP_LIT, N_LIST_LIT, N_FUNC_LIT,
@@ -338,6 +343,10 @@ typedef struct Node {
         struct { char *name; Type *annot; struct Node *init; } let;
         struct { struct Node *cond, *then, *els; } ifs;
         struct { struct Node *cond, *body; } whiles;
+        /* for: C-style uses init/cond/incr (is_in=false); for-in uses
+         * var/iterable (is_in=true). */
+        struct { struct Node *init, *cond, *incr, *body;
+                 char *var; struct Node *iterable; bool is_in; } fors;
         struct { struct Node *expr; } ret;      /* expr may be NULL */
         struct { struct Node *expr; } expr_stmt;
         struct { struct Node **assigns; int count; } server; /* each N_ASSIGN */

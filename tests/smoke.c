@@ -520,6 +520,43 @@ check("skills: index enumeration includes the scratch skill",
         }
     }
 
+    /* ---- for / break / continue ---- */
+
+    check("for-in over range",
+          "let s = 0;\nfor (x in range(5)) { s = s + x; }\nprint(s);", "10\n");
+    check("C-style for with let init",
+          "let s = 0;\nfor (let i = 0; i < 5; i = i + 1) { s = s + i; }\nprint(s);", "10\n");
+    check("C-style for with expr init",
+          "let i = 0;\nlet s = 0;\nfor (i = 0; i < 3; i = i + 1) { s = s + 1; }\nprint(s);", "3\n");
+    check("for-in with let",
+          "let s = \"\";\nfor (let x in range(3)) { s = s + str(x); }\nprint(s);", "012\n");
+    check("for-in over map keys",
+          "let m = { a: 1, b: 2 };\nlet k = \"\";\nfor (x in m) { k = k + x; }\nprint(k);", "ab\n");
+    check("break in for",
+          "let c = 0;\nfor (let i = 0; i < 100; i = i + 1) { if (i == 3) { break; } c = c + 1; }\nprint(c);", "3\n");
+    check("continue in for",
+          "let c = 0;\nfor (let i = 0; i < 5; i = i + 1) { if (i == 2) { continue; } c = c + 1; }\nprint(c);", "4\n");
+    check("break in while",
+          "let w = 0;\nwhile (true) { w = w + 1; if (w > 3) { break; } }\nprint(w);", "4\n");
+    check("continue in while",
+          "let o = 0;\nlet i = 0;\nwhile (i < 6) { i = i + 1; if (i % 2 == 0) { continue; } o = o + 1; }\nprint(o);", "3\n");
+    check("nested for, inner break scoped",
+          "let p = 0;\nfor (a in range(3)) { for (b in range(3)) { if (b == 1) { break; } p = p + 1; } }\nprint(p);", "3\n");
+
+    /* ---- collection tools ---- */
+
+    check("range stop", "print(len(range(4)));", "4\n");
+    check("range start-stop", "print(get(range(1, 6), 0));", "1\n");
+    check("range step", "print(get(range(0, 10, 3), 3));", "9\n");
+    check("map named func",
+          "func dbl(x) { return x * 2; }\nprint(get(map(dbl, range(1, 6)), 4));", "10\n");
+    check("map lambda",
+          "print(get(map(func (x) { return x * 3; }, range(1, 6)), 2));", "9\n");
+    check("filter",
+          "func even(x) { return x % 2 == 0; }\nprint(len(filter(even, range(1, 6))));", "2\n");
+    check("reduce",
+          "func add(a, b) { return a + b; }\nprint(reduce(add, range(1, 6), 0));", "15\n");
+
     /* ---- type checker rejects ---- */
 
     reject("let type mismatch", "let x: int = \"hi\";", "assignable");
@@ -543,6 +580,9 @@ check("skills: index enumeration includes the scratch skill",
     reject("map key not in struct",
           "type P = { x: int };\nfunc p(): P { return { x: 1, z: 2 }; }",
           "no field");
+    reject("break outside loop", "break;", "outside a loop");
+    reject("continue outside loop", "continue;", "outside a loop");
+    reject("break in func body", "func f() { break; }", "outside a loop");
 
     printf("\n%d tests, %d failed\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;
