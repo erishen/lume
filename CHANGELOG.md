@@ -4,6 +4,21 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Route handlers now see `req.query` (raw query string without the `?`;
+  null when absent) and `req.query_params` (URL-decoded map; a segment
+  without `=` gets an empty value, repeated keys last-wins, `+` decodes
+  to space).
+
+### Fixed
+
+- Route handler lookup now matches the path with the query string stripped
+  (the framework already dispatched on the stripped path, but the DSL shim
+  compared the full URI, so any `/echo?a=1` request fell through to a 404).
+
 ## [0.2.0] - 2026-09-25
 
 ### Security

@@ -144,8 +144,11 @@ return { type: "text/plain", body: "hello" };
 特殊含义;若你想返回一个字段名恰好叫 `body` 的 JSON 对象,包一层即可:
 `return { body: { body: "x" } };`。
 
-处理函数收到一个 **请求 map**,字段有:`method`、`path`、`remote_addr`、
-`host`、`content_type`、`content_length`、`user_agent`、`body`。
+处理函数收到一个 **请求 map**,字段有:`method`、`path`(含 query 串)、
+`remote_addr`、`host`、`content_type`、`content_length`、`user_agent`、
+`body`、`query`(原始查询串,不含 `?`;无查询 → `null`)、`query_params`
+(解析后的参数 map,key/value 均已 URL 解码,`+` → 空格,段无 `=` 时值为
+空串,重复 key 后者覆盖;无查询 → 空 map)。
 
 ### 方法与路由缩写
 

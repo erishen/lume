@@ -3,6 +3,10 @@
 #include "minijson.h"
 #include "llm.h"
 #include <stdlib.h> /* getenv(LUME_BIND) */
+#include <string.h> /* strchr/memchr/strlen */
+
+/* from agent-httpd util.c (internal.h) — URL-decode a query segment */
+extern void url_decode(char *dst, const char *src);
 
 /* bridge.c — the language's runtime translated into libagenthttpd.a calls.
  *
@@ -53,6 +57,42 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
                                : val_null());
     map_set(vm, m, "body",
             req->body ? make_string(vm, req->body, strlen(req->body)) : val_null());
+
+    /* Query string: req->path may carry "?a=1&b=2" (route matching already
+     * strips it). Expose the raw string (no '?') plus a decoded params map:
+     * '+' -> space, %XX -> byte, a segment without '=' gets an empty value,
+     * repeated keys overwrite (last wins). */
+    Obj *pm = AS_OBJ(make_map(vm));
+    vm_push(vm, val_obj((Obj *)pm)); /* root while filling */
+    const char *q = strchr(req->path, '?');
+    if (q) {
+        map_set(vm, m, "query", make_string(vm, q + 1, strlen(q + 1)));
+        const char *seg = q + 1;
+        while (*seg) {
+            const char *amp = strchr(seg, '&');
+            size_t len = amp ? (size_t)(amp - seg) : strlen(seg);
+            const char *eq = memchr(seg, '=', len);
+            size_t kn = eq ? (size_t)(eq - seg) : len;
+            size_t vn = eq ? len - kn - 1 : 0;
+            char key_raw[MAX_PATH_SIZE], key[MAX_PATH_SIZE];
+            char val_raw[MAX_PATH_SIZE], val[MAX_PATH_SIZE];
+            if (kn >= sizeof key_raw || vn >= sizeof val_raw) {
+                seg += len + (amp ? 1 : 0);
+                continue; /* oversized segment: skip, keep the rest */
+            }
+            memcpy(key_raw, seg, kn); key_raw[kn] = '\0';
+            if (eq) { memcpy(val_raw, eq + 1, vn); val_raw[vn] = '\0'; url_decode(val, val_raw); }
+            else val[0] = '\0';
+            url_decode(key, key_raw);
+            map_set(vm, pm, key, make_string(vm, val, strlen(val)));
+            seg += len;
+            if (amp) seg++;
+        }
+    } else {
+        map_set(vm, m, "query", val_null());
+    }
+    map_set(vm, m, "query_params", val_obj((Obj *)pm));
+    vm_pop(vm);
 
     return val_obj((Obj *)m); /* still rooted on the stack */
 }
@@ -194,10 +234,15 @@ fail:
 /* ---------- route shim ---------- */
 
 static int route_pattern_match(const char *pattern, const char *path) {
-    size_t n = strlen(pattern);
-    if (n && pattern[n - 1] == '*')
-        return strncmp(pattern, path, n - 1) == 0;
-    return strcmp(pattern, path) == 0;
+    /* A request may carry a query string ("/echo?a=1"); match against the
+     * path only, like the framework's route_path_matches — otherwise the
+     * shim finds no handler for a URL the framework already dispatched. */
+    const char *q = strchr(path, '?');
+    size_t plen = strlen(pattern);
+    size_t n = q ? (size_t)(q - path) : strlen(path);
+    if (plen && pattern[plen - 1] == '*')
+        return n >= plen - 1 && strncmp(pattern, path, plen - 1) == 0;
+    return n == plen && strncmp(pattern, path, plen) == 0;
 }
 
 /* C callback registered via agenthttpd_route. A single shim serves every DSL
