@@ -66,7 +66,8 @@ All notable changes to Lume are documented here. The format follows
 - Prebuilt binaries for all four platforms (linux-x64/arm64, darwin-x64/arm64)
   as `lume-<os>-<arch>`, built by a GitHub Actions matrix and attached to the
   release on tag push; the same matrix runs on push/PR to catch cross-platform
-  build failures before a tag is cut.
+  build failures before a tag is cut. (darwin-x64 was delayed on 0.1.1 by a
+  starved macos-13 runner and shipped with 0.1.2 via cross-compilation.)
 
 ## [0.1.0] - 2026-09-24
 

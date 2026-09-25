@@ -35,18 +35,27 @@ make clean        # 删 build/ 与 bin/
 
 ## 安装
 
-每个 GitHub Release 都附带预编译二进制,一条命令安装:
+每个 GitHub Release 都附带预编译产物,一条命令安装:
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/erishen/lume/main/install.sh | sh
 ```
 
-按平台匹配 `lume-<os>-<arch>` 安装到 `~/.local/bin/lume`(macOS arm64/x64、
-Linux arm64/x64;需要 `curl` 或 `wget`)。可覆盖:
+按平台下载 `lume-<os>-<arch>.tar.gz`(macOS arm64/x64、Linux arm64/x64;
+需要 `curl`/`wget` + `tar`):二进制落在 `~/.local/bin/lume`,Web UI(`www`)、
+`examples/` 与 `docs/` 落在 `~/.local/share/lume` —— 打包的 /chat /dsl 演示页
+依赖这些文件,因为 docroot 从工作目录解析 `./www`。跑演示:
+
+```bash
+cd ~/.local/share/lume && ~/.local/bin/lume examples/sqlite-write.lume
+# 然后打开 http://127.0.0.1:8084/chat (或 /dsl)
+```
+
+可覆盖:
 
 - `LUME_VERSION=v0.1.0` —— 锁定具体版本而非 latest
 - `LUME_PREFIX=/opt/lume` —— 安装根目录(二进制落在 `$PREFIX/bin`)
-- `LUME_SHA256=<hex>` —— 校验下载二进制的 sha256
+- `LUME_SHA256=<hex>` —— 校验下载 tarball 的 sha256
 
 安装脚本与二进制都挂在 GitHub Releases 上——不需要 npm registry 或包管理器。
 想自己编译或跑容器,见上面的快速开始与容器章节。

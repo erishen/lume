@@ -62,7 +62,7 @@ Overrides:
 
 - `LUME_VERSION=v0.1.0` — pin a specific release instead of `latest`
 - `LUME_PREFIX=/opt/lume` — install root (binary lands in `$PREFIX/bin`)
-- `LUME_SHA256=<hex>` — verify the downloaded binary's checksum
+- `LUME_SHA256=<hex>` — verify the downloaded tarball's checksum
 
 The installer and the binaries live on GitHub Releases — no npm registry, no
 package manager. To build from source or run containers instead, see the
