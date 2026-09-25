@@ -4,7 +4,7 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.1.2] - 2026-09-25
 
 ### Added
 
@@ -36,6 +36,22 @@ All notable changes to Lume are documented here. The format follows
 - Typecheck: un-annotated list literals may mix element types (element
   type falls back to `any`), needed for heterogeneous `?` parameter lists
   like `[3, "c"]`; annotated lists stay homogeneous.
+- `sqlite-write` example grows a /dsl demo page (chat UI gains a DSL entry
+  in the shared nav) and the page migrated from Lume SSR to a React
+  client that fetches the `/dsl/data` JSON API.
+
+### Changed
+
+- Release assets are now tarballs (`lume-<os>-<arch>.tar.gz`) containing
+  `bin/lume` plus the web UI (`www`, including the esbuild bundles that
+  are gitignored in the repo), `examples/`, `docs/` and the READMEs —
+  a bare binary alone cannot serve /chat /dsl because the docroot
+  resolves `./www` from the working directory. Each tarball ships with a
+  `.sha256` sidecar; `install.sh` downloads the tarball, puts the binary
+  in `~/.local/bin` and the web UI/examples/docs in `~/.local/share/lume`.
+- `install.sh`: installs from the tarball (needs `tar`), still honors
+  `LUME_VERSION` / `LUME_PREFIX` / `LUME_SHA256` (checksum now applies to
+  the tarball).
 
 ## [0.1.1] - 2026-09-25
 

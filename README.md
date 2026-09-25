@@ -46,9 +46,19 @@ Prebuilt binaries are attached to every GitHub Release. One command:
 curl -sSfL https://raw.githubusercontent.com/erishen/lume/main/install.sh | sh
 ```
 
-Installs the matching platform binary (`lume-<os>-<arch>`) to
-`~/.local/bin/lume` (macOS arm64/x64, Linux arm64/x64; needs `curl` or
-`wget`). Overrides:
+Installs the matching platform tarball (`lume-<os>-<arch>.tar.gz`,
+macOS arm64/x64, Linux arm64/x64; needs `curl`/`wget` + `tar`): the binary
+lands in `~/.local/bin/lume`, and the web UI (`www`), `examples/` and
+`docs/` in `~/.local/share/lume` — the bundled /chat /dsl demo pages need
+those files because the docroot resolves `./www` from the working
+directory. Run the demo with:
+
+```bash
+cd ~/.local/share/lume && ~/.local/bin/lume examples/sqlite-write.lume
+# then open http://127.0.0.1:8084/chat (or /dsl)
+```
+
+Overrides:
 
 - `LUME_VERSION=v0.1.0` — pin a specific release instead of `latest`
 - `LUME_PREFIX=/opt/lume` — install root (binary lands in `$PREFIX/bin`)
@@ -167,6 +177,13 @@ static container image works too:
   statement slips past the text check. Guardrails mirror the old MCP server's:
   single statement, SELECT-only after stripping comments, prepare-time syntax
   validation, 200-row cap.
+- Both tools accept optional `?` bind parameters — `sql_query(sql[, params])`
+  / `sql_write(path, sql[, params])` — where `params` is a list of scalars
+  bound via `sqlite3_bind_*`. Values never enter the SQL text, so guardrail
+  checks see only the statement skeleton and injection through a parameter
+  value is impossible (quotes, `;`, `--`, DDL keywords in a value are
+  inert). Prefer this over string interpolation whenever a value is not a
+  compile-time constant.
 - `sql_write` — *opt-in, off by default*: a single write statement —
   `INSERT` / `UPDATE` / `DELETE` (UPDATE/DELETE must carry a WHERE clause) or
   `CREATE TABLE` for a new table. `DROP` / `ALTER` / `TRUNCATE` / `VACUUM` /

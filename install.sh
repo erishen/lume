@@ -3,8 +3,10 @@
 #
 #   curl -sSfL https://raw.githubusercontent.com/erishen/lume/main/install.sh | sh
 #
-# Downloads the prebuilt binary for your platform from GitHub Releases and
-# installs it to ~/.local/bin/lume. Needs curl or wget.
+# Downloads the prebuilt release tarball for your platform from GitHub
+# Releases and installs it: the binary lands in ~/.local/bin/lume, and the
+# web UI (www), examples and docs in ~/.local/share/lume so the bundled
+# /chat /dsl demo pages resolve their docroot. Needs curl or wget.
 #
 # Overrides (set before piping, e.g. `... | LUME_VERSION=v0.1.0 sh`):
 #   LUME_VERSION  version tag to install (default: latest)
@@ -37,7 +39,7 @@ case "$(uname -m)" in
     ;;
 esac
 
-asset="lume-$os-$arch"
+asset="lume-$os-$arch.tar.gz"
 if [ "$VERSION" = "latest" ]; then
   url="https://github.com/$REPO/releases/latest/download/$asset"
 else
@@ -47,7 +49,7 @@ fi
 # --- download ---------------------------------------------------------------
 mkdir -p "$BINDIR"
 tmp="$BINDIR/.lume.tmp.$$"
-trap 'rm -f "$tmp"' EXIT INT TERM
+trap 'rm -f "$tmp"; rm -rf "$tmp.d" "$BINDIR/.lume.stage.$$"' EXIT INT TERM
 
 echo "==> lume-install: downloading $asset"
 if command -v curl >/dev/null 2>&1; then
@@ -79,8 +81,30 @@ if [ -n "${LUME_SHA256:-}" ]; then
 fi
 
 # --- install ----------------------------------------------------------------
-chmod +x "$tmp"
-mv "$tmp" "$BINDIR/lume"
+if ! command -v tar >/dev/null 2>&1; then
+  echo "lume-install: need tar to unpack the release" >&2
+  exit 1
+fi
+stage="$BINDIR/.lume.stage.$$"
+mkdir -p "$stage"
+tar -xzf "$tmp" -C "$stage" || { echo "lume-install: corrupt download" >&2; exit 1; }
+dir=$(find "$stage" -maxdepth 1 -mindepth 1 -type d | head -1)
+[ -n "$dir" ] && [ -x "$dir/bin/lume" ] || {
+  echo "lume-install: tarball layout unexpected" >&2
+  exit 1
+}
+
+chmod +x "$dir/bin/lume"
+mv "$dir/bin/lume" "$BINDIR/lume"
+if [ -d "$dir/www" ] || [ -d "$dir/examples" ] || [ -d "$dir/docs" ]; then
+  sharedir="$PREFIX/share/lume"
+  mkdir -p "$sharedir"
+  cp -R "$dir/www" "$dir/examples" "$dir/docs" "$dir/README.md" "$dir/CHANGELOG.md" \
+    "$sharedir/" 2>/dev/null || true
+  echo "==> lume-install: web UI + examples + docs in $sharedir"
+  echo "    demo: cd $sharedir && $BINDIR/lume examples/sqlite-write.lume (then http://127.0.0.1:8084/chat)"
+fi
+rm -rf "$stage"
 echo "==> lume-install: installed $BINDIR/lume"
 echo "    run: $BINDIR/lume --help"
 

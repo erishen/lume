@@ -52,24 +52,46 @@ jobs:
       - name: Build lume
         run: make
 
+      - name: Install frontend deps
+        run: |
+          corepack enable
+          cd frontend && pnpm install --frozen-lockfile
+
+      - name: Build frontend bundle
+        run: make ui
+
       - name: Smoke-check all examples
         run: make check
 
       - name: Report platform and binary type
         run: uname -s -m && file bin/lume
 
-      - name: Stage release asset
+      # The release asset is a tarball, not a bare binary: the web UI bundles
+      # (www/*.js) are gitignored build output, so the frontend must ride
+      # inside the artifact or an installed binary would serve broken
+      # /chat /dsl pages (docroot resolves ./www from the working directory).
+      - name: Stage release tarball
         if: startsWith(github.ref, 'refs/tags/')
-        run: cp bin/lume "${{ matrix.asset }}"
+        run: |
+          mkdir -p "dist/${{ matrix.asset }}/bin"
+          cp bin/lume "dist/${{ matrix.asset }}/bin/"
+          cp -r www examples docs README.md README.zh.md CHANGELOG.md install.sh             "dist/${{ matrix.asset }}/"
+          cd dist
+          tar -czf "${{ matrix.asset }}.tar.gz" "${{ matrix.asset }}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${{ matrix.asset }}.tar.gz" > "${{ matrix.asset }}.sha256"
+          else
+            shasum -a 256 "${{ matrix.asset }}.tar.gz" > "${{ matrix.asset }}.sha256"
+          fi
 
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}.*
           if-no-files-found: error
 
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: ${{ matrix.asset }}
+          files: dist/${{ matrix.asset }}.tar.gz
