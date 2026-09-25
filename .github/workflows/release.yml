@@ -50,6 +50,13 @@ jobs:
       - name: Build lume
         run: make
 
+      # GitHub now runs Node-20-targeting actions on the Node-24 runtime, so
+      # the frontend build is explicitly pinned to Node 24 everywhere.
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Install frontend deps
         run: |
           corepack enable
