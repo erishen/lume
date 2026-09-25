@@ -7,8 +7,10 @@
  * a plain API round-trip. The write-up sample is a static block so the page
  * teaches the call forms even before any data arrives.
  *
- * Styling: shared app.css classes (.hero/.shell/.muted/…) + Tailwind
- * utilities, same as the chat page.
+ * Styling: shared app.css classes (.hero/.shell/.card/…) + Tailwind
+ * utilities. dsl.tsx is listed in app.css @source so the utility classes
+ * used here are generated into www/app.css (missing before: the tables and
+ * the bare <pre> had no styles at all, which is why the page looked bare).
  */
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -44,33 +46,52 @@ interface DslData {
 function DataTable({
   rows,
   cols,
+  emptyLabel = "（空）",
 }: {
   rows: Row[];
   cols: { key: string; label: string }[];
+  emptyLabel?: string;
 }) {
+  if (rows.length === 0) {
+    return <p className="muted py-2">{emptyLabel}</p>;
+  }
   return (
-    <table className="w-full border-collapse">
-      <thead>
-        <tr>
-          {cols.map((c) => (
-            <th key={c.key} className="text-left border-b border-gray-300 px-2 py-1">
-              {c.label}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={i}>
+    <div className="mt-3 overflow-x-auto">
+      <table className="w-full border-collapse text-[13px] leading-snug">
+        <thead>
+          <tr>
             {cols.map((c) => (
-              <td key={c.key} className="border-b border-gray-200 px-2 py-1">
-                {String(r[c.key] ?? "")}
-              </td>
+              <th
+                key={c.key}
+                className="border-b border-line px-3 py-2 text-left font-semibold text-muted"
+              >
+                {c.label}
+              </th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} className="odd:bg-bg/45 hover:bg-accent/6">
+              {cols.map((c, j) => {
+                const v = r[c.key];
+                const numeric = typeof v === "number";
+                return (
+                  <td
+                    key={c.key}
+                    className={`border-b border-line/70 px-3 py-2 align-top ${
+                      numeric ? "text-right tabular-nums" : ""
+                    } ${j === 0 ? "font-mono text-sky-300" : ""}`}
+                  >
+                    {String(v ?? "")}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -99,14 +120,48 @@ function DslPage() {
         </p>
       </header>
 
-      <h2>写法示例(脚本层直接调用,不经 LLM)</h2>
-      <pre>{DSL_EXAMPLE}</pre>
+      {/* 数据状态条 + 原始 JSON 入口 */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-[13px]">
+        {err ? (
+          <span className="rounded-full border border-red-400/40 bg-red-500/10 px-3 py-1 font-medium text-red-300">
+            加载失败:{err}
+          </span>
+        ) : data ? (
+          <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 font-medium text-emerald-300">
+            数据已就绪 · 共 {data.row_count} 行
+          </span>
+        ) : (
+          <span className="rounded-full border border-line bg-panel px-3 py-1 text-muted">
+            加载中…
+          </span>
+        )}
+        <a
+          href="/dsl/data"
+          className="ml-auto rounded-full border border-line px-3 py-1 font-medium text-muted no-underline hover:border-accent hover:text-accent"
+        >
+          原始 JSON ↗
+        </a>
+      </div>
 
-      <h2>portfolio 镜像表(只读查询)</h2>
-      {err ? (
-        <p className="muted">加载失败:{err}</p>
-      ) : data ? (
-        <>
+      {/* 写法示例 */}
+      <section className="mb-3.5 rounded-xl border border-line bg-panel p-4.5">
+        <h2 className="text-[15px] font-bold text-ink">
+          写法示例<span className="ml-2 font-mono text-[11px] font-normal text-muted">脚本层直接调用,不经 LLM</span>
+        </h2>
+        <pre className="mt-3 overflow-x-auto rounded-lg border border-line bg-[linear-gradient(180deg,#121a30,#0d1426)] px-4 py-3.5 font-mono text-[12.5px] leading-[1.65] text-[#9fe8a2]">
+          {DSL_EXAMPLE}
+        </pre>
+      </section>
+
+      {/* portfolio 镜像表 */}
+      <section className="mb-3.5 rounded-xl border border-line bg-panel p-4.5">
+        <h2 className="flex items-baseline justify-between text-[15px] font-bold text-ink">
+          portfolio 镜像表
+          <span className="font-mono text-[11px] font-normal text-muted">只读查询 · {data ? data.holdings.length : "—"} 行</span>
+        </h2>
+        {err ? (
+          <p className="muted py-2">{err}</p>
+        ) : data ? (
           <DataTable
             rows={data.holdings}
             cols={[
@@ -115,29 +170,31 @@ function DslPage() {
               { key: "avg_cost", label: "avg_cost" },
             ]}
           />
-          <p className="muted">共 {data.row_count} 行</p>
-        </>
-      ) : (
-        <p className="muted">loading…</p>
-      )}
+        ) : (
+          <p className="muted py-2">加载中…</p>
+        )}
+      </section>
 
-      <h2>analysis 表(DSL 幂等建表 + 写入)</h2>
-      {data ? (
-        <DataTable
-          rows={data.analysis}
-          cols={[
-            { key: "symbol", label: "symbol" },
-            { key: "cost_value", label: "cost_value" },
-            { key: "note", label: "note" },
-          ]}
-        />
-      ) : (
-        <p className="muted">loading…</p>
-      )}
-
-      <p>
-        <a href="/dsl/data">查看原始 JSON</a>
-      </p>
+      {/* analysis 表 */}
+      <section className="rounded-xl border border-line bg-panel p-4.5">
+        <h2 className="flex items-baseline justify-between text-[15px] font-bold text-ink">
+          analysis 表
+          <span className="font-mono text-[11px] font-normal text-muted">DSL 幂等建表 + 写入</span>
+        </h2>
+        {data ? (
+          <DataTable
+            rows={data.analysis}
+            cols={[
+              { key: "symbol", label: "symbol" },
+              { key: "cost_value", label: "cost_value" },
+              { key: "note", label: "note" },
+            ]}
+            emptyLabel="（暂无数据,示例首次写入时创建）"
+          />
+        ) : (
+          <p className="muted py-2">加载中…</p>
+        )}
+      </section>
     </main>
   );
 }

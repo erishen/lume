@@ -25,6 +25,7 @@
 @source "./hub/hub-catalog.tsx";
 @source "./hub/hub-discovery.tsx";
 @source "./sqlite-write/app.tsx";
+@source "./sqlite-write/dsl.tsx";
 @source "../../www/invest/index.html";
 @source "../../www/invest/chat.html";
 @source "../../www/invest/reports.html";

@@ -4,6 +4,18 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- /dsl page UI overhaul: sections now render as cards, a status badge
+  shows data readiness / row count / errors, tables get styled headers,
+  zebra striping, right-aligned numeric columns and monospace symbol
+  cells, and the code sample sits in a proper code panel. The page's
+  Tailwind utilities were previously never emitted because `dsl.tsx`
+  was missing from `app.css` `@source` — tables and the bare `<pre>`
+  had no styles at all; the source list now includes it.
+
 ## [0.1.2] - 2026-09-25
 
 ### Added
