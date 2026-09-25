@@ -1,0 +1,66 @@
+name: Release
+
+# 发布工作流: push 一个 v* tag(如 v0.2.0)时,在四个平台原生构建 bin/lume,
+# 以 lume-<os>-<arch> 命名,附加到该 tag 的 GitHub Release(不存在则创建)。
+# install.sh 用同样的命名约定从 releases/latest/download/ 下载,所以新增
+# 平台只需要改这里的矩阵 + install.sh 的平台映射。
+#
+# 注意: 矩阵并发往同一个 release 上传 asset。action-gh-release 先按 tag
+# 查已有 release(不存在才创建),多 job 并行是安全用法;fail-fast: false
+# 保证单平台失败不影响其它平台产物。
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: lume-linux-x64
+          - os: ubuntu-24.04-arm
+            asset: lume-linux-arm64
+          - os: macos-13
+            asset: lume-darwin-x64
+          - os: macos-14
+            asset: lume-darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev
+
+      - name: Build lume
+        run: make
+
+      - name: Smoke-check all examples
+        run: make check
+
+      - name: Report platform and binary type
+        run: uname -s -m && file bin/lume
+
+      - name: Stage release asset
+        run: cp bin/lume "${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}

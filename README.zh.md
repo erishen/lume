@@ -33,6 +33,24 @@ make clean        # 删 build/ 与 bin/
 `frontend/src/`,产物进 `www/`——`www/` 里的 `*.js` / `*.css` 是构建产物
 (已在 `.gitignore` 排除),手写的 HTML 壳 `www/*/index.html` 等才是源码。
 
+## 安装
+
+每个 GitHub Release 都附带预编译二进制,一条命令安装:
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/erishen/lume/main/install.sh | sh
+```
+
+按平台匹配 `lume-<os>-<arch>` 安装到 `~/.local/bin/lume`(macOS arm64/x64、
+Linux arm64/x64;需要 `curl` 或 `wget`)。可覆盖:
+
+- `LUME_VERSION=v0.1.0` —— 锁定具体版本而非 latest
+- `LUME_PREFIX=/opt/lume` —— 安装根目录(二进制落在 `$PREFIX/bin`)
+- `LUME_SHA256=<hex>` —— 校验下载二进制的 sha256
+
+安装脚本与二进制都挂在 GitHub Releases 上——不需要 npm registry 或包管理器。
+想自己编译或跑容器,见上面的快速开始与容器章节。
+
 ## 目录
 
 | 路径 | 内容 |

@@ -38,6 +38,26 @@ goes to `www/` — `*.js` / `*.css` under `www/` are build artifacts (ignored
 in `.gitignore`), while hand-written HTML shells like `www/*/index.html` are
 source.
 
+## Install
+
+Prebuilt binaries are attached to every GitHub Release. One command:
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/erishen/lume/main/install.sh | sh
+```
+
+Installs the matching platform binary (`lume-<os>-<arch>`) to
+`~/.local/bin/lume` (macOS arm64/x64, Linux arm64/x64; needs `curl` or
+`wget`). Overrides:
+
+- `LUME_VERSION=v0.1.0` — pin a specific release instead of `latest`
+- `LUME_PREFIX=/opt/lume` — install root (binary lands in `$PREFIX/bin`)
+- `LUME_SHA256=<hex>` — verify the downloaded binary's checksum
+
+The installer and the binaries live on GitHub Releases — no npm registry, no
+package manager. To build from source or run containers instead, see the
+Quick start and Containers sections.
+
 ## Layout
 
 | Path | Contents |
