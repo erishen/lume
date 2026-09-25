@@ -174,6 +174,23 @@ demo-sqlite-watch: all check ui
 	HARNESS_TOOLS_ALLOW=$(DEMO_SQLITE_TOOLS) MCP_ALLOW=fs,think,memory \
 		SQLITE_DB=.data/lume.db ./$(TARGET) --watch examples/sqlite-write.lume
 
+# URL 查询参数示例: examples/query-demo.lume on :$(QUERY_DEMO_PORT)(默认 8087,
+# 独立于 demo-sqlite 的 8084 / hub 的 8083)。纯 API 无前端页面:
+#   /echo?name=Ada&tag=hello%20world&flag   — 原始 query 串 + 解码 params 对照
+#   /api/hello?name=Lume&style=polite       — 参数读取 + get() 缺省值
+#   make query-demo           # 构建 + 检查 + 清端口 + 前台启动(Ctrl-C 停)
+#   make query-demo-watch     # 热更新:改 examples/query-demo.lume 自动重起
+QUERY_DEMO_PORT ?= 8087
+query-demo: all check
+	$(call KILL_SERVER,$(QUERY_DEMO_PORT),[q]uery-demo.lume)
+	@echo "==> lume examples/query-demo.lume on :$(QUERY_DEMO_PORT) (URL query params demo)"; \
+	./$(TARGET) examples/query-demo.lume
+
+query-demo-watch:
+	$(call KILL_SERVER,$(QUERY_DEMO_PORT),[q]uery-demo.lume)
+	@echo "==> lume --watch examples/query-demo.lume on :$(QUERY_DEMO_PORT) (URL query params demo)"; \
+	./$(TARGET) --watch examples/query-demo.lume
+
 # tsm-hub 网关能力示例: examples/hub.lume on :$(HUB_PORT)(默认 8083,
 # 与 invest 的 8082 并存)。不收敛——整本网关目录全开:
 #   HARNESS_SKILLS_ALLOW=网关 5 个技能(code-review/rust-review/hot-news-post/
