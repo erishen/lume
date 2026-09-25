@@ -43,7 +43,7 @@ DEMO     := examples/demo.lume
 HELLO    := examples/hello.lume
 INVEST   := examples/invest.lume
 HUB      := examples/hub.lume
-EXAMPLES := $(DEMO) examples/lang-basics.lume $(HELLO) $(INVEST) $(HUB) examples/sqlite-write.lume
+EXAMPLES := $(DEMO) examples/lang-basics.lume $(HELLO) $(INVEST) $(HUB) examples/sqlite-write.lume examples/query-demo.lume
 # dev / dev-minimal 用的默认端口 (echo 与启动前清端口用)。
 PORT ?= 8082
 HUB_PORT ?= 8083
