@@ -289,6 +289,9 @@ function Chat(): React.ReactElement {
             {label}
           </button>
         ))}
+        <a key="dsl" className="prompt-btn" href="/dsl" target="_blank" rel="noreferrer">
+          DSL 直连演示 ↗
+        </a>
       </div>
       <ul className="msgs" ref={listRef} role="log" aria-live="polite">
         {messages.length === 0 && (

@@ -84,10 +84,12 @@ route "GET", "/dsl", func(req) {
   let analysis = sql_query("select * from analysis order by symbol");
   return {
     status: 200,
-    type: "text/html",
+    type: "text/html; charset=utf-8",
     body: render(
       el("html", {},
-        el("head", {}, el("title", {}, "Lume · DSL 直连 SQL 演示")),
+        el("head", {},
+          el("meta", { charset: "utf-8" }),
+          el("title", {}, "Lume · DSL 直连 SQL 演示")),
         el("body", {},
           el("h1", {}, "DSL 直连 SQL 演示"),
           el("p", {},
