@@ -67,56 +67,13 @@ func seed_analysis() {
   }
 }
 
-// 行 map 列表 → HTML 表格(SSR:el/render,数据全部来自 sql_query)
-func sql_table(rows, cols) {
-  let heading = el("tr", {}, map(func(c) { return el("th", {}, c); }, cols));
-  let trs = map(func(r) {
-    return el("tr", {}, map(func(c) { return el("td", {}, str(get(r, c))); }, cols));
-  }, rows);
-  return el("table", {}, heading, trs);
-}
-
-let dsl_example =
-  "// 只读查询 → 行 map 列表,可 get()/len()/遍历\n"
-  "let holdings = sql_query(\"select symbol, units, avg_cost from portfolio order by symbol\");\n"
-  "\n"
-  "// 护栏写 → 影响行数(DDL 为 0);UPDATE/DELETE 必须带 WHERE\n"
-  "let n = sql_write(\"update analysis set cost_value = 2000 where symbol = 'AAPL'\");\n"
-  "\n"
-  "// 幂等建表:表存在则跳过(重复启动不报错)\n"
-  "let has = len(sql_query(\"select name from sqlite_master where type = 'table' and name = 'analysis'\"));\n"
-  "if (has == 0) {\n"
-  "  sql_write(\"create table analysis (symbol text, cost_value real, note text)\");\n"
-  "  sql_write(\"insert into analysis values ('AAPL', 1500, 'dsl-demo')\");\n"
-  "}";
-
-// 可视化页面:portfolio 只读查询 + analysis 表往返,合并成一个 HTML 响应。
+// 可视化页面:React 壳(frontend/src/sqlite-write/dsl.tsx 打包为 dsl.js,
+// 页面 fetch /dsl/data 用 sql_* API 拿同一份数据客户端渲染)。
 route "GET", "/dsl", func(req) {
-  seed_analysis();
-  let holdings = sql_query(
-    "select symbol, units, avg_cost from portfolio order by symbol");
-  let analysis = sql_query("select * from analysis order by symbol");
   return {
     status: 200,
     type: "text/html; charset=utf-8",
-    body: render(
-      el("html", {},
-        el("head", {},
-          el("meta", { charset: "utf-8" }),
-          el("title", {}, "Lume · DSL 直连 SQL 演示")),
-        el("body", {},
-          el("h1", {}, "DSL 直连 SQL 演示"),
-          el("p", {},
-            "脚本层 ", el("code", {}, "sql_query"), " / ",
-            el("code", {}, "sql_write"), " 内建直接查/写 SQLite,不经过 LLM。"),
-          el("h2", {}, "写法示例(脚本层直接调用,不经 LLM)"),
-          el("pre", {}, dsl_example),
-          el("h2", {}, "portfolio 镜像表(只读查询)"),
-          sql_table(holdings, ["symbol", "units", "avg_cost"]),
-          el("p", {}, "共 " + str(len(holdings)) + " 行"),
-          el("h2", {}, "analysis 表(DSL 幂等建表 + 写入)"),
-          sql_table(analysis, ["symbol", "cost_value", "note"]),
-          el("p", {}, el("a", { href: "/dsl/data" }, "查看原始 JSON")))))
+    body: read_file("www/sqlite-write/dsl.html"),
   };
 };
 
