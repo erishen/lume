@@ -16,6 +16,31 @@ Lume is the DSL layer; HTTP / chat / MCP / sessions come from the
 `.gitmodules`) — clone with `git clone --recurse-submodules`, or run
 `git submodule update --init` after cloning.
 
+## ⚠️ Security — read before exposing the port
+
+Lume's HTTP server has **no built-in authentication**. The chat endpoint
+(`/react/api/chat`) can drive `fs` tools that read and write files, so **anyone
+who can reach the port can use `/chat` and read local files**. Treat the port as
+a trusted, loopback-only surface:
+
+- **Bind to loopback** (`127.0.0.1`) or put it behind a reverse proxy that adds
+  auth. Never expose the port to an untrusted LAN/WAN.
+- **Enable Basic Auth** for any non-loopback bind. Container deployments do this
+  via the bundled `htpasswd` + `.env`; **local `make dev` / `make invest` do
+  _not_ enable auth by default** — keep them on `localhost` only.
+- **Data egress.** When `LLM_API_KEY` is set, chat content, session memory and
+  the SQLite schema are sent to `LLM_API_URL`. For a public/third-party provider
+  this is "providing personal data to a third party" under PIPL — the in-app
+  settings/discovery pages disclose this, but running it for *others'* data
+  needs your own privacy notice and consent flow.
+- **Same-origin guard.** `/api/reports` and `/api/settings` (iquest) reject
+  cross-origin reads/writes, and the native chat endpoint (`/react/api/chat`)
+  also enforces a same-origin + POST-only check in agent-httpd
+  (`chat_origin_ok`) — a cross-site browser request is rejected with 403 before
+  any generation or session write. Requests with no `Origin` (non-browser
+  clients, the test harness) are still allowed, so the network boundary above
+  remains the primary control.
+
 ## Quick start
 
 ```bash

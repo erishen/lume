@@ -13,6 +13,24 @@ Lume 是 DSL 层,HTTP/聊天/MCP/会话由 [agent-httpd](agent-httpd/) submodule
 提供,静态链 `libagenthttpd.a`。agent-httpd 版本由 gitlink 锁定(见 `.gitmodules`),
 clone 用 `git clone --recurse-submodules`,或 clone 后 `git submodule update --init`。
 
+## ⚠️ 安全 —— 暴露端口前必读
+
+Lume 的 HTTP 服务器**自身不带鉴权**。聊天端点(`/react/api/chat`)能驱动
+`fs` 工具读写文件,因此**任何能连上端口的人都能用 `/chat` 并读取本地文件**。
+请把端口视作「可信、仅本地回环」的攻击面:
+
+- **绑定回环地址**(`127.0.0.1`),或放到带鉴权的反向代理后面。切勿把端口暴露给
+  不可信的局域网/公网。
+- **非回环绑定时务必开启 Basic Auth**。容器部署通过内置 `htpasswd` + `.env` 实现;
+  **本地的 `make dev` / `make invest` 默认不开启鉴权**——只在 `localhost` 用。
+- **数据出境**。设置 `LLM_API_KEY` 后,聊天内容、会话记忆与 SQLite schema 会发往
+  `LLM_API_URL`。若用公网/第三方 provider,这在 PIPL 意义下属于「向第三方提供个人
+  信息」——应用内的设置/发现页已做披露,但若用他人数据来跑,需自备隐私告知与同意流。
+- **同源守卫**。iquest 的 `/api/reports` 与 `/api/settings` 跨源读写均被拒;原生聊天端点
+  (`/react/api/chat`) 在 agent-httpd 里同样有「同源 + 仅 POST」校验(`chat_origin_ok`),
+  跨站浏览器请求会在生成/写会话前被 403 拒绝。无 `Origin` 的请求(非浏览器/测试)仍放行,
+  所以上面的网络边界仍是主防线。
+
 ## 快速开始
 
 ```bash

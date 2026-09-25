@@ -446,12 +446,17 @@ static int h_settings_post(HttpRequest *req, HttpResponse *res) {
     const char *pv = jfind_value(body, "provider");
     if (pv && *pv == '\"')
         jread_string(&pv, prov, sizeof prov);
-    /* provider 会作为一整行写进 .env:拒绝换行/回车及其它控制字符,防止
-     * JSON "\n" 解码后注入任意配置行。 */
+    /* provider 会作为一整行写进 .env(PSE_REVIEW_PROVIDER=<value>)。除控制
+     * 字符(防 JSON "\n" 解码后注入任意配置行)外,还要挡住 #(部分 .env 解析器
+     * 把 # 起的内容当注释,导致读到的 provider 被截断)、=(破坏 key=value 形态)
+     * 以及空格/Tab(行式解析会错位)。provider 取值是 router/deepseek 这类单
+     * token,这些字符本就不应出现。 */
     for (const char *q = prov; *q; q++) {
         unsigned char c = (unsigned char)*q;
-        if (c < 0x20 || c == 0x7f) {
-            json_error(res, 400, "provider contains control characters");
+        if (c < 0x20 || c == 0x7f || c == '#' || c == '=' ||
+            c == ' ' || c == '\t') {
+            json_error(res, 400,
+                       "provider contains invalid characters (#, =, space or control)");
             return 0;
         }
     }
