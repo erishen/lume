@@ -18,6 +18,10 @@
           本 profile 显式放行 <b>sql_write</b>——模型可建分析表、写入、查询；
           portfolio 镜像表只读，DROP / ALTER / TRUNCATE / PRAGMA 等被护栏拒绝。
         </p>
+        <p>
+          脚本层同样直连（不经 LLM）：<code>sql_query</code> / <code>sql_write</code>
+          内建在 <a href="/dsl">DSL 直连演示</a> 里可视化展示。
+        </p>
       </header>
       <section class="chat shell" id="chat-root">
         <p class="muted">loading agent…</p>

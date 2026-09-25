@@ -52,7 +52,8 @@ route "GET", "/", func(req) {
 
 // ============================================================================
 // DSL 直连示例 —— 不经过 LLM,脚本直接查/写 SQLite(与 chat 工具同一个库、
-// 同一套护栏)。浏览器开 http://localhost:8084/dsl 看效果。
+// 同一套护栏)。浏览器开 http://localhost:8084/dsl 看可视化页面,
+// /dsl/data 返回同一份数据的原始 JSON。
 // ============================================================================
 
 // 幂等建 analysis 表并写入演示数据(重复启动不报错:表已存在则跳过)
@@ -66,11 +67,43 @@ func seed_analysis() {
   }
 }
 
-// 只读查持仓镜像表 + analysis 表往返,合并成一个 JSON 响应。
-// 注意 sql_query 返回行 map 列表,可直接 get()/len()/遍历:
-//   len(sql_query("select * from portfolio")) → 行数
-//   get(sql_query("select * from analysis"), 0) → 第一行 map
+// 行 map 列表 → HTML 表格(SSR:el/render,数据全部来自 sql_query)
+func sql_table(rows, cols) {
+  let heading = el("tr", {}, map(func(c) { return el("th", {}, c); }, cols));
+  let trs = map(func(r) {
+    return el("tr", {}, map(func(c) { return el("td", {}, str(get(r, c))); }, cols));
+  }, rows);
+  return el("table", {}, heading, trs);
+}
+
+// 可视化页面:portfolio 只读查询 + analysis 表往返,合并成一个 HTML 响应。
 route "GET", "/dsl", func(req) {
+  seed_analysis();
+  let holdings = sql_query(
+    "select symbol, units, avg_cost from portfolio order by symbol");
+  let analysis = sql_query("select * from analysis order by symbol");
+  return {
+    status: 200,
+    type: "text/html",
+    body: render(
+      el("html", {},
+        el("head", {}, el("title", {}, "Lume · DSL 直连 SQL 演示")),
+        el("body", {},
+          el("h1", {}, "DSL 直连 SQL 演示"),
+          el("p", {},
+            "脚本层 ", el("code", {}, "sql_query"), " / ",
+            el("code", {}, "sql_write"), " 内建直接查/写 SQLite,不经过 LLM。"),
+          el("h2", {}, "portfolio 镜像表(只读查询)"),
+          sql_table(holdings, ["symbol", "units", "avg_cost"]),
+          el("p", {}, "共 " + str(len(holdings)) + " 行"),
+          el("h2", {}, "analysis 表(DSL 幂等建表 + 写入)"),
+          sql_table(analysis, ["symbol", "cost_value", "note"]),
+          el("p", {}, el("a", { href: "/dsl/data" }, "查看原始 JSON")))))
+  };
+};
+
+// 同一份数据的原始 JSON(供脚本/接口消费)
+route "GET", "/dsl/data", func(req) {
   seed_analysis();
   let holdings = sql_query(
     "select symbol, units, avg_cost from portfolio order by symbol");
@@ -83,5 +116,5 @@ route "GET", "/dsl", func(req) {
 };
 
 print("sqlite-write.lume: on :8084 — 打开 /chat,问\"建一张 analysis 表存持仓成本市值\"试试");
-print("  DSL 直连示例:打开 /dsl,看 sql_query/sql_write 内建直接查/写同一个库");
+print("  DSL 直连示例:打开 /dsl(可视化)/dsl/data(JSON),看 sql_query/sql_write 内建直接查/写同一个库");
 run();
