@@ -131,6 +131,13 @@ int main(void) {
           "let a = \"hello\"; let b = \" world\"; print(a + b + \"!\");",
           "hello world!\n");
 
+    check("adjacent string literals merge (JS-style)",
+          "print(\"a\" \"b\" \"c\");\n"
+          "let s = \"p\" \"q\";\n"
+          "print(s);",
+          "abc\npq\n");
+    reject("adjacent non-string literal", "print(\"a\" 1);", "expected");
+
     check("comparisons",
           "print(str(2 < 3)); print(str(2 >= 3)); print(str(1 == 1)); "
           "print(str(1 != 2)); print(str(1 == 2));",

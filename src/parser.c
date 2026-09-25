@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include "lume.h"
 
 /* Recursive-descent parser with a layered arithmetic grammar
@@ -605,10 +606,28 @@ static Node *parse_primary(Parser *p) {
     }
     if (t.type == TOK_STRING) {
         advance(p);
+        /* JS-style adjacent string literals: "a" "b" is "ab". Merge the
+         * quote-inclusive spans here; the combined literal unescapes at
+         * eval time like any other, so \" and \\n inside either part keep
+         * their meaning across the join. */
+        size_t mlen = (size_t)t.length;
+        char *merged = malloc(mlen + 1);
+        memcpy(merged, t.start, mlen);
+        merged[mlen] = '\0';
+        while (peek(p).type == TOK_STRING) {
+            Token u = peek(p);
+            advance(p);
+            size_t inner = (size_t)u.length - 2; /* drop u's quotes */
+            merged = realloc(merged, mlen - 1 + inner + 1 + 1);
+            memcpy(merged + mlen - 1, u.start + 1, inner); /* overwrite our closing quote */
+            mlen = mlen - 1 + inner + 1;
+            merged[mlen - 1] = '"';
+            merged[mlen] = '\0';
+        }
         Node *n = nalloc(N_LITERAL, t.line);
         n->as.lit.kind = LIT_STR;
-        n->as.lit.text = t.start; /* includes quotes; unescaped at eval */
-        n->as.lit.len = t.length;
+        n->as.lit.text = merged; /* includes quotes; unescaped at eval */
+        n->as.lit.len = mlen;
         return n;
     }
     if (t.type == TOK_TRUE || t.type == TOK_FALSE || t.type == TOK_NULL) {

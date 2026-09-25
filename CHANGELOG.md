@@ -17,6 +17,9 @@ All notable changes to Lume are documented here. The format follows
   `map(fn, list)`, `filter(fn, list)`, `reduce(fn, list, init)` — the fn
   forms accept named functions and lambdas and run through the shared call
   machinery (GC-rooted, `return`/`?` unwinding intact).
+- Adjacent string literals merge JS-style: `"a" "b"` is `"ab"` (merged at
+  parse time pre-escape, so `\n` / `\"` inside either part keep meaning
+  across the join). Non-string neighbours still error as before.
 - SQL builtins: `sql_query(sql)` / `sql_query(path, sql)` (read-only SELECT
   returning a list of row maps) and `sql_write(sql)` / `sql_write(path, sql)`
   (guarded INSERT / UPDATE / DELETE with mandatory WHERE, or CREATE TABLE for
