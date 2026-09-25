@@ -13,6 +13,9 @@ pass() { echo "ok   $*"; }
 
 # 1. build + parse checks -------------------------------------------------
 make > /dev/null 2>&1 || fail "make"
+# --help / -h must print usage and exit 0 (not the unknown-flag error path)
+./bin/lume --help > /dev/null 2>&1 || fail "--help should exit 0"
+./bin/lume -h > /dev/null 2>&1 || fail "-h should exit 0"
 ./bin/lume --check examples/demo.lume > /dev/null || fail "parse demo"
 ./bin/lume --check examples/lang-basics.lume > /dev/null || fail "parse lang-basics"
 ./bin/lume --check examples/hello.lume > /dev/null || fail "parse hello"

@@ -5,14 +5,20 @@ name: Release
 # install.sh 用同样的命名约定从 releases/latest/download/ 下载,所以新增
 # 平台只需要改这里的矩阵 + install.sh 的平台映射。
 #
+# push main / PR 也会跑同一个构建矩阵(不上传 asset),让平台构建问题在
+# 发布前就暴露,而不是等到打 tag 才第一次编译。
+#
 # 注意: 矩阵并发往同一个 release 上传 asset。action-gh-release 先按 tag
 # 查已有 release(不存在才创建),多 job 并行是安全用法;fail-fast: false
-# 保证单平台失败不影响其它平台产物。
+# 保证单平台失败不影响其它平台产物。tag 之外的事件 GITHUB_TOKEN 只读,
+# 上传步骤全部有 if 守卫。
 
 on:
   push:
+    branches: [main]
     tags:
       - 'v*'
+  pull_request:
 
 permissions:
   contents: write
@@ -53,14 +59,17 @@ jobs:
         run: uname -s -m && file bin/lume
 
       - name: Stage release asset
+        if: startsWith(github.ref, 'refs/tags/')
         run: cp bin/lume "${{ matrix.asset }}"
 
       - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
           if-no-files-found: error
 
       - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: ${{ matrix.asset }}
