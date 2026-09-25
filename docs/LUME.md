@@ -338,7 +338,7 @@ func use(): Result {
 | `keys(m)` | map 的键列表 |
 | `get(m, k, 缺省?)` | 取 map 字段;缺键时返回第三个参数(否则 null)。**跨边界取值建议用它**,比如 agent 工具实参 |
 | `range(止)` / `range(起, 止)` / `range(起, 止, 步)` | 等差数列列表(整数元素保持 int);步长不能为 0 |
-| `map(fn, list)` | 对每个元素调用 fn → 新列表 |
+| `map(fn, list)` | 对每个元素调用 fn → 新列表(fn 可传具名 `func`、`func (x) { ... }` lambda 或 `(x) => { ... }` 箭头函数,`filter`/`reduce` 同理) |
 | `filter(fn, list)` | 保留 fn(item) 为真的元素 → 新列表 |
 | `reduce(fn, list, init)` | 从左折叠:fn(累加值, 元素),返回最终值 |
 | `json(s)` | JSON 字符串 → Lume 值(map/list/标量) |
