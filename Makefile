@@ -62,7 +62,8 @@ define KILL_SERVER
 	done
 endef
 SRCS     := src/main.c src/lexer.c src/parser.c src/value.c \
-            src/typecheck.c src/interp.c src/bridge.c src/token.c src/iquest.c
+            src/typecheck.c src/interp.c src/builtins.c src/vdom.c \
+            src/bridge.c src/token.c src/iquest.c
 OBJS     := $(SRCS:src/%.c=build/%.o)
 
 all: bin $(TARGET)
