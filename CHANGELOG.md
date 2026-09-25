@@ -17,6 +17,15 @@ All notable changes to Lume are documented here. The format follows
   `map(fn, list)`, `filter(fn, list)`, `reduce(fn, list, init)` — the fn
   forms accept named functions and lambdas and run through the shared call
   machinery (GC-rooted, `return`/`?` unwinding intact).
+- SQL builtins: `sql_query(sql)` / `sql_query(path, sql)` (read-only SELECT
+  returning a list of row maps) and `sql_write(sql)` / `sql_write(path, sql)`
+  (guarded INSERT / UPDATE / DELETE with mandatory WHERE, or CREATE TABLE for
+  a new table; returns affected rows, 0 for DDL). The single-statement
+  checks, SELECT-only read and write allow-list are shared with the agent
+  chat tools via agent-httpd's exported `sqlite_query_json` /
+  `sqlite_write_exec` — one guardrail implementation, no duplication. The
+  default database comes from env `SQLITE_DB`; an explicit path opens any
+  SQLite file (read-only for queries).
 
 ## [0.1.1] - 2026-09-25
 

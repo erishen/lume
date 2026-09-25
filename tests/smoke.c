@@ -1,6 +1,8 @@
 #include "lume.h"
 #include "tools.h"
 #include "skills.h"
+#include "sqlite_tool.h"
+#include <sqlite3.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -117,6 +119,9 @@ int main(void) {
      * even after manual runs have dropped a real catalog. */
     mkdir(".data", 0755);
     unlink(".data/mcp-servers-router.json");
+
+    /* sql_query(sql) single-arg form falls back to env SQLITE_DB. */
+    setenv("SQLITE_DB", "/tmp/lume-smoke-data/sql.db", 1);
 
     check("arithmetic + casts",
           "print(str(1 + 2 * 3)); print(str(int(\"42\") - 2.5));",
@@ -474,6 +479,107 @@ check("skills: index enumeration includes the scratch skill",
           "unlock_file();\n"
           "print(str(a)); print(str(b)); print(str(c));",
           "true\ntrue\ntrue\n");
+
+    /* ---- sql_query / sql_write builtins (DSL-level SQLite) --------------
+     * A scratch db is created from C; the DSL then queries it (explicit path
+     * and via SQLITE_DB) and writes to it (guarded UPDATE, CREATE + INSERT).
+     * The guardrails are asserted from C against the exported agent-httpd
+     * helpers, so the negative paths (dangerous DDL, no-WHERE update,
+     * portfolio mirror, multi-statement) need no DSL runtime-error
+     * expectation. */
+    {
+        tests_run++;
+        const char *db = "/tmp/lume-smoke-data/sql.db";
+        unlink(db);
+        sqlite3 *sq = NULL;
+        char *emsg = NULL;
+        if (sqlite3_open(db, &sq) != SQLITE_OK ||
+            sqlite3_exec(sq,
+                         "CREATE TABLE t (id INTEGER, name TEXT);"
+                         "INSERT INTO t VALUES (1,'a');"
+                         "INSERT INTO t VALUES (2,'b');",
+                         NULL, NULL, &emsg) != SQLITE_OK) {
+            printf("FAIL sql scratch db setup: %s\n",
+                   emsg ? emsg : "cannot open");
+            tests_failed++;
+        } else {
+            printf("ok   sql scratch db setup\n");
+        }
+        sqlite3_close(sq);
+    }
+
+    check("sql_query: rows as list of maps (explicit path)",
+          "let r = sql_query(\"/tmp/lume-smoke-data/sql.db\", "
+          "\"select * from t order by id\");\n"
+          "print(stringify(r));",
+          "[{\"id\":1,\"name\":\"a\"},{\"id\":2,\"name\":\"b\"}]\n");
+
+    check("sql_query: SQLITE_DB fallback (single arg)",
+          "let r = sql_query(\"select name from t order by id\");\n"
+          "print(get(get(r, 1), \"name\"));",
+          "b\n");
+
+    check("sql_write: guarded update returns affected rows",
+          "let n = sql_write(\"/tmp/lume-smoke-data/sql.db\", "
+          "\"update t set name = 'z' where id = 1\");\n"
+          "print(str(n));\n"
+          "print(stringify(sql_query(\"/tmp/lume-smoke-data/sql.db\", "
+          "\"select name from t order by id\")));",
+          "1\n[{\"name\":\"z\"},{\"name\":\"b\"}]\n");
+
+    check("sql_write: CREATE TABLE returns 0, INSERT returns 1 (round trip)",
+          "let m = sql_write(\"/tmp/lume-smoke-data/sql.db\", "
+          "\"create table u (k TEXT)\");\n"
+          "let n = sql_write(\"/tmp/lume-smoke-data/sql.db\", "
+          "\"insert into u values ('x')\");\n"
+          "print(str(m)); print(str(n));\n"
+          "print(stringify(sql_query(\"/tmp/lume-smoke-data/sql.db\", "
+          "\"select * from u\")));",
+          "0\n1\n[{\"k\":\"x\"}]\n");
+
+    /* Guardrails exercised at the C level against sqlite_query_json /
+     * sqlite_write_exec (the code the builtins call). */
+    {
+        tests_run++;
+        int ok = 0;
+        char err[256] = {0};
+        sbuf b = {0};
+        if (sqlite_query_json("/tmp/lume-smoke-data/sql.db",
+                              "select count(*) as n from t",
+                              &b, err, sizeof err) == 0 &&
+            strstr(b.p ? b.p : "", "\"n\":2")) ok++;
+        free(b.p);
+        b.p = NULL;
+        if (sqlite_query_json("/tmp/lume-smoke-data/sql.db",
+                              "drop table t", &b, err, sizeof err) != 0 &&
+            strstr(err, "only SELECT")) ok++;
+        free(b.p);
+        b.p = NULL;
+        if (sqlite_query_json("/tmp/lume-smoke-data/sql.db",
+                              "select * from t; drop table t",
+                              &b, err, sizeof err) != 0 &&
+            strstr(err, "multiple statements")) ok++;
+        free(b.p);
+        b.p = NULL;
+        int affected = 0;
+        char werr[256] = {0};
+        if (sqlite_write_exec("/tmp/lume-smoke-data/sql.db",
+                              "drop table t", &affected, werr, sizeof werr) != 0 &&
+            strstr(werr, "dangerous")) ok++;
+        if (sqlite_write_exec("/tmp/lume-smoke-data/sql.db",
+                              "update t set name = 'x'", &affected,
+                              werr, sizeof werr) != 0 &&
+            strstr(werr, "WHERE")) ok++;
+        if (sqlite_write_exec("/tmp/lume-smoke-data/sql.db",
+                              "delete from portfolio", &affected,
+                              werr, sizeof werr) != 0 &&
+            strstr(werr, "portfolio")) ok++;
+        if (ok == 6) printf("ok   sql guardrails (C-level)\n");
+        else {
+            printf("FAIL sql guardrails (%d/6)\n", ok);
+            tests_failed++;
+        }
+    }
 
     /* write_file atomicity + permissions (checked from C, outside the DSL):
      * the sibling .tmp.<pid> must be gone after the write, and the target must

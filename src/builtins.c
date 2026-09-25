@@ -7,6 +7,7 @@
 #include "minijson.h"
 #include "tools.h"
 #include "skills.h"
+#include "sqlite_tool.h"
 #include <dirent.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -247,6 +248,61 @@ static void native_stringify(VM *vm, int argc, Value *args, Value *out) {
     json_append_value(vm, &b, args[0]);
     *out = make_string(vm, b.p ? b.p : "", b.len);
 }
+
+/* sql_query(sql) / sql_query(path, sql) - read-only SELECT against SQLite,
+ * returning a list of row maps (same guardrails as the chat sql_query tool:
+ * single statement, SELECT only; the db is opened physically read-only). */
+static void native_sql_query(VM *vm, int argc, Value *args, Value *out) {
+    const char *db = NULL, *sql = NULL;
+    if (argc == 1) {
+        if (!arg_string(vm, args[0], &sql)) return;
+    } else if (argc >= 2) {
+        if (!arg_string(vm, args[0], &db)) return;
+        if (!arg_string(vm, args[1], &sql)) return;
+    } else {
+        vm_set_error(vm, "sql_query() needs sql, or (path, sql)");
+        return;
+    }
+    sbuf b = {0};
+    char err[512] = {0};
+    if (sqlite_query_json(db, sql, &b, err, sizeof err) != 0) {
+        vm_set_error(vm, "sql_query: %s", err[0] ? err : "failed");
+        free(b.p);
+        *out = val_null();
+        return;
+    }
+    char jerr[256] = {0};
+    json_parse(vm, b.p ? b.p : "[]", jerr, sizeof jerr);
+    free(b.p);
+    if (vm->error) { *out = val_null(); return; }
+    *out = vm_pop(vm); /* json_parse pushed the result above the args */
+}
+
+/* sql_write(sql) / sql_write(path, sql) - guarded write: INSERT / UPDATE /
+ * DELETE (UPDATE/DELETE must carry WHERE) or CREATE TABLE for a new table;
+ * DROP/ALTER/TRUNCATE/VACUUM/ATTACH/PRAGMA and portfolio-mirror writes are
+ * rejected. Returns the number of rows affected (0 for DDL). */
+static void native_sql_write(VM *vm, int argc, Value *args, Value *out) {
+    const char *db = NULL, *sql = NULL;
+    if (argc == 1) {
+        if (!arg_string(vm, args[0], &sql)) return;
+    } else if (argc >= 2) {
+        if (!arg_string(vm, args[0], &db)) return;
+        if (!arg_string(vm, args[1], &sql)) return;
+    } else {
+        vm_set_error(vm, "sql_write() needs sql, or (path, sql)");
+        return;
+    }
+    int affected = 0;
+    char err[512] = {0};
+    if (sqlite_write_exec(db, sql, &affected, err, sizeof err) != 0) {
+        vm_set_error(vm, "sql_write: %s", err[0] ? err : "failed");
+        *out = val_null();
+        return;
+    }
+    *out = val_int(affected);
+}
+
 
 static void native_now(VM *vm, int argc, Value *args, Value *out) {
     (void)vm; (void)argc; (void)args;
@@ -963,6 +1019,8 @@ Value b_range(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, a
 Value b_map(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_map); }
 Value b_filter(VM *vm, int argc, Value *args)     { return vm_native(vm, argc, args, native_filter); }
 Value b_reduce(VM *vm, int argc, Value *args)     { return vm_native(vm, argc, args, native_reduce); }
+Value b_sql_query(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_sql_query); }
+Value b_sql_write(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_sql_write); }
 Value b_json(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_json); }
 Value b_stringify(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_stringify); }
 Value b_now(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_now); }
