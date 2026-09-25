@@ -306,6 +306,10 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "--check") == 0) do_check = true;
         else if (strcmp(argv[i], "--dump") == 0) do_dump = true;
         else if (strcmp(argv[i], "--watch") == 0) do_watch = true;
+        else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            usage(argv[0]);
+            return 0;
+        }
         else if (argv[i][0] != '-') script = argv[i];
         else { usage(argv[0]); return 2; }
     }
