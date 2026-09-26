@@ -319,6 +319,11 @@ int main(void) {
           "let x: int = 1;\nprint(stringify(x));",
           "1\n");
 
+    check("call args: trailing comma accepted (matches list/map)",
+          "func f(a: int, b: int) { return a + b; }\n"
+          "print(str(f(1, 2,))); print(str(len([1, 2, 3,])));",
+          "3\n3\n");
+
     check("vdom: render() serializes el() trees (SSR)",
           "print(render(el(\"a\", { href: \"/x\" }, \"Home\")));\n"
           "print(render(el(\"section\", { data_page: \"home\", hidden: true }, \"Hi\")));",

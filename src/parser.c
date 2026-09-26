@@ -745,13 +745,15 @@ static Node *parse_postfix(Parser *p) {
             args->as.list.items = NULL;
             args->as.list.count = 0;
             if (!check(p, TOK_RPAREN)) {
-                do {
+                for (;;) {
                     Node *e = parse_expression(p);
                     if (!e) return NULL;
                     args->as.list.items = realloc(args->as.list.items,
                                                   sizeof(Node *) * ((size_t)args->as.list.count + 1));
                     args->as.list.items[args->as.list.count++] = e;
-                } while (match(p, TOK_COMMA));
+                    if (!match(p, TOK_COMMA)) break;
+                    if (check(p, TOK_RPAREN)) break; /* trailing comma */
+                }
             }
             if (!expect(p, TOK_RPAREN)) return NULL;
             Node *call = nalloc(N_CALL, previous_line(p));
