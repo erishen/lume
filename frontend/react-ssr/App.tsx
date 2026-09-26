@@ -70,7 +70,7 @@ function Layout({ nodeVersion, mode }: { nodeVersion: string; mode: RenderMode }
             to="/react"
             className="mr-auto font-bold tracking-tight no-underline text-slate-100 hover:text-accent"
           >
-            <code className="text-amber-300">lume</code>
+            <code className="text-amber-300">Lume</code>
             <span className="mx-1 text-slate-500">&#215;</span>
             <span className="bg-gradient-to-r from-sky-400 to-violet-400 bg-clip-text text-transparent">
               React
