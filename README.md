@@ -102,7 +102,7 @@ Quick start and Containers sections.
 |---|---|
 | `src/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, ~5.5k lines of C11 |
 | `examples/` | 8 `.lume` examples (demo / hello / invest / hub / lang-basics / sqlite-write / query-demo / react-ssr) |
-| `frontend/` | React 18 + TS + Tailwind 4 client, bundled with esbuild `--splitting` |
+| `frontend/` | React 18 + TS + Tailwind 4 client (`src/`, esbuild `--splitting`) + React SSR page sources (`react-ssr/`, built by `scripts/build-react-ssr.sh`) |
 | `www/` | docroot: hand-written HTML shells + build artifacts (mixed; don't delete wholesale) |
 | `tests/` | C unit tests (`smoke.c`) + tool dispatch (`tools_driver.c`) + end-to-end (`run_all.sh`) |
 | `docker/` | Two-stage Dockerfile (C rebuilt in-container) + compose (invest / hub services) |

@@ -197,7 +197,9 @@ query-demo-watch:
 # agent-httpd submodule 里(pnpm install + scripts/build-ssr.sh)。
 REACT_SSR_SERVER ?= agent-httpd/bin/react-ssr-server
 REACT_SSR_SOCK   ?= .data/react-ssr.sock
-REACT_SSR_DEPS   ?= agent-httpd/cgi-bin/react-ssr/node_modules/.bin/esbuild
+# React SSR 页面源码在 frontend/react-ssr/(lume 仓库内,可直接改 pages/*.tsx),
+# 由 scripts/build-react-ssr.sh 构建常驻后端与 hydration bundle。
+REACT_SSR_DEPS   ?= frontend/react-ssr/node_modules/.bin/esbuild
 
 # 杀掉常驻 node React SSR 后端(按完整命令行匹配),并清掉 stale socket。
 define KILL_REACT_SSR
@@ -206,12 +208,12 @@ define KILL_REACT_SSR
 endef
 
 $(REACT_SSR_DEPS):
-	@echo "==> pnpm install React SSR deps (agent-httpd/cgi-bin/react-ssr)"; \
-	cd agent-httpd/cgi-bin/react-ssr && pnpm install
+	@echo "==> pnpm install React SSR deps (frontend/react-ssr)"; \
+	cd frontend/react-ssr && pnpm install
 
 $(REACT_SSR_SERVER): $(REACT_SSR_DEPS)
-	@echo "==> building React SSR resident backend (esbuild)"; \
-	cd agent-httpd && sh scripts/build-ssr.sh && cp www/js/react-ssr.js ../www/js/ 2>/dev/null || true
+	@echo "==> building React SSR resident backend (frontend/react-ssr)"; \
+	sh scripts/build-react-ssr.sh
 
 # React SSR 内容页示例: examples/react-ssr.lume on :$(SSR_CONTENT_PORT)(默认 8085)。
 # 链路: 常驻 node 后端(React 组件经 react-dom/server renderToString)→

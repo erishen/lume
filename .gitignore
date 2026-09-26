@@ -21,6 +21,8 @@ tests/tools-bin-asan.dSYM/
 # 源码在 frontend/src/;make ui 用 esbuild/Tailwind 把 bundle 与 CSS 写进
 # ../www。pnpm-lock.yaml 入库以保证可复现(与 agent-httpd 同款约定)。
 frontend/node_modules/
+frontend/react-ssr/node_modules/
+frontend/react-ssr/tailwind.css
 # vscode 扩展的 vsix 包是 vsce package 产物,可重编,不入库。
 editor/lume-vscode/*.vsix
 # www/ 里只有两类文件:手写的 HTML 壳(www/*/index.html、chat.html …)入库,
