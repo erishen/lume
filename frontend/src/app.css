@@ -26,6 +26,8 @@
 @source "./hub/hub-discovery.tsx";
 @source "./sqlite-write/app.tsx";
 @source "./sqlite-write/dsl.tsx";
+@source "./abac/app.tsx";
+@source "./modules/app.tsx";
 @source "../../www/invest/index.html";
 @source "../../www/invest/chat.html";
 @source "../../www/invest/reports.html";
@@ -277,4 +279,82 @@
   .cat-schema { @apply m-0 break-all font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-sky-300; }
   .cat-chip { @apply mr-1.5 mb-1.5 inline-block rounded-full border border-line px-2.5 py-0.5 font-mono text-[12px] text-muted; }
   .chips { @apply m-0; }
+
+  /* ------------------------------------------------------------ abac demo
+   * ABAC 属性访问控制示例 UI (frontend/src/abac/app.tsx):决策测试器 +
+   * 主体/资源属性表 + 审计视图。深色 token 视觉与 invest/hub 一致。 */
+  .abac-page { @apply max-w-6xl px-5.5 pt-7 pb-24; }
+  .abac-hero h1 { @apply mb-1.5 mt-0 text-[38px] tracking-[0.5px] text-accent; }
+  .abac-hero p { @apply mb-0 mt-4 max-w-[72ch] text-[15px] leading-[1.6] text-muted; }
+  .abac-panel { @apply rounded-[16px] border border-line bg-panel/70 p-5.5; }
+  .abac-panel h2 { @apply mt-0 mb-4 text-[16px] font-bold tracking-[0.04em] text-ink; }
+  .abac-grid { @apply mt-5 grid gap-5; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+  .abac-label { @apply mb-1.5 block text-[11.5px] font-semibold tracking-[0.1em] text-muted uppercase; }
+  .abac-select {
+    @apply block cursor-pointer rounded-lg border border-line bg-bg px-3 py-2.5 text-[14px] text-ink
+      hover:border-accent/60 focus:border-accent focus:outline-none;
+  }
+  .abac-btn { @apply cursor-pointer rounded-full bg-accent px-5 py-2.5 text-[14px] font-bold text-accent-ink hover:brightness-110 disabled:opacity-50; }
+  .abac-btn-ghost { @apply cursor-pointer rounded-full border border-line bg-transparent px-4 py-2.5 text-[13px] font-semibold text-muted hover:border-accent hover:text-ink disabled:opacity-50; }
+  .abac-badge { @apply inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-bold; }
+  .abac-badge-permit { @apply border border-emerald-400/40 bg-emerald-400/10 text-emerald-300; }
+  .abac-badge-deny { @apply border border-rose-400/40 bg-rose-400/10 text-rose-300; }
+  .abac-trace { @apply m-0 mt-4 list-none space-y-1.5 rounded-xl border border-line bg-bg/50 p-4 font-mono text-[12.5px] text-muted; }
+  .abac-trace li { @apply pl-0.5; }
+  .abac-trace li::before { @apply mr-2 text-accent; content: "▸"; }
+  .abac-table { @apply w-full text-[13px] text-ink; }
+  .abac-table th { @apply border-b border-line px-2.5 py-2 text-left font-semibold text-muted; }
+  .abac-table td { @apply border-b border-line/60 px-2.5 py-2 align-top; }
+  .abac-table tr:last-child td { @apply border-b-0; }
+  .abac-code { @apply rounded-md border border-line bg-bg px-1.5 py-px font-mono text-[12px] text-accent; }
+  .abac-footnote { @apply mt-3.5 text-[12.5px] leading-[1.7] text-muted/80; }
+
+  /* ------------------------------------------------------------ modules demo
+   * 多文件 import/export 示例 UI (frontend/src/modules/app.tsx):税额计算器 +
+   * 模块导出清单。深色 token 视觉与 invest/abac 一致。 */
+  .modules-app { @apply max-w-6xl px-5.5 pt-7 pb-16; }
+  .modules-hero { @apply flex flex-wrap items-end justify-between gap-3; }
+  .modules-eyebrow { @apply mb-1.5 mt-0 text-[12px] font-semibold tracking-[0.18em] text-accent; }
+  .modules-title { @apply mb-1.5 mt-0 text-[38px] tracking-[0.5px] text-accent; }
+  .modules-sub { @apply mb-0 mt-3 max-w-[72ch] text-[15px] leading-[1.65] text-muted; }
+  .modules-sub code { @apply rounded-md border border-line bg-bg px-1.5 py-px font-mono text-[12.5px] text-accent; }
+  .modules-badge { @apply rounded-full border border-accent/40 bg-accent/10 px-3.5 py-1.5 text-[12.5px] font-bold text-accent; }
+  .modules-grid { @apply mt-6 grid gap-5; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+  .modules-panel { @apply rounded-[16px] border border-line bg-panel/70 p-5.5; }
+  .modules-h2 { @apply mt-0 mb-2 text-[16px] font-bold tracking-[0.04em] text-ink; }
+  .modules-h3 { @apply mt-5 mb-2 text-[13px] font-bold tracking-[0.06em] text-muted; }
+  .modules-hint { @apply mb-4 mt-0 text-[13px] leading-[1.65] text-muted; }
+  .modules-hint code { @apply rounded-md border border-line bg-bg px-1.5 py-px font-mono text-[12px] text-accent; }
+  .modules-form { @apply mt-2 space-y-4; }
+  .modules-label { @apply mb-1.5 block text-[11.5px] font-semibold tracking-[0.1em] text-muted uppercase; }
+  .modules-input {
+    @apply mt-1.5 block w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-[14px] text-ink
+      hover:border-accent/60 focus:border-accent focus:outline-none;
+  }
+  .modules-zones { @apply mt-1.5 flex flex-wrap gap-2; }
+  .modules-zone {
+    @apply cursor-pointer rounded-lg border border-line bg-bg px-4 py-2.5 text-left
+      hover:border-accent/60;
+  }
+  .modules-zone span { @apply block text-[14px] font-bold text-ink; }
+  .modules-zone small { @apply block text-[12px] text-muted; }
+  .modules-zone-active { @apply border-accent/70 bg-accent/10; }
+  .modules-zone-active span { @apply text-accent; }
+  .modules-err { @apply mt-3 text-[13px] font-semibold text-rose-300; }
+  .modules-result { @apply mt-5 space-y-2 rounded-xl border border-accent/30 bg-accent/5 p-4; }
+  .modules-result-row { @apply flex items-center justify-between text-[14px] text-muted; }
+  .modules-result-row b { @apply font-mono text-[15px] text-ink; }
+  .modules-result-total { @apply border-t border-accent/20 pt-2.5; }
+  .modules-result-total span { @apply font-bold text-ink; }
+  .modules-result-total b { @apply text-[20px] text-accent; }
+  .modules-result-note { @apply mt-2 text-[12.5px] text-muted/80; }
+  .modules-table { @apply w-full text-[13px] text-ink; }
+  .modules-table th { @apply border-b border-line px-2.5 py-2 text-left font-semibold text-muted; }
+  .modules-table td { @apply border-b border-line/60 px-2.5 py-2 align-top; }
+  .modules-table tr:last-child td { @apply border-b-0; }
+  .modules-kind { @apply rounded-md border border-accent/30 bg-accent/10 px-1.5 py-px font-mono text-[11.5px] text-accent; }
+  .modules-name { @apply rounded-md border border-line bg-bg px-1.5 py-px font-mono text-[12px] text-ink; }
+  .modules-name-private { @apply border-dashed text-muted; }
+  .modules-desc { @apply text-[13px] text-muted; }
+  .modules-foot { @apply mt-8 text-[12.5px] leading-[1.7] text-muted/80; }
 }

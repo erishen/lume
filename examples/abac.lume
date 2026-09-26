@@ -1,128 +1,73 @@
-// ABAC (Attribute-Based Access Control) demo — the mechanism shape of
-// spring-abac, expressed in the Lume DSL. No strategy engine, no SpEL:
-// the "policy" is plain Lume functions, and the framework's sandboxed
-// interpreter *is* the policy engine.
+// ABAC(Attribute-Based Access Control,属性访问控制)完整示例 —— 模块化拆分后的入口
 //
-//   (subject, resource, environment) --policy expression--> PERMIT / DENY
+// 策略引擎(属性源 / decide / 审计)已拆到 examples/abac/policy.lume 策略库,
+// 本文件只保留 HTTP 层:认证 + 路由 + 响应,handler 把请求翻译成
+// policy.decide(user, res, action) 调用。策略逻辑改动不再碰入口,反之亦然。
 //
-// Attributes:
-//   subject     req.user        Basic Auth username (htpasswd, server{})
-//               + attribute table below (stands in for a directory source)
-//   resource    ?doc=          doc id -> { clearance, department } table
-//   environment now()          wall clock: writes are denied outside 09-18
-//                              Beijing time ("no deletion after hours")
+//   账号(与 spring-abac README 一致)→ 主体属性(见 policy.lume)
+//   ─────
+//   admin  EXEC / clearance 5 / CN      carol  ENG / clearance 4 / US
+//   alice  ENG  / clearance 3 / CN      bob    SALES / clearance 2 / CN
 //
-// Deny-by-default: every unknown subject/resource and every rule miss
-// yields DENY — only an explicit permit lets a request through.
-//
-//   make abac                       # builds htpasswd + starts :8086
-//   curl -u admin:admin123 'http://localhost:8086/docs?doc=board'
-//   curl -u carol:carol123 'http://localhost:8086/docs?doc=roadmap'  # 403
-//   curl -u carol:carol123 -X POST 'http://localhost:8086/docs/delete?doc=roadmap'
-//                                   # 403 outside working hours
-//
-// Accounts (same as spring-abac's README demo table):
-//   admin  EXEC/5/CN   carol ENG/4/US   alice ENG/3/CN   bob SALES/2/CN
+//   运行
+//   ─────
+//   make abac     # 生成 .data/abac.htpasswd(4 个账号)并启动 :8086
+//   或手动:htpasswd -B -c .data/abac.htpasswd admin admin123(+carol/alice/bob)
+//   ./bin/lume examples/abac.lume
 
-// ---- subject attributes (who asks) ------------------------------------
-let subjects = {
-  admin: { department: "EXEC", clearance: 5, region: "CN", title: "admin" },
-  carol: { department: "ENG", clearance: 4, region: "US", title: "manager" },
-  alice: { department: "ENG", clearance: 3, region: "CN", title: "engineer" },
-  bob:   { department: "SALES", clearance: 2, region: "CN", title: "sales" },
-};
+import "abac/policy.lume" as policy;
 
-// ---- resource attributes (what is asked for) ---------------------------
-// clearance 4 = CONFIDENTIAL; 3 = INTERNAL; 2 = RESTRICTED; 5 = TOP.
-let docs = {
-  board:    { clearance: 5, department: "EXEC" },
-  roadmap:  { clearance: 4, department: "ENG" },
-  internal: { clearance: 3, department: "ENG" },
-  pipeline: { clearance: 2, department: "SALES" },
-};
+// ============ 路由(把策略接到真实请求上) ============
 
-type Decision = {
-  decision: string,   // "PERMIT" | "DENY"
-  reason: string,
-  subject: string,
-  resource: string,
-  method: string,
-};
-
-// ---- policy expression: attributes -> PERMIT/DENY ----------------------
-func decide(req): Decision {
-  let res = req.query_params.doc;
-  let subj = get(subjects, req.user, null);
-  if (subj == null) {
-    return { decision: "DENY", reason: "unknown or unauthenticated subject",
-             subject: req.user, resource: res, method: req.method };
-  }
-  let doc = get(docs, res, null);
-  if (doc == null) {
-    return { decision: "DENY", reason: "unknown resource",
-             subject: req.user, resource: res, method: req.method };
-  }
-  // clearance: subject must be at least as cleared as the resource
-  if (doc.clearance > subj.clearance) {
-    return { decision: "DENY",
-             reason: "clearance " + str(subj.clearance) + " < required "
-                     + str(doc.clearance),
-             subject: req.user, resource: res, method: req.method };
-  }
-  // department: own department, or EXEC crosses departments
-  if (doc.department != subj.department and subj.department != "EXEC") {
-    return { decision: "DENY",
-             reason: "department mismatch (" + doc.department
-                     + " not readable by " + subj.department + ")",
-             subject: req.user, resource: res, method: req.method };
-  }
-  // CONFIDENTIAL (clearance 4) additionally requires region CN
-  if (doc.clearance == 4 and subj.region != "CN") {
-    return { decision: "DENY",
-             reason: "CONFIDENTIAL cannot be read from outside CN (region "
-                     + subj.region + ")",
-             subject: req.user, resource: res, method: req.method };
-  }
-  // environment: writes denied outside Beijing 09:00-18:00
-  if (req.method != "GET") {
-    let hour = int((now() + 28800) % 86400 / 3600);   // UTC+8
-    if (hour < 9 or hour >= 18) {
-      return { decision: "DENY",
-               reason: "no writes after hours (Beijing hour=" + str(hour) + ")",
-               subject: req.user, resource: res, method: req.method };
-    }
-  }
-  return { decision: "PERMIT", reason: "attributes satisfy policy",
-           subject: req.user, resource: res, method: req.method };
-}
-
-// PERMIT -> 200 + decision JSON; DENY -> 403 + decision JSON
-func respond(d: Decision) {
+// 统一入口:任何受保护操作都先 policy.decide(),再按结果响应
+// PERMIT → 200 JSON(决策详情);DENY → 403 JSON
+func respond(d) {
+  policy.audit_write(d);                // 每次决策都留痕(策略库负责写审计)
   if (d.decision == "PERMIT") { return d; }
   return { status: 403, type: "application/json", body: stringify(d) };
 }
 
-// ---- routes ------------------------------------------------------------
-// read: resource picked via ?doc= (row-level, like document-service)
-get "/docs", (req) => { return respond(decide(req)); };
-
-// write: delete is the "deletion" the after-hours rule guards
-post "/docs/delete", (req) => { return respond(decide(req)); };
-
-// plain intro page with curl examples
-get "/", (req) => {
-  return "<h1>ABAC demo</h1>"
-       + "<p>Read: <code>curl -u USER:PASS 'http://localhost:8086/docs?doc=ID'</code></p>"
-       + "<p>Delete: <code>curl -u USER:PASS -X POST "
-       + "'http://localhost:8086/docs/delete?doc=ID'</code></p>"
-       + "<p>Accounts: admin/admin123 carol/carol123 alice/alice123 bob/bob123.</p>"
-       + "<p>Docs: board(TOP/EXEC) roadmap(CONF/ENG) internal(INT/ENG) "
-       + "pipeline(RESTR/SALES).</p>";
+// 读取文档:GET /docs?doc=<id>
+get "/docs", (req) => {
+  return respond(policy.decide(req.user, req.query_params.doc, "read"));
 };
 
+// 删除文档:POST /docs/delete?doc=<id>(管理动作,受工作时间约束)
+post "/docs/delete", (req) => {
+  return respond(policy.decide(req.user, req.query_params.doc, "delete"));
+};
+
+// 审批文档:POST /docs/approve?doc=<id>(仅 EXEC,受工作时间约束)
+post "/docs/approve", (req) => {
+  return respond(policy.decide(req.user, req.query_params.doc, "approve"));
+};
+
+// 调试端点:显式指定 user/res/action,展示策略推理过程("具体怎么做")
+//   curl -u admin:admin123 'http://localhost:8086/decide?user=carol&res=roadmap&action=read'
+get "/decide", (req) => {
+  let u = req.query_params.user;
+  let r = req.query_params.res;
+  let a = get(req.query_params, "action", "read");
+  let d = policy.decide(u, r, a);
+  policy.audit_write({ debug: true, user: u, resource: r, action: a,
+                       decision: d.decision, reason: d.reason });
+  return { input: { user: u, resource: r, action: a },
+           result: d, hint: "trace 为策略引擎逐步推理记录" };
+};
+
+// 审计查看:GET /audit(认证即可,demo 简化;生产应加角色限制)
+get "/audit", (req) => {
+  return { lines: policy.audit_read_all() };
+};
+
+// 首页由 React 前端提供:server{} 的 views="abac" 把 / 映射到
+// www/abac/index.html(frontend/src/abac/app.tsx 构建出的 React 单页),
+// 页面通过 /decide 与 /audit 两个 JSON API 驱动决策测试与审计展示。
 server {
   port = 8086;
   workers = 4;
+  docroot = "./www";     // 静态资源:www/abac/app.js、www/app.css
+  views = "abac";        // 页面壳:www/abac/index.html(/ -> index.html)
   htpasswd = "./.data/abac.htpasswd";   // make abac 生成(4 个 demo 账号)
   auth_realm = "abac-demo";
 }

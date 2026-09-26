@@ -37,50 +37,15 @@ server {
 // mutable server-side state, shared by every handler in this process
 let app_state = { count: 0, hits: 0, started: now() };
 
-// ------------------------------------------------ server-side components
-// Note: components are deliberately untyped (loose) — a vnode tree is a
-// dynamic structure, and render() knows how to walk it.
-func cls(active: string, name: string): string {
-  let c: string = "nav";
-  if (active == name) { c = c + " active"; }
-  return c;
-}
+// ------------------------------------------------ SSR 页面组件(库)
+// 页面组件(cls/nav/card/page)已拆到 examples/demo/ui.lume —— 纯函数组件库,
+// 与服务器状态解耦;这里 import 后以 ui.xxx 调用,类比前端 import React 组件。
+import "demo/ui.lume" as ui;
 
-func nav(active) {
-  return el("nav", {},
-    el("a", { class: cls(active, "home"), href: "/" }, "Home"),
-    el("a", { class: cls(active, "counter"), href: "/counter" }, "Counter"),
-    el("a", { class: cls(active, "chat"), href: "/chat" }, "Agent"),
-    el("a", { class: cls(active, "hello"), href: "/hello" }, "API"));
-}
 
-func card(icon, title, body, color) {
-  return el("div", { class: "card" },
-    el("span", { class: "dot", style: "background:" + color }),
-    el("h3", {}, icon + " " + title),
-    el("p", {}, body));
-}
-
-// template-string shell: {0}=title {4}=body slots, scalar (title) escaped,
-// vnode slots (nav, body list) rendered structurally
-func page(title, page_id, body) {
-  return html("<!doctype html><html><head>"
-    + "<meta charset='utf-8'>"
-    + "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-    + "<title>{0} · Lume</title>"
-    + "<link rel='stylesheet' href='/app.css'>"
-    + "<script type='module' src='/invest/app.js'></script></head>"
-    + "<body data-page='{1}'>"
-    + "<a class='skip' href='#top'>skip to content</a>"
-    + "{2}"
-    + "<main id='top'>{3}</main>"
-    + "<footer>{4}</footer>"
-    + "</body></html>",
-    title, page_id, nav(page_id), body, "Lume · strongly-typed C DSL on agent-httpd");
-}
 
 func home_page(req) {
-  return page("Home", "home", [
+  return ui.page("Home", "home", [
     el("section", { class: "hero" },
       el("h1", {}, "Lume."),
       el("p", {}, "Write the server in a strongly typed DSL. The page wakes "
@@ -91,9 +56,9 @@ func home_page(req) {
         + "};")),
       el("a", { class: "btn", href: "/counter" }, "Try the counter →")),
     el("section", { class: "grid" },
-      card("1", "Typed", "int, float, string, bool, Result — checked at compile time.", "#38bdf8"),
-      card("2", "Handlers", "route and tool register closures; '?' propagates {err}.", "#a3e635"),
-      card("3", "JSON", "json(), stringify(), get() cross the C boundary.", "#f472b6")),
+      ui.card("1", "Typed", "int, float, string, bool, Result — checked at compile time.", "#38bdf8"),
+      ui.card("2", "Handlers", "route and tool register closures; '?' propagates {err}.", "#a3e635"),
+      ui.card("3", "JSON", "json(), stringify(), get() cross the C boundary.", "#f472b6")),
     el("section", { class: "clock" },
       el("span", { id: "clock" }, "--:--:--"),
       el("small", {}, "client-side tick — no server round-trip")),
@@ -101,7 +66,7 @@ func home_page(req) {
 }
 
 func counter_page(req) {
-  return page("Counter", "counter", [
+  return ui.page("Counter", "counter", [
     html("<section class='hero'>"
       + "<h1>Server state</h1>"
       + "<p>The count lives in a global map on the master VM. All stateful "
@@ -139,7 +104,7 @@ route "GET", "/counter", counter_page;
 // and a mount point for the React client. Configure a real model in .env:
 //   cp .env.example .env   # set LLM_API_URL / LLM_MODEL / LLM_API_KEY
 func chat_page(req) {
-  return page("Agent", "chat", [
+  return ui.page("Agent", "chat", [
     html("<section class='hero'>"
       + "<h1>Agent</h1>"
       + "<p>Talk to the embedded agent. It answers over the server's native "
