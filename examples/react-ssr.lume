@@ -1,27 +1,25 @@
-// React SSR 内容页 demo —— 等价于 agent-httpd 预设页(www/react/home.html +
-// /cgi-bin/react-ssr.cgi)的展示方式,渲染发生在 node 的 React 生态里,不是
-// Lume 引擎自己的 vdom SSR。
+// React SSR 内容页 demo —— lume 直接对接常驻的 node React SSR 后端(无 CGI)。
 //
-// 渲染链路:
-//   GET /react                 -> docroot 静态降级页 www/react/home.html
-//                                  (无 JS 也可读完整正文;页面含 GET 表单)
-//   GET /cgi-bin/react-ssr.cgi?name=Ada&message=...&mode=ssr
-//                               -> node CGI 程序 www/cgi-bin/react-ssr.cgi:
-//                                  React 组件经 react-dom/server renderToString
-//                                  在服务端渲染成完整 HTML 再返回(真正意义的
-//                                  React SSR;表单即 GET 提交到此)
-//   GET /js/home.js            -> docroot 静态 bundle(客户端 hydration)
+//   server { react_socket = "...sock" }  → 内嵌 agent-httpd 把 /react/*
+//                                          FastCGI relay 到该 UNIX socket
+//   node bin/react-ssr-server <sock>     → 常驻 node 进程:React 组件经
+//                                          react-dom/server renderToString
+//                                          渲染成完整 HTML(不 fork 进程)
 //
-// cgi_bin 指向 www/cgi-bin 后,/cgi-bin/* 由内嵌的 agent-httpd 引擎自动调度
-// (fork + exec node),Lume 侧无需做任何转发。react-ssr.cgi 是 esbuild 打包的
-// 单文件 node 程序(内嵌 react/react-dom/server,无 node_modules 依赖)。
+// 链路:
+//   GET /react                → FastCGI relay → node React SSR(完整 HTML,
+//                                react-router StaticRouter 多页: /react/about
+//                                /react/counter /react/chat 都渲染)
+//   无后端时                   → 降级伺服 docroot 静态页 www/react/home.html
+//   GET /js/react-ssr.js      → docroot 静态 bundle(客户端 hydration)
+//
+// 依赖: node + react-ssr 构建链(pnpm install + agent-httpd scripts/build-ssr.sh
+// → agent-httpd/bin/react-ssr-server)。make react-ssr 会自动构建并先后端后
+// 前端启动;直接手动跑:先起后端,再起本文件。
 server {
   host = "127.0.0.1";
   port = 8085;
   docroot = "./www";
-  cgi_bin = "./www/cgi-bin";   // /cgi-bin/* 交给 CGI 引擎(node React SSR)
+  react_socket = "./.data/react-ssr.sock";   // 常驻 node React SSR 后端
 }
-route "GET", "/react", func (req) {
-  return { status: 200, type: "text/html", body: read_file("./www/react/home.html") };
-};
 run();

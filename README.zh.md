@@ -213,3 +213,5 @@ DataPulse 风格的自然语言转 SQL:只要 `SQLITE_DB` 有值,服务器就 in
 放行后也可用 `sql_write`),Agent 用真实结果作答——没有 Python、没有 MCP
 stdio 进程、没有 Node sidecar、没有第二次 LLM 调用。
 
+## 相关文章
+- [Lume：C11 单二进制的 Agent DSL 服务器](https://erishen.cn/lume/)

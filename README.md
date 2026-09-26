@@ -50,7 +50,7 @@ make dev          # demo, full example            → http://localhost:8081
 make dev-minimal  # hello, minimal intro          → http://localhost:8082
 make invest       # invest, portfolio assistant   → http://localhost:8082
 make hub          # hub, gateway capability hub   → http://localhost:8083
-make react-ssr   # React SSR content page (node CGI) → http://localhost:8085
+make react-ssr   # React SSR via resident node backend → http://localhost:8085
 
 make test         # full suite: C unit + tool dispatch + real HTTP/SSE + GC stress
 make check        # type-check only, no server
@@ -271,3 +271,5 @@ executes it read-only in-process (or `sql_write` when explicitly whitelisted),
 and the agent answers from the real result — no Python, no MCP stdio process,
 no Node sidecar, no second LLM call.
 
+## Related Articles
+- [Lume: An Agent DSL Server in a Single C11 Binary](https://erishen.cn/lume-en/)

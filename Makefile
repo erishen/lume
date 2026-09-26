@@ -191,21 +191,53 @@ query-demo-watch:
 	@echo "==> lume --watch examples/query-demo.lume on :$(QUERY_DEMO_PORT) (URL query params demo)"; \
 	./$(TARGET) --watch examples/query-demo.lume
 
+# --- React SSR 常驻后端(node bin/react-ssr-server,经 FastCGI relay) ---
+# server{} 的 react_socket 指向 $(REACT_SSR_SOCK),内嵌 agent-httpd 把
+# /react/* FastCGI relay 过去;node 进程常驻,无 CGI fork。构建链在
+# agent-httpd submodule 里(pnpm install + scripts/build-ssr.sh)。
+REACT_SSR_SERVER ?= agent-httpd/bin/react-ssr-server
+REACT_SSR_SOCK   ?= .data/react-ssr.sock
+REACT_SSR_DEPS   ?= agent-httpd/cgi-bin/react-ssr/node_modules/.bin/esbuild
+
+# 杀掉常驻 node React SSR 后端(按完整命令行匹配),并清掉 stale socket。
+define KILL_REACT_SSR
+	@pgrep -f '$(REACT_SSR_SERVER) $(REACT_SSR_SOCK)' 2>/dev/null | xargs kill -9 2>/dev/null || true; \
+	rm -f $(REACT_SSR_SOCK)
+endef
+
+$(REACT_SSR_DEPS):
+	@echo "==> pnpm install React SSR deps (agent-httpd/cgi-bin/react-ssr)"; \
+	cd agent-httpd/cgi-bin/react-ssr && pnpm install
+
+$(REACT_SSR_SERVER): $(REACT_SSR_DEPS)
+	@echo "==> building React SSR resident backend (esbuild)"; \
+	cd agent-httpd && sh scripts/build-ssr.sh && cp www/js/react-ssr.js ../www/js/ 2>/dev/null || true
+
 # React SSR 内容页示例: examples/react-ssr.lume on :$(SSR_CONTENT_PORT)(默认 8085)。
-# 等价于 agent-httpd 预设页(www/react/home.html + /cgi-bin/react-ssr.cgi):
-# /react 伺服静态降级页,表单提交到 node CGI —— React 组件经 react-dom/server
-# renderToString 在服务端渲染成完整 HTML(真正的 React SSR,渲染在 node 生态)。
-#   make react-ssr             # 构建 + 检查 + 清端口 + 前台启动(Ctrl-C 停)
-#   make react-ssr-watch       # 热更新:改 examples/react-ssr.lume 自动重起
+# 链路: 常驻 node 后端(React 组件经 react-dom/server renderToString)→
+# server{} 的 react_socket → /react/* FastCGI relay;无后端时降级伺服
+# www/react/home.html。等价于 agent-httpd 预设页(www/react/*.html + -R)。
+#   make react-ssr             # 构建后端 + 检查 + 起后端 + 前台启动(Ctrl-C 停)
+#   make react-ssr-watch       # 同前,lume 用 --watch 热更新
 SSR_CONTENT_PORT ?= 8085
-react-ssr: all check
+react-ssr: all check $(REACT_SSR_SERVER)
+	$(call KILL_REACT_SSR)
 	$(call KILL_SERVER,$(SSR_CONTENT_PORT),[r]eact-ssr.lume)
-	@echo "==> lume examples/react-ssr.lume on :$(SSR_CONTENT_PORT) (React SSR content page demo)"; \
+	@echo "==> starting node React SSR backend: $(REACT_SSR_SERVER) $(REACT_SSR_SOCK)"; \
+	mkdir -p .data; \
+	$(REACT_SSR_SERVER) $(REACT_SSR_SOCK) >/tmp/lume-react-ssr.log 2>&1 & \
+	sleep 1; \
+	@echo "==> lume examples/react-ssr.lume on :$(SSR_CONTENT_PORT) (React SSR via FastCGI relay)"; \
 	./$(TARGET) examples/react-ssr.lume
 
-react-ssr-watch:
+react-ssr-watch: all check $(REACT_SSR_SERVER)
+	$(call KILL_REACT_SSR)
 	$(call KILL_SERVER,$(SSR_CONTENT_PORT),[r]eact-ssr.lume)
-	@echo "==> lume --watch examples/react-ssr.lume on :$(SSR_CONTENT_PORT) (React SSR content page demo)"; \
+	@echo "==> starting node React SSR backend: $(REACT_SSR_SERVER) $(REACT_SSR_SOCK)"; \
+	mkdir -p .data; \
+	$(REACT_SSR_SERVER) $(REACT_SSR_SOCK) >/tmp/lume-react-ssr.log 2>&1 & \
+	sleep 1; \
+	@echo "==> lume --watch examples/react-ssr.lume on :$(SSR_CONTENT_PORT) (React SSR via FastCGI relay)"; \
 	./$(TARGET) --watch examples/react-ssr.lume
 
 # tsm-hub 网关能力示例: examples/hub.lume on :$(HUB_PORT)(默认 8083,

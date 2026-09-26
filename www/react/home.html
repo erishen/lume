@@ -111,17 +111,18 @@
     <p class="kicker">Server-side React</p>
     <h1>React SSR 内容页</h1>
     <p>React 组件经 <b>react-dom/server</b> 在服务端渲染成完整 HTML——这一页的
-      正文在初始响应里就齐全。表单提交走真实的 CGI 渲染器
-      (<code>/cgi-bin/react-ssr.cgi</code>),由 lume 内嵌的 agent-httpd 引擎调度。</p>
+      正文在初始响应里就齐全。表单提交由常驻的 node 后端
+      (<code>bin/react-ssr-server</code>)经 FastCGI relay 渲染,由 lume
+      内嵌的 agent-httpd 引擎调度。</p>
   </section>
 
   <section class="card">
     <span id="mode-pill" class="pill">SSR</span>
     <h2>Rendered on the server</h2>
-    <p>lume 把 <code>server</code> 块里的 <code>cgi_bin</code> 指向
-      <code>www/cgi-bin</code>,<code>/cgi-bin/react-ssr.cgi</code> 于是作为
-      node 程序被调度:React 组件树用 <code>react-dom/server</code> +
-      <code>StaticRouter</code> 渲染成 HTML,再由 <code>home.js</code>
+    <p>lume 的 <code>server</code> 块把 <code>react_socket</code> 指向常驻
+      node 后端(<code>bin/react-ssr-server</code>),<code>/react/*</code> 经
+      FastCGI relay 过去:React 组件树用 <code>react-dom/server</code> +
+      <code>StaticRouter</code> 渲染成 HTML,再由 <code>react-ssr.js</code>
       hydration。<span id="method-note">GET</span> 参数回显如下。</p>
     <table>
       <tbody>
@@ -145,10 +146,10 @@
 
   <section class="card">
     <h3>Try it</h3>
-    提交表单(<code>GET</code>)到 <code>/cgi-bin/react-ssr.cgi</code>,
-      服务端用你的参数重新渲染同一页面——这就是 agent-httpd 预设页
-      (<code>www/react/home.html</code> + CGI)等价物在 lume 里的样子。
-    <form method="get" action="/cgi-bin/react-ssr.cgi">
+    提交表单(<code>GET</code>)到 <code>/react</code> 自身(带参数),常驻后端用
+      你的参数重新渲染同一页面——agent-httpd 预设页
+      (<code>www/react/home.html</code>)等价物在 lume 里的样子。
+    <form method="get" action="/react">
       <label for="f-name">Name
         <input id="f-name" type="text" name="name" placeholder="Alice">
       </label>
@@ -159,9 +160,9 @@
     </form>
   </section>
 
-  <p class="foot">静态降级页 &middot; 完整链路: <code>/react</code> 伺服本页,
-      <a href="/cgi-bin/react-ssr.cgi">react-ssr.cgi</a> 做真正的 React SSR
-      (node CGI) &middot; 端口 :8085(<code>make react-ssr</code>)。</p>
+  <p class="foot">静态降级页 &middot; 有后端时 <code>/react</code> 由常驻的
+      node React SSR 进程(<code>bin/react-ssr-server</code>)经 FastCGI relay
+      渲染,本页只在后端未启动时伺服 &middot; :8085(<code>make react-ssr</code>)。</p>
 </div>
 <script src="/js/home.js" defer></script>
 </body>

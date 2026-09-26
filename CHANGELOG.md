@@ -14,13 +14,16 @@ All notable changes to Lume are documented here. The format follows
   to space).
 
 - `examples/react-ssr.lume` (:8085, `make react-ssr`): a React SSR content
-  page equivalent to agent-httpd's preset fallback pages
-  (`www/react/home.html` + `/cgi-bin/react-ssr.cgi`). `/react` serves the
-  static shell; the GET form posts to the node CGI, where React components
-  are rendered by `react-dom/server` `renderToString` — true React SSR, not
-  the Lume engine's own vdom render. The `server` block now wires
-  `cgi_bin` (`./www/cgi-bin`) and `www/cgi-bin/react-ssr.cgi` is the
-  bundled CGI (esbuild, self-contained, no node_modules).
+  page driven by a resident node backend — the `server` block sets
+  `react_socket` (`./.data/react-ssr.sock`) and the embedded agent-httpd
+  FastCGI-relays `/react/*` to `bin/react-ssr-server` (built from
+  agent-httpd's `cgi-bin/react-ssr` TSX by `pnpm install` +
+  `scripts/build-ssr.sh`; `make react-ssr` builds, starts the backend, then
+  runs lume). React components render with `react-dom/server`
+  `renderToString` + `StaticRouter` — `/react`, `/react/about`,
+  `/react/counter` all server-render; query strings (`?name=Ada&message=hi`)
+  are relayed and echoed. No CGI fork, no Lume vdom. Without the backend,
+  `/react` degrades to the static `www/react/home.html` shell.
 
 ### Fixed
 
