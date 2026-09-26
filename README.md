@@ -86,6 +86,16 @@ cd ~/.local/share/lume && ~/.local/bin/lume examples/sqlite-write.lume
 # then open http://127.0.0.1:8084/chat (or /dsl)
 ```
 
+The React SSR demo (`examples/react-ssr.lume`, :8085) is also bundled:
+`bin/react-ssr-server` (a resident node backend, in the tarball since
+v0.3.0) plus the hydration bundle under `www/js/`. It needs `node`:
+
+```bash
+cd ~/.local/share/lume && node bin/react-ssr-server .data/react-ssr.sock &
+~/.local/bin/lume examples/react-ssr.lume
+# then open http://127.0.0.1:8085/react
+```
+
 Overrides:
 
 - `LUME_VERSION=v0.1.0` — pin a specific release instead of `latest`

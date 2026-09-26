@@ -65,6 +65,17 @@ jobs:
       - name: Build frontend bundle
         run: make ui
 
+      # The React SSR demo needs its resident node backend and hydration
+      # bundle in the tarball, otherwise a released lume serves /react from
+      # the static fallback only. Sources live in frontend/react-ssr/ (built
+      # by scripts/build-react-ssr.sh -> agent-httpd/bin/react-ssr-server +
+      # www/js/react-ssr.js). Platform-independent JS, so one build serves
+      # all four tarballs.
+      - name: Build React SSR backend
+        run: |
+          cd frontend/react-ssr && pnpm install --frozen-lockfile
+          sh scripts/build-react-ssr.sh
+
       - name: Smoke-check all examples
         run: make check
 
@@ -80,6 +91,7 @@ jobs:
         run: |
           mkdir -p "dist/${{ matrix.asset }}/bin"
           cp bin/lume "dist/${{ matrix.asset }}/bin/"
+          cp agent-httpd/bin/react-ssr-server "dist/${{ matrix.asset }}/bin/"
           cp -r www examples docs README.md README.zh.md CHANGELOG.md install.sh "dist/${{ matrix.asset }}/"
           cd dist
           tar -czf "${{ matrix.asset }}.tar.gz" "${{ matrix.asset }}"
@@ -100,8 +112,12 @@ jobs:
           make -C agent-httpd CC="clang -target x86_64-apple-darwin" bin/libagenthttpd.a
           make CC="clang -target x86_64-apple-darwin" bin/lume
           file bin/lume
+          # agent-httpd clean wiped its bin/: rebuild the resident backend
+          # (node bundle, arch-independent) before staging.
+          sh scripts/build-react-ssr.sh >/dev/null
           mkdir -p "dist/lume-darwin-x64/bin"
           cp bin/lume "dist/lume-darwin-x64/bin/"
+          cp agent-httpd/bin/react-ssr-server "dist/lume-darwin-x64/bin/"
           cp -r www examples docs README.md README.zh.md CHANGELOG.md install.sh "dist/lume-darwin-x64/"
           cd dist
           tar -czf lume-darwin-x64.tar.gz lume-darwin-x64
