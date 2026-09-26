@@ -233,6 +233,38 @@ struct（`tool_param_struct`，把 `int`/`float`/`string`/`bool` 关键字或字
 6. `tests/smoke.c` 补一条 `check(...)`（正常路径）和必要时 `reject(...)`
    （类型错误路径）。
 
+### 加一种新语句/关键字
+1. `lume.h`：加 `TokenType` 枚举项；token.c 好 `TOKEN_NAMES` 的对应名字。
+2. `lexer.c`：`KEYWORDS[]` 或标点分支。
+3. `parser.c`：`parse_statement` 分支生成新 `NodeType`；`lume.h` 扩 AST union；
+   `node_print` 加调试输出。
+4. `typecheck.c`：`ck_stmt`/`ck_expr` 处理新节点（编译期强类型就在这保证）。
+5. `interp.c`：`exec_statement`/`eval_expr` 给运行时语义。
+6. `tests/smoke.c` 补一条 `check(...)`（正常路径）和必要时 `reject(...)`
+   （类型错误路径）。
+
+### 多文件模块（import / export）约定
+- **语法层**：`import "路径" as ns` 与 `export` 前缀在 `parser.c
+  parse_statement` 顶部；`Node.is_export` + `N_IMPORT`（`as.imp.path` 保留
+  **带引号原始串**，loader 负责解转义）。
+- **加载链在 `loader.c`**（`make` 的 SRCS 里有它）：`loader_run` 是 `main.c`
+  唯一入口——解析、类型检查、执行都从这里走；`--check` 与执行共用同一条链
+  （递归检查依赖但**不执行**）。
+- **作用域模型**：每个模块一个 `Module`（`lume.h`）：独立顶层 `Env` +
+  `exports` 导出表；`N_IMPORT` 在运行时把 `ns` 绑定成导出表对象
+  （`OBJ_ENV`），成员读取走 `interp.c` 的 `OBJ_ENV` 分支；类型检查侧
+  `scope_put_ns/scope_get_ns` + `export_add` 写回 `export_types`。
+- **GC 约定**：模块 `env/exports` 要挂进 `vm->active_envs` 链（loader.c
+  `exec_module`），否则下一个模块执行触发 GC 时会被回收——这是进程级
+  root，模块生命周期 = 进程。
+- **入口模块**：`env = vm->globals`（内建与 `route/tool` 注册都靠它）；
+  依赖模块 `env` 的 parent 指向入口 globals，保证内建可见。
+- **循环检测**：`load_stack`（当前加载路径栈）+ `Module.loading`，报
+  `circular import`。**缓存**：`Module.executed` 保证菱形依赖里被共享的
+  库顶层只执行一次。
+- **测试**：`tests/smoke.c` 的 `check_modules()`（多文件 helper，写临时目录
+  后走 `loader_run`）；`examples/modules/` 是可运行示例，已进 `make check`。
+
 ### 加一个新内置类型（如 date）
 - `lume.h TypeKind` / `typecheck.c` 的 `ck_expr` literal 与 `type_compat`、
   `ty_str/tp_inner` 都要同步加分支。

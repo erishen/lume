@@ -310,6 +310,20 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
                     vm_push(vm, val_int(o->as.list.count));
                     return;
                 }
+                if (o->type == OBJ_ENV) {
+                    /* `import "x" as ns` — read a module export */
+                    Env *e = (Env *)o;
+                    int found = 0;
+                    Value v = env_get(e, n->as.member.name, &found);
+                    if (!found) {
+                        vm_set_error(vm, "line %zu: module has no export '%s'",
+                                     n->line, n->as.member.name);
+                        return;
+                    }
+                    vm_pop(vm);
+                    vm_push(vm, v);
+                    return;
+                }
             }
             vm_set_error(vm, "line %zu: cannot read field '%s' on this value",
                          n->line, n->as.member.name);
@@ -467,6 +481,8 @@ static void exec_statement(VM *vm, Node *n, Env *env) {
             if (vm->error) return;
             Value v = vm_pop(vm);
             env_set(vm, env, n->as.let.name, v);
+            if (n->is_export && vm->export_env)
+                env_set(vm, vm->export_env, n->as.let.name, v);
             return;
         }
         case N_IF: {
@@ -578,6 +594,8 @@ static void exec_statement(VM *vm, Node *n, Env *env) {
             Value f = make_func(vm, n->as.func.name, n->as.func.names,
                                 n->as.func.arity, n->as.func.body, env);
             env_set(vm, env, n->as.func.name, f);
+            if (n->is_export && vm->export_env)
+                env_set(vm, vm->export_env, n->as.func.name, f);
             return;
         }
         case N_TYPE_DECL:
@@ -737,6 +755,19 @@ static void exec_statement(VM *vm, Node *n, Env *env) {
                 vm_set_error(vm, "failed to register tool '%s'", n->as.tool.name);
             return;
         }
+        case N_IMPORT: {
+            /* `import "x.lume" as ns;` — the loader has already executed this
+             * module's dependencies and rewritten the path to the canonical
+             * form; bind ns to the dependency's export table. */
+            Module *m = loader_find(vm, n->as.imp.path);
+            if (!m || !m->exports) {
+                vm_set_error(vm, "line %zu: module '%s' not loaded",
+                             n->line, n->as.imp.path);
+                return;
+            }
+            env_set(vm, env, n->as.imp.ns, val_obj((Obj *)m->exports));
+            return;
+        }
         default:
             vm_set_error(vm, "line %zu: internal error (stmt node %d)", n->line, (int)n->type);
             return;
@@ -837,4 +868,20 @@ void exec_program(VM *vm, Node *prog) {
     }
     for (int i = 0; i < prog->as.program.count && !vm->error; i++)
         exec_statement(vm, prog->as.program.stmts[i], vm->globals);
+}
+
+/* Execute one module's top level (loader.c calls this in dependency order,
+ * exactly once per module). The module's own Env is temporarily the globals
+ * (route/tool/server registrations and builtins all key off vm->globals), and
+ * exported bindings also land in the module's export table. Restores the
+ * caller's globals afterwards; the entry module's env stays as vm->globals. */
+void exec_module_top(VM *vm, Module *m) {
+    Env *saved_globals = vm->globals;
+    Env *saved_exports = vm->export_env;
+    vm->globals = m->env;
+    vm->export_env = m->exports;
+    for (int i = 0; i < m->prog->as.program.count && !vm->error; i++)
+        exec_statement(vm, m->prog->as.program.stmts[i], m->env);
+    vm->export_env = saved_exports;
+    vm->globals = saved_globals;
 }

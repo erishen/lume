@@ -257,7 +257,16 @@ static void result_to_response(VM *vm, Value result, HttpResponse *res) {
     res->status_code = status;
     snprintf(res->status_text, sizeof(res->status_text), "%s",
              status_text_for(status));
-    if (mime) snprintf(res->content_type, sizeof(res->content_type), "%s", mime);
+    /* DSL 返回的 HTML 必须显式带 UTF-8 声明:浏览器在 Content-Type 无
+     * charset 时会按本机区域猜编码,中文页面会乱码。静态文件与 FastCGI
+     * 响应不经这里(各自携带 charset/meta),只有 handler 直出的
+     * text/html 会被补上 "; charset=utf-8"(显式已带 charset 则不动)。 */
+    if (mime && strncmp(mime, "text/html", 9) == 0 && !strstr(mime, "charset")) {
+        snprintf(res->content_type, sizeof(res->content_type),
+                 "%s; charset=utf-8", mime);
+    } else if (mime) {
+        snprintf(res->content_type, sizeof(res->content_type), "%s", mime);
+    }
     free(owned_body);
     return;
 

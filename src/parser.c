@@ -235,6 +235,50 @@ static Node *parse_route_tail(Parser *p, Node *n) {
 static Node *parse_statement(Parser *p) {
     Token t = peek(p);
 
+    if (t.type == TOK_EXPORT) {
+        /* `export let|func|type …` — parse the underlying declaration and
+         * mark it; the checker/interp publish it into the module's export
+         * table. (importers bind `import "x" as ns` to that table.) */
+        advance(p);
+        TokenType kt = peek(p).type;
+        if (kt != TOK_LET && kt != TOK_FUNC && kt != TOK_TYPE) {
+            perror_at(p, peek(p).line,
+                      "expected 'let', 'func' or 'type' after 'export'", NULL);
+            return NULL;
+        }
+        Node *n = parse_statement(p);
+        if (n) n->is_export = true;
+        return n;
+    }
+    if (t.type == TOK_IMPORT) {
+        /* import "path/to/lib.lume" as ns;  — top-level only (the loader
+         * rejects imports nested anywhere else). */
+        advance(p);
+        if (!check(p, TOK_STRING)) {
+            perror_at(p, peek(p).line,
+                      "expected a path string after 'import'", NULL);
+            return NULL;
+        }
+        Token path = peek(p);
+        advance(p);
+        if (!expect(p, TOK_AS)) return NULL;
+        if (!check(p, TOK_IDENT)) {
+            perror_at(p, peek(p).line,
+                      "expected a namespace name after 'as'", NULL);
+            return NULL;
+        }
+        Token ns = peek(p);
+        advance(p);
+        if (!expect(p, TOK_SEMI)) return NULL;
+        Node *n = nalloc(N_IMPORT, t.line);
+        /* keep the raw quoted path (like N_LITERAL strings); the loader
+         * unescapes it and resolves it against this file's directory */
+        n->as.imp.path = malloc((size_t)path.length + 1);
+        memcpy(n->as.imp.path, path.start, (size_t)path.length);
+        n->as.imp.path[path.length] = '\0';
+        n->as.imp.ns = ident_name(p, ns);
+        return n;
+    }
     if (t.type == TOK_LBRACE) {
         return parse_block(p);
     }
@@ -1059,6 +1103,12 @@ void node_print(Node *n, int depth) {
             if (n->as.func.ret) { printf(": "); type_print(n->as.func.ret); }
             printf("\n");
             node_print(n->as.func.body, depth + 1);
+            break;
+        case N_IMPORT:
+            indent_print(depth);
+            printf("import \"%.*s\" as %s%s\n",
+                   (int)strlen(n->as.imp.path), n->as.imp.path,
+                   n->as.imp.ns, n->is_export ? " (export)" : "");
             break;
         default:
             indent_print(depth); printf("node(type=%d)\n", (int)n->type);

@@ -81,21 +81,15 @@ static void watch_signal(int sig) {
     }
 }
 
-/* parse + type check without running; err[] gets the first failure. */
+/* parse + type check without running; err[] gets the first failure. Goes
+ * through the module loader so scripts with `import` validate correctly
+ * (dependencies type-checked, cycle detection active). Memory allocated per
+ * validation is intentionally not freed: dev tool, one reload = one tree. */
 static bool watch_validate(const char *script, char *err, size_t errsz) {
-    size_t len = 0;
-    char *source = read_file(script, &len);
-    if (!source) {
-        snprintf(err, errsz, "cannot read %s", script);
-        return false;
-    }
-    Node *prog = parse_program(source, err, errsz);
-    if (!prog) { free(source); return false; }
-    bool ok = type_check_program(prog, err, errsz);
-    /* AST leak per validation is intentional: dev tool, parser has no
-     * node_free and one reload = one program tree. */
-    free(source);
-    return ok;
+    VM vm;
+    vm_init(&vm);
+    bridge_init(&vm);
+    return loader_run(&vm, script, true, err, errsz) == 0;
 }
 
 static void file_sig(const char *path, struct timespec *mtime, long long *size) {
@@ -317,37 +311,23 @@ int main(int argc, char **argv) {
 
     if (do_watch) return run_watch(argv[0], script);
 
-    size_t len = 0;
-    char *source = read_file(script, &len);
-    if (!source) {
-        fprintf(stderr, "lume: cannot read %s\n", script);
-        return 1;
-    }
-
-    char err[512] = {0};
-    Node *prog = parse_program(source, err, sizeof(err));
-    if (!prog) {
-        fprintf(stderr, "lume: %s\n", err[0] ? err : "parse error");
-        free(source);
-        return 1;
-    }
-
     if (do_dump) {
+        /* single-file AST dump (imports are resolved by the loader, which is
+         * not needed to inspect one file's tree) */
+        size_t len = 0;
+        char *source = read_file(script, &len);
+        if (!source) {
+            fprintf(stderr, "lume: cannot read %s\n", script);
+            return 1;
+        }
+        char derr[512] = {0};
+        Node *prog = parse_program(source, derr, sizeof(derr));
+        if (!prog) {
+            fprintf(stderr, "lume: %s\n", derr[0] ? derr : "parse error");
+            free(source);
+            return 1;
+        }
         node_print(prog, 0);
-        free(source);
-        return 0;
-    }
-
-    /* Static type checking always runs: Lume is strongly typed at
-     * compile time. --check stops here. */
-    if (!type_check_program(prog, err, sizeof(err))) {
-        fprintf(stderr, "lume: %s\n", err[0] ? err : "type error");
-        free(source);
-        return 1;
-    }
-
-    if (do_check) {
-        printf("parse OK (%zu bytes)\n", len);
         free(source);
         return 0;
     }
@@ -356,10 +336,23 @@ int main(int argc, char **argv) {
     vm_init(&vm);
     bridge_init(&vm);
 
-    exec_program(&vm, prog);
+    /* Multi-file import/export: the loader parses + type-checks the entry
+     * script and every module it imports (dependencies first), then executes
+     * module top levels in dependency order, the entry's last (entry env ==
+     * vm->globals, so builtins and route/tool registrations keep working). */
+    char err[512] = {0};
+    if (loader_run(&vm, script, do_check, err, sizeof(err)) != 0) {
+        fprintf(stderr, "lume: %s\n", err[0] ? err : "load error");
+        return 1;
+    }
+
+    if (do_check) {
+        printf("parse OK (%s)\n", script);
+        return 0;
+    }
+
     if (vm.error) {
         fprintf(stderr, "lume: %s\n", vm.error_msg);
-        free(source);
         return 1;
     }
 
@@ -368,6 +361,5 @@ int main(int argc, char **argv) {
      * a server. */
     if (!vm.run_called)
         fprintf(stderr, "lume: note: script completed without run()\n");
-    free(source);
     return 0;
 }

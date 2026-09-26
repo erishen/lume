@@ -92,6 +92,75 @@ static void reject(const char *name, const char *src, const char *want_sub) {
     }
 }
 
+
+/* Multi-file module tests (import/export): write `files` (name -> content)
+ * under /tmp/lume-smoke-modules/<name>/, then run `entry` through the loader
+ * (parse + typecheck + execute, dependencies first, each module once). When
+ * `want_fail` is non-NULL the run must fail with that substring in the error;
+ * otherwise stdout (from print()) is compared byte-for-byte. */
+static void check_modules(const char *name, const char *const files[][2],
+                          int nfiles, const char *entry, const char *expect,
+                          const char *want_fail) {
+    tests_run++;
+    char dir[256];
+    snprintf(dir, sizeof(dir), "/tmp/lume-smoke-modules/%s", name);
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s' && mkdir -p '%s'", dir, dir);
+    if (system(cmd) != 0) {
+        fprintf(stderr, "FAIL %-32s cannot create scratch dir\n", name);
+        tests_failed++;
+        return;
+    }
+    for (int i = 0; i < nfiles; i++) {
+        char p[320];
+        snprintf(p, sizeof(p), "%s/%s", dir, files[i][0]);
+        FILE *f = fopen(p, "wb");
+        if (!f) {
+            fprintf(stderr, "FAIL %-32s cannot write %s\n", name, files[i][0]);
+            tests_failed++;
+            return;
+        }
+        fputs(files[i][1], f);
+        fclose(f);
+    }
+
+    VM vm;
+    vm_init(&vm);
+    char err[512] = {0};
+    char entrypath[320];
+    snprintf(entrypath, sizeof(entrypath), "%s/%s", dir, entry);
+    char path[256];
+    int fd = capture_begin(path);
+    int rc = loader_run(&vm, entrypath, false, err, sizeof(err));
+    char out[8192];
+    capture_end(fd, path, out, sizeof(out));
+    unlink(path);
+
+    if (want_fail) {
+        if (rc == 0 || !strstr(err, want_fail)) {
+            fprintf(stderr, "FAIL %-32s expected loader error containing '%s'; "
+                            "rc=%d got: %s\n", name, want_fail, rc, err);
+            tests_failed++;
+        } else {
+            printf("ok   %s\n", name);
+        }
+        return;
+    }
+    if (rc != 0) {
+        fprintf(stderr, "FAIL %-32s loader: %s\n", name, err);
+        tests_failed++;
+    } else if (vm.error) {
+        fprintf(stderr, "FAIL %-32s runtime: %s\n", name, vm.error_msg);
+        tests_failed++;
+    } else if (strcmp(out, expect) != 0) {
+        fprintf(stderr, "FAIL %-32s output\n  got: %s\n want: %s\n", name, out,
+                expect);
+        tests_failed++;
+    } else {
+        printf("ok   %s\n", name);
+    }
+}
+
 int main(void) {
     /* Seed the lib registries so the discovery-builtin tests below are
      * deterministic: tools_init() registers the 7 builtins; skills_init()
@@ -701,6 +770,80 @@ check("skills: index enumeration includes the scratch skill",
     reject("break outside loop", "break;", "outside a loop");
     reject("continue outside loop", "continue;", "outside a loop");
     reject("break in func body", "func f() { break; }", "outside a loop");
+
+
+    /* ---- multi-file modules (import/export) ---- */
+    {
+        static const char *f[][2] = {
+            {"lib.lume",
+             "export let TAX_RATE = 0.13;\n"
+             "let hidden = \"module-private\";\n"
+             "export func tax(amount) { return amount * TAX_RATE; }\n"},
+            {"main.lume",
+             "import \"lib.lume\" as lib;\n"
+             "print(\"tax =\", lib.tax(1000));\n"
+             "print(\"rate =\", lib.TAX_RATE);\n"
+             "print(\"sum =\", lib.tax(1000) + lib.TAX_RATE);\n"},
+        };
+        check_modules("modules import + namespace call", f, 2,
+                      "main.lume", "tax = 130\nrate = 0.13\nsum = 130.13\n",
+                      NULL);
+    }
+    {
+        static const char *f[][2] = {
+            {"a.lume",
+             "import \"b.lume\" as b;\nprint(b.x);\n"},
+            {"b.lume",
+             "import \"a.lume\" as a;\nexport let x = 1;\n"},
+        };
+        check_modules("modules circular import rejected", f, 2, "a.lume",
+                      "", "circular import");
+    }
+    {
+        static const char *f[][2] = {
+            {"c.lume",
+             "print(\"C top-level runs\");\nexport let V = 7;\n"},
+            {"b.lume",
+             "import \"c.lume\" as c;\n"
+             "export func from_b() { return c.V + 1; }\n"},
+            {"a.lume",
+             "import \"c.lume\" as c;\n"
+             "import \"b.lume\" as b;\n"
+             "print(\"V=\", c.V, \" b=\", b.from_b());\n"},
+        };
+        check_modules("modules diamond runs dep once", f, 3, "a.lume",
+                      "C top-level runs\nV= 7  b= 8\n", NULL);
+    }
+    {
+        static const char *f[][2] = {
+            {"lib.lume",
+             "export func seven() { return 7; }\nlet secret = 1;\n"},
+            {"main.lume",
+             "import \"lib.lume\" as lib;\nprint(lib.secret);\n"},
+        };
+        check_modules("modules unexported member rejected", f, 2, "main.lume",
+                      "", "no export 'secret'");
+    }
+    {
+        static const char *f[][2] = {
+            {"lib.lume",
+             "export func seven() { return 7; }\n"},
+            {"main.lume",
+             "import \"lib.lume\" as lib;\n"
+             "import \"lib.lume\" as lib;\n"},
+        };
+        check_modules("modules duplicate namespace rejected", f, 2,
+                      "main.lume", "", "duplicate name 'lib'");
+    }
+    {
+        static const char *f[][2] = {
+            {"main.lume",
+             "import \"missing.lume\" as m;\nprint(m.x);\n"},
+        };
+        check_modules("modules missing file rejected", f, 1, "main.lume", "",
+                      "cannot resolve import");
+    }
+
 
     printf("\n%d tests, %d failed\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;

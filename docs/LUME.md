@@ -324,6 +324,60 @@ func use(): Result {
 **`?` 只能出现在函数内部**,它会截断当前函数、把 `{ err: ... }` 一路向上抛。
 之前成功例子里 `?` 用在**顶层**(不在函数里)是不合法的。
 
+### 多文件模块(import / export)
+
+一个 `.lume` 文件 = 一个模块:模块有**独立的顶层作用域**,只把显式标记的
+绑定导出给入口。适合把策略、计算、数据结构拆到独立文件,多个入口复用。
+
+```lume
+// lib.lume —— 库侧:只用 export 前缀标记要导出的东西
+export let TAX_RATE = 0.13;
+let internal_note = "module-private";        // 未导出:入口不可见
+
+export type Order = { amount: float, zone: string };
+
+export func apply(o: Order): float {
+  if (o.zone == "free-trade") { return o.amount * 0.06; }
+  return o.amount * TAX_RATE;
+}
+```
+
+```lume
+// app.lume —— 入口侧:import "路径" as 命名空间,再通过 ns.xxx 使用
+import "lib.lume" as lib;
+
+let o = { amount: 1000.0, zone: "mainland" };
+print(lib.apply(o));      // 130
+print(lib.TAX_RATE);      // 0.13
+print(lib.internal_note); // 类型错误:module 'lib' has no export 'internal_note'
+```
+
+规则:
+
+- **`export` 只修饰顶层 `let` / `func` / `type`**(`export let / export func / export type`)。
+  其余顶层绑定是模块私有的,入口读取会在类型检查时报错。
+- **`import "相对路径" as ns` 只能出现在顶层**,路径相对**当前文件所在目录**
+  解析(自动 realpath 规范化,`a/../b` 会折叠)。一次 `import` 引入一个命名空间,
+  命名空间不能重名。
+- **每个模块的顶层只执行一次**(依赖图缓存):多个模块 import 同一个库,库的
+  顶层不会重复执行。执行顺序是依赖优先,入口模块最后。
+- **循环 import 会报错**(`circular import: ... imports itself`),不会死循环。
+- **`--check` 与执行走同一条加载链**:`lume --check app.lume` 会递归检查全部
+  依赖模块,但不执行。
+- 模块顶层就是普通程序顶层,照样可以注册 `route` / `tool` / `server`;
+  入口模块的顶层就是整个程序。
+
+可运行的完整示例:`examples/modules/`(tax.lume 库 + app.lume CLI 入口,
+`make modules` 运行)、`examples/modules-server.lume`(同库的服务器版,
+`make modules-ui` 构建 React 前端并在 :8090 提供税额计算器页面),都已纳入
+`make check`。
+
+现有示例也按此拆库:`examples/abac/policy.lume`(ABAC 策略引擎,入口
+examples/abac.lume 只剩 HTTP 层)、`examples/invest/ledger.lume`(账本 +
+portfolio_* 工具,`tool` 声明在模块顶层照常注册,入口 import 一行即全部就绪)
+与 `examples/demo/ui.lume`(SSR 页面组件 cls/nav/card/page,纯函数、不碰
+服务器状态,类比前端 React 组件库)。
+
 ---
 
 ## 内建函数

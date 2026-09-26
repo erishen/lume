@@ -67,6 +67,7 @@ static const struct {
     {"else",   TOK_ELSE},   {"while",  TOK_WHILE}, {"for",    TOK_FOR},
     {"in",     TOK_IN},     {"break",  TOK_BREAK}, {"continue", TOK_CONTINUE},
     {"let",    TOK_LET},
+    {"import", TOK_IMPORT}, {"export", TOK_EXPORT}, {"as",     TOK_AS},
     {"true",   TOK_TRUE},   {"false",  TOK_FALSE}, {"null",   TOK_NULL},
     {"and",    TOK_AND},    {"or",     TOK_OR},    {"not",    TOK_NOT},
     {"type",   TOK_TYPE},   {"int",    TOK_INT},   {"float",  TOK_FLOAT},

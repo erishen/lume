@@ -88,6 +88,9 @@ static void tp_inner(Type *t) {
         case TY_BOOL:   printf("bool"); break;
         case TY_ANY:    printf("any"); break;
         case TY_RESULT: printf("Result"); break;
+        case TY_NS:
+            printf("module");
+            break;
         case TY_LIST:
             tp_inner(t->elem);
             printf("[]");
@@ -145,9 +148,18 @@ typedef struct CSym {
     struct CSym *next;
 } CSym;
 
+/* A module namespace: `import "x.lume" as ns` registers ns here; member
+ * lookups resolve through the module's export signatures. */
+typedef struct CNS {
+    char *name;
+    struct Module *mod;
+    struct CNS *next;
+} CNS;
+
 typedef struct CScope {
     struct CScope *parent;
     CSym *syms;
+    CNS *nss;
 } CScope;
 
 typedef struct StructDef {
@@ -166,6 +178,11 @@ typedef struct {
     char *errbuf;
     size_t errbuf_size;
     bool failed;
+    /* module context (NULL for single-file / REPL checks): the module being
+     * checked and the loader registry used to resolve `import "x" as ns`. */
+    struct Module *self;
+    struct Module **mods;
+    int mod_count;
 } Checker;
 
 static void ck_fail(Checker *c, size_t line, const char *fmt, ...) {
@@ -178,6 +195,25 @@ static void ck_fail(Checker *c, size_t line, const char *fmt, ...) {
     size_t used = strlen(c->errbuf);
     vsnprintf(c->errbuf + used, c->errbuf_size - used, fmt, ap);
     va_end(ap);
+}
+
+/* Record an exported binding's signature on the module being checked (a no-op
+ * outside module context). Duplicate names are ignored — the duplicate is
+ * already rejected by the scope at declaration time. */
+static void export_add(Checker *c, const char *name, Type *t) {
+    if (!c->self || !t) return;
+    for (int i = 0; i < c->self->export_types.count; i++)
+        if (strcmp(c->self->export_types.names[i], name) == 0) return;
+    c->self->export_types.names =
+        realloc(c->self->export_types.names,
+                sizeof(char *) * ((size_t)c->self->export_types.count + 1));
+    c->self->export_types.types =
+        realloc(c->self->export_types.types,
+                sizeof(Type *) * ((size_t)c->self->export_types.count + 1));
+    if (!c->self->export_types.names || !c->self->export_types.types) return;
+    c->self->export_types.names[c->self->export_types.count] = strdup(name);
+    c->self->export_types.types[c->self->export_types.count] = t;
+    c->self->export_types.count++;
 }
 
 static CScope *scope_new(CScope *parent) {
@@ -205,6 +241,22 @@ static Type *scope_get(CScope *s, const char *name) {
     return NULL;
 }
 
+static void scope_put_ns(CScope *s, const char *name, Module *m) {
+    CNS *ns = calloc(1, sizeof(CNS));
+    ns->name = strdup(name);
+    ns->mod = m;
+    ns->next = s->nss;
+    s->nss = ns;
+}
+
+static Module *scope_get_ns(CScope *s, const char *name) {
+    for (CScope *sc = s; sc; sc = sc->parent) {
+        for (CNS *it = sc->nss; it; it = it->next)
+            if (strcmp(it->name, name) == 0) return it->mod;
+    }
+    return NULL;
+}
+
 static StructDef *find_struct(Checker *c, const char *name) {
     for (StructDef *d = c->structs; d; d = d->next)
         if (strcmp(d->name, name) == 0) return d;
@@ -225,6 +277,11 @@ static Type *resolve(Checker *c, Type *t, size_t line) {
     if (t->kind == TY_STRUCT && t->name) {
         StructDef *d = find_struct(c, t->name);
         if (!d) {
+            /* Types exported by an imported module are already fully formed
+             * (the dependency is type-checked before the importer), so they
+             * are usable directly even though they are not registered in
+             * this file's struct table. */
+            if (t->count > 0) return t;
             ck_fail(c, line, "unknown type '%s'", t->name);
             return any_type();
         }
@@ -311,7 +368,6 @@ static void ck_stmt(Checker *c, Node *n);
 static void ck_fn(Checker *c, char **names, Type *ft, Node *body);
 
 static Type *ck_expr(Checker *c, Node *n, Type *expected);
-
 static Type *ck_list(Checker *c, Node *n, Type *expected) {
     if (n->as.list.count == 0) {
         /* `[]` — type comes from the expected annotation, else any[] */
@@ -450,6 +506,21 @@ static Type *ck_expr(Checker *c, Node *n, Type *expected) {
         }
 
         case N_MEMBER: {
+            /* `ns.member` — the base is a module namespace */
+            if (n->as.member.obj->type == N_VAR) {
+                Module *nsmod = scope_get_ns(c->scope, n->as.member.obj->as.var.name);
+                if (nsmod) {
+                    for (int i = 0; i < nsmod->export_types.count; i++)
+                        if (strcmp(nsmod->export_types.names[i],
+                                   n->as.member.name) == 0) {
+                            n->as.member.type = nsmod->export_types.types[i];
+                            return nsmod->export_types.types[i];
+                        }
+                    ck_fail(c, n->line, "module '%s' has no export '%s'",
+                            n->as.member.obj->as.var.name, n->as.member.name);
+                    return any_type();
+                }
+            }
             Type *ot = ck_expr(c, n->as.member.obj, NULL);
             ot = resolve(c, ot, n->line);
             if (ot->kind == TY_ANY) return any_type();
@@ -664,6 +735,38 @@ static Type *tool_param_struct(Node *p) {
 static void ck_stmt(Checker *c, Node *n) {
     if (c->failed || !n) return;
     switch (n->type) {
+        case N_IMPORT: {
+            /* `import "x.lume" as ns;` — bind ns to the dependency's export
+             * table. The loader has already resolved paths and filled self's
+             * import_paths/ns_names; node->as.imp.path is the canonical path. */
+            if (!c->self) {
+                ck_fail(c, n->line, "'import' is only available in a file module");
+                return;
+            }
+            if (scope_get_ns(c->scope, n->as.imp.ns) ||
+                scope_get(c->scope, n->as.imp.ns)) {
+                ck_fail(c, n->line, "duplicate name '%s'",
+                        n->as.imp.ns);
+                return;
+            }
+            Module *dep = NULL;
+            for (int i = 0; i < c->mod_count; i++)
+                if (strcmp(c->mods[i]->path, n->as.imp.path) == 0) {
+                    dep = c->mods[i];
+                    break;
+                }
+            if (!dep) {
+                ck_fail(c, n->line, "module '%s' not loaded", n->as.imp.path);
+                return;
+            }
+            if (!dep->typechecked) {
+                ck_fail(c, n->line, "module '%s' failed type checking",
+                        dep->path);
+                return;
+            }
+            scope_put_ns(c->scope, n->as.imp.ns, dep);
+            return;
+        }
         case N_BLOCK:
             ck_blk(c, n);
             return;
@@ -677,6 +780,9 @@ static void ck_stmt(Checker *c, Node *n) {
             }
             scope_put(c->scope, n->as.let.name,
                       annot ? annot : (it ? it : any_type()));
+            if (n->is_export)
+                export_add(c, n->as.let.name,
+                           scope_get(c->scope, n->as.let.name));
             return;
         }
         case N_IF: {
@@ -811,7 +917,10 @@ static void ck_stmt(Checker *c, Node *n) {
 
 /* ===================== program entry ===================== */
 
-bool type_check_program(Node *prog, char *errbuf, size_t errbuf_size) {
+/* Module-aware entry (loader.c): `self` is the module being checked, `mods`
+ * the loader registry. Plain single-file checks pass NULL/NULL/0. */
+bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
+                       Node *prog, char *errbuf, size_t errbuf_size) {
     if (!prog || prog->type != N_PROGRAM) return true;
 
     Checker c;
@@ -820,6 +929,9 @@ bool type_check_program(Node *prog, char *errbuf, size_t errbuf_size) {
     c.errbuf = errbuf;
     c.errbuf_size = errbuf_size;
     c.scope = scope_new(NULL);
+    c.self = self;
+    c.mods = mods;
+    c.mod_count = mod_count;
 
     /* builtins are loose */
     {
@@ -866,6 +978,8 @@ bool type_check_program(Node *prog, char *errbuf, size_t errbuf_size) {
                 type_add_member(def, s->as.type_decl.field_names[j],
                                 resolve(&c, s->as.type_decl.field_types[j],
                                         s->line));
+            if (s->is_export)
+                export_add(&c, s->as.type_decl.name, def);
         }
     }
 
@@ -883,6 +997,9 @@ bool type_check_program(Node *prog, char *errbuf, size_t errbuf_size) {
                                    : any_type();
         scope_put(c.scope, s->as.func.name, type_func(s->as.func.arity,
                                                       params, ret));
+        if (s->is_export)
+            export_add(&c, s->as.func.name,
+                       scope_get(c.scope, s->as.func.name));
     }
 
     /* Pass D: walk everything (function bodies included). */
@@ -890,4 +1007,8 @@ bool type_check_program(Node *prog, char *errbuf, size_t errbuf_size) {
         ck_stmt(&c, prog->as.program.stmts[i]);
 
     return !c.failed;
+}
+
+bool type_check_program(Node *prog, char *errbuf, size_t errbuf_size) {
+    return type_check_module(NULL, NULL, 0, prog, errbuf, errbuf_size);
 }

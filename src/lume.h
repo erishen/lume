@@ -46,6 +46,7 @@ typedef enum {
     TOK_SERVER, TOK_ROUTE, TOK_TOOL, TOK_FUNC, TOK_RETURN,
     TOK_IF, TOK_ELSE, TOK_WHILE, TOK_FOR, TOK_IN, TOK_BREAK, TOK_CONTINUE,
     TOK_LET,
+    TOK_IMPORT, TOK_EXPORT, TOK_AS,
     TOK_TRUE, TOK_FALSE, TOK_NULL, TOK_AND, TOK_OR, TOK_NOT,
     TOK_TYPE, TOK_INT, TOK_FLOAT, TOK_KW_STRING, TOK_BOOL, TOK_RESULT,
     TOK_GET, TOK_HEAD, TOK_POST, TOK_PUT, TOK_PATCH, TOK_DELETE, TOK_OPTIONS,
@@ -73,6 +74,7 @@ const char *token_type_name(TokenType t);
 
 typedef struct Type Type;
 typedef struct Node Node;
+struct Module; /* forward decl; full definition below (typedef Module) */
 
 typedef enum {
     TY_NULL, TY_INT, TY_FLOAT, TY_STRING, TY_BOOL,
@@ -80,7 +82,9 @@ typedef enum {
     TY_LIST,   /* elem is the element type */
     TY_STRUCT, /* name != NULL for declared structs; anonymous otherwise */
     TY_FUNC,   /* a named/top-level function value */
-    TY_RESULT  /* `{ ok: ... }` or `{ err: ... }` */
+    TY_RESULT, /* `{ ok: ... }` or `{ err: ... }` */
+    TY_NS      /* module namespace: `import "lib.lume" as ns` — name is the
+                * alias; members resolve through the module's export table */
 } TypeKind;
 
 typedef struct Type {
@@ -106,6 +110,10 @@ void type_print(Type *t);              /* type text into stdout (debug) */
 /* Static type checking pass (compile-time). Returns false + errbuf on the
  * first error. Runs after parsing, before execution. */
 bool type_check_program(Node *prog, char *errbuf, size_t errbuf_size);
+/* Module-aware variant (loader.c): self = module being checked, mods =
+ * registry of every loaded module (used to resolve `import "x" as ns`). */
+bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
+                       Node *prog, char *errbuf, size_t errbuf_size);
 
 /* ===================== values / objects / GC ===================== */
 
@@ -307,7 +315,44 @@ struct VM {
     int tool_count;
     Obj *server_config;       /* `server { ... }` results (GC root) */
     bool run_called;
+
+    /* module system (loader.c). The registry is populated once, before
+     * agenthttpd_run forks workers; modules and their top-level envs are
+     * immutable afterwards. */
+    struct Module **modules;
+    int module_count;
+    char **load_stack;        /* paths currently being loaded (cycle check) */
+    int load_depth;
+    Env *export_env;          /* export table of the module being executed */
 };
+
+/* ===================== modules / loader ===================== */
+
+/* One source file = one module: its own top-level Env and its own export
+ * table. importers bind `import "x.lume" as ns` to the module's exports Env. */
+typedef struct Module {
+    char *path;               /* canonical absolute path (strdup'd, owned) */
+    Node *prog;               /* parsed program */
+    char **import_paths;      /* raw import strings, relative to this file's dir */
+    char **ns_names;          /* parallel `as` aliases */
+    int import_count;
+    Env *env;                 /* module top-level environment (OBJ_ENV) */
+    Env *exports;             /* exported bindings (OBJ_ENV) */
+    struct { char **names; Type **types; int count; } export_types;
+    bool loading;             /* on the load stack (cycle detect) */
+    bool typechecked;
+    bool executed;
+} Module;
+
+/* Load the entry script and every module it transitively imports. Modules are
+ * parsed, type-checked (dependencies first) and — unless check_only — their
+ * top levels executed in dependency order (each exactly once). Entry module's
+ * top level runs last, leaving vm->globals bound to it. Returns 0 on success,
+ * nonzero + errbuf on failure. */
+int loader_run(VM *vm, const char *entry_path, bool check_only,
+               char *errbuf, size_t errbuf_size);
+/* Registry lookup by canonical path; NULL if not loaded. */
+Module *loader_find(VM *vm, const char *canon_path);
 
 /* ===================== parser ===================== */
 
@@ -321,7 +366,8 @@ typedef enum {
     N_VAR, N_ASSIGN, N_ASSIGN_MEMBER,
     N_LITERAL, N_MAP_LIT, N_LIST_LIT, N_FUNC_LIT,
     N_CALL, N_MEMBER,
-    N_UNARY, N_BINARY
+    N_UNARY, N_BINARY,
+    N_IMPORT   /* `import "path" as ns;` — top-level only */
 } NodeType;
 
 typedef enum {
@@ -337,6 +383,9 @@ typedef enum {
 typedef struct Node {
     NodeType type;
     size_t line;
+    bool is_export;   /* `export` prefix: top-level let/func/type visible to
+                       * importers (funcs/lets bind into the module's export
+                       * env; types publish a signature only) */
     union {
         struct { struct Node **stmts; int count; } program;
         struct { struct Node **stmts; int count; } block;
@@ -376,6 +425,10 @@ typedef struct Node {
         struct { struct Node *obj; char *name; struct Type *type; } member;
         struct { Op op; struct Node *operand; } unary;
         struct { Op op; struct Node *left, *right; } binary;
+        /* import: path is the raw string literal from the source (resolved
+         * against the importing file's directory by the loader); ns is the
+         * `as` alias. */
+        struct { char *path; char *ns; } imp;
     } as;
 } Node;
 
