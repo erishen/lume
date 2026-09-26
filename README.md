@@ -50,6 +50,7 @@ make dev          # demo, full example            → http://localhost:8081
 make dev-minimal  # hello, minimal intro          → http://localhost:8082
 make invest       # invest, portfolio assistant   → http://localhost:8082
 make hub          # hub, gateway capability hub   → http://localhost:8083
+make react-ssr   # React SSR content page (node CGI) → http://localhost:8085
 
 make test         # full suite: C unit + tool dispatch + real HTTP/SSE + GC stress
 make check        # type-check only, no server
@@ -100,7 +101,7 @@ Quick start and Containers sections.
 | Path | Contents |
 |---|---|
 | `src/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, ~5.5k lines of C11 |
-| `examples/` | 6 `.lume` examples (demo / hello / invest / hub / lang-basics / sqlite-write) |
+| `examples/` | 8 `.lume` examples (demo / hello / invest / hub / lang-basics / sqlite-write / query-demo / react-ssr) |
 | `frontend/` | React 18 + TS + Tailwind 4 client, bundled with esbuild `--splitting` |
 | `www/` | docroot: hand-written HTML shells + build artifacts (mixed; don't delete wholesale) |
 | `tests/` | C unit tests (`smoke.c`) + tool dispatch (`tools_driver.c`) + end-to-end (`run_all.sh`) |

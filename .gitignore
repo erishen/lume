@@ -28,6 +28,17 @@ editor/lume-vscode/*.vsix
 # 手写资源请用非 js/css 扩展名,或按下面的否定模式显式放行。
 /www/**/*.js
 /www/**/*.css
+# React SSR 演示例外(与 agent-httpd 同款约定,这几份是源而非可重编产物):
+# www/js/home.js 是手写的客户端参数回显脚本;www/cgi-bin/react-ssr.cgi 是
+# esbuild 打包的 node CGI(自包含 react-dom/server,仓库内无重建工具链),
+# react-ssr.css 与其 TSX 源码一并保留。
+/www/js/*
+!/www/js/home.js
+/www/cgi-bin/*
+!/www/cgi-bin/react-ssr.cgi
+!/www/cgi-bin/react-ssr.css
+!/www/cgi-bin/react-ssr/
+!/www/cgi-bin/react-ssr/**
 
 # --- 运行时状态 -------------------------------------------------------------
 # 含对话内容、会话 id 与本机绝对路径,一律不入库:

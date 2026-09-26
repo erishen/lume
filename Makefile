@@ -43,7 +43,7 @@ DEMO     := examples/demo.lume
 HELLO    := examples/hello.lume
 INVEST   := examples/invest.lume
 HUB      := examples/hub.lume
-EXAMPLES := $(DEMO) examples/lang-basics.lume $(HELLO) $(INVEST) $(HUB) examples/sqlite-write.lume examples/query-demo.lume examples/ssr-content.lume
+EXAMPLES := $(DEMO) examples/lang-basics.lume $(HELLO) $(INVEST) $(HUB) examples/sqlite-write.lume examples/query-demo.lume examples/react-ssr.lume
 # dev / dev-minimal 用的默认端口 (echo 与启动前清端口用)。
 PORT ?= 8082
 HUB_PORT ?= 8083
@@ -191,21 +191,22 @@ query-demo-watch:
 	@echo "==> lume --watch examples/query-demo.lume on :$(QUERY_DEMO_PORT) (URL query params demo)"; \
 	./$(TARGET) --watch examples/query-demo.lume
 
-# SSR 内容页示例: examples/ssr-content.lume on :$(SSR_CONTENT_PORT)(默认 8085)。
-# 等价于 agent-httpd 预设页(www/react/*.html)的 Lume 原生 SSR 版本:初始 HTML
-# 即含完整正文 + description/OG,无 JS 依赖;另有 /params?name=Ada&flag 参数回显。
-#   make ssr-content           # 构建 + 检查 + 清端口 + 前台启动(Ctrl-C 停)
-#   make ssr-content-watch     # 热更新:改 examples/ssr-content.lume 自动重起
+# React SSR 内容页示例: examples/react-ssr.lume on :$(SSR_CONTENT_PORT)(默认 8085)。
+# 等价于 agent-httpd 预设页(www/react/home.html + /cgi-bin/react-ssr.cgi):
+# /react 伺服静态降级页,表单提交到 node CGI —— React 组件经 react-dom/server
+# renderToString 在服务端渲染成完整 HTML(真正的 React SSR,渲染在 node 生态)。
+#   make react-ssr             # 构建 + 检查 + 清端口 + 前台启动(Ctrl-C 停)
+#   make react-ssr-watch       # 热更新:改 examples/react-ssr.lume 自动重起
 SSR_CONTENT_PORT ?= 8085
-ssr-content: all check
-	$(call KILL_SERVER,$(SSR_CONTENT_PORT),[s]sr-content.lume)
-	@echo "==> lume examples/ssr-content.lume on :$(SSR_CONTENT_PORT) (SSR content page demo)"; \
-	./$(TARGET) examples/ssr-content.lume
+react-ssr: all check
+	$(call KILL_SERVER,$(SSR_CONTENT_PORT),[r]eact-ssr.lume)
+	@echo "==> lume examples/react-ssr.lume on :$(SSR_CONTENT_PORT) (React SSR content page demo)"; \
+	./$(TARGET) examples/react-ssr.lume
 
-ssr-content-watch:
-	$(call KILL_SERVER,$(SSR_CONTENT_PORT),[s]sr-content.lume)
-	@echo "==> lume --watch examples/ssr-content.lume on :$(SSR_CONTENT_PORT) (SSR content page demo)"; \
-	./$(TARGET) --watch examples/ssr-content.lume
+react-ssr-watch:
+	$(call KILL_SERVER,$(SSR_CONTENT_PORT),[r]eact-ssr.lume)
+	@echo "==> lume --watch examples/react-ssr.lume on :$(SSR_CONTENT_PORT) (React SSR content page demo)"; \
+	./$(TARGET) --watch examples/react-ssr.lume
 
 # tsm-hub 网关能力示例: examples/hub.lume on :$(HUB_PORT)(默认 8083,
 # 与 invest 的 8082 并存)。不收敛——整本网关目录全开:

@@ -13,11 +13,24 @@ All notable changes to Lume are documented here. The format follows
   without `=` gets an empty value, repeated keys last-wins, `+` decodes
   to space).
 
+- `examples/react-ssr.lume` (:8085, `make react-ssr`): a React SSR content
+  page equivalent to agent-httpd's preset fallback pages
+  (`www/react/home.html` + `/cgi-bin/react-ssr.cgi`). `/react` serves the
+  static shell; the GET form posts to the node CGI, where React components
+  are rendered by `react-dom/server` `renderToString` — true React SSR, not
+  the Lume engine's own vdom render. The `server` block now wires
+  `cgi_bin` (`./www/cgi-bin`) and `www/cgi-bin/react-ssr.cgi` is the
+  bundled CGI (esbuild, self-contained, no node_modules).
+
 ### Fixed
 
 - Route handler lookup now matches the path with the query string stripped
   (the framework already dispatched on the stripped path, but the DSL shim
   compared the full URI, so any `/echo?a=1` request fell through to a 404).
+
+- Call-argument lists now accept a trailing comma (`f(a, b,)`), matching
+  list and map literals; previously the extra comma made the parser try to
+  parse the closing paren as another expression.
 
 ## [0.2.0] - 2026-09-25
 
