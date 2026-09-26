@@ -76,7 +76,7 @@ function App() {
   }, []);
 
   return (
-    <div className="modules-app min-h-screen bg-[var(--bg)] text-[var(--ink)]">
+    <div className="modules-app min-h-screen bg-(--bg) text-[var(--ink)]">
       <header className="modules-hero">
         <div>
           <p className="modules-eyebrow">Lume · 多文件模块演示</p>
