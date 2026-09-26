@@ -131,6 +131,13 @@ Mach-O,必须在 Linux 容器内重编。
   `LUME_AUTH_PASSWORD`,`.env` 已 gitignore),镜像 entrypoint 在容器启动时
   把它换成 `/app/auth/htpasswd`(bcrypt),`server{}` 里的
   `htpasswd = env("HTPASSWD_FILE")` 读到。实测无凭证
+- **登出 / 切账号(可选 env)**:`AUTH_REALM_FILE` 启用 `/logout` —— 轮换 401
+  挑战 realm(计数 N>0 时变 `<realm>#N`,浏览器 Basic-Auth 凭据缓存桶失效,
+  重新弹登录框),并可选写一条 30s 一次性拒绝记录防止旧缓存凭据静默重登。
+  `AUTH_PUBLIC_PATHS`(分号分隔的前缀列表)让无敏感数据的前端资源(如
+  `/accounts` 切账号页)绕过 401 门 —— 否则登出后切账号页自身弹框,形成
+  死锁。段边界前缀匹配:`/accounts` 覆盖 `/accounts/list`,不误伤
+  `/accounting`。
   `401 + WWW-Authenticate: Basic realm="lume"`。框架只认 `$5$`/`$6$`/bcrypt
   强哈希,明文与弱哈希加载即退出。改 `.env` 后 `docker compose up -d` 生效;
   本机 `make invest` 不注这些 env → 取到 null → 认证保持关闭。密码值请只用

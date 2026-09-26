@@ -176,6 +176,14 @@ stays git-ignored.
   stays off. Keep passwords alphanumeric — `#` / `$` and friends are parsed
   inconsistently between compose's env parser and `llm_env_init()` and can be
   silently truncated.
+- **Logout & account switching** (optional envs): `AUTH_REALM_FILE` enables
+  `/logout` — it rotates the 401 challenge realm (`<realm>#N`) so the browser
+  re-prompts instead of silently reusing cached credentials, plus an optional
+  one-shot 30s deny for the logged-out user. `AUTH_PUBLIC_PATHS` (a `;`-
+  separated prefix list) exempts credential-free frontend resources (e.g. an
+  `/accounts` switch page) from the 401 gate with a segment-boundary prefix
+  match (`/accounts` covers `/accounts/list`, not `/accounting`) — without it
+  the switch page itself prompts after logout.
 - **Access logs never record query strings** (explicitly truncated in
   `http_log.c`); log files are 0600; request bodies are never logged.
 - **Narrowed model reach**: `read_file` is jailed to the web root via
