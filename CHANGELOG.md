@@ -15,11 +15,10 @@ All notable changes to Lume are documented here. The format follows
 
 - `examples/react-ssr.lume` (:8085, `make react-ssr`): a React SSR content
   page driven by a resident node backend — the `server` block sets
-  `react_socket` (`./.data/react-ssr.sock`) and the embedded agent-httpd
+  `react_socket` (`./.data/react-ssr.sock`) and the built-in HTTP engine
   FastCGI-relays `/react/*` to `bin/react-ssr-server` (built from
-  agent-httpd's `cgi-bin/react-ssr` TSX by `pnpm install` +
-  `scripts/build-ssr.sh`; `make react-ssr` builds, starts the backend, then
-  runs lume). React components render with `react-dom/server`
+  `frontend/react-ssr/` TSX by `pnpm install` + `scripts/build-react-ssr.sh`;
+  `make react-ssr` builds, starts the backend, then runs lume). React components render with `react-dom/server`
   `renderToString` + `StaticRouter` — `/react`, `/react/about`,
   `/react/counter` all server-render; query strings (`?name=Ada&message=hi`)
   are relayed and echoed. No CGI fork, no Lume vdom. Without the backend,

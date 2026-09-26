@@ -195,7 +195,7 @@ query-demo-watch:
 # server{} 的 react_socket 指向 $(REACT_SSR_SOCK),内嵌 agent-httpd 把
 # /react/* FastCGI relay 过去;node 进程常驻,无 CGI fork。构建链在
 # agent-httpd submodule 里(pnpm install + scripts/build-ssr.sh)。
-REACT_SSR_SERVER ?= agent-httpd/bin/react-ssr-server
+REACT_SSR_SERVER ?= bin/react-ssr-server
 REACT_SSR_SOCK   ?= .data/react-ssr.sock
 # React SSR 页面源码在 frontend/react-ssr/(lume 仓库内,可直接改 pages/*.tsx),
 # 由 scripts/build-react-ssr.sh 构建常驻后端与 hydration bundle。
@@ -218,7 +218,7 @@ $(REACT_SSR_SERVER): $(REACT_SSR_DEPS)
 # React SSR 内容页示例: examples/react-ssr.lume on :$(SSR_CONTENT_PORT)(默认 8085)。
 # 链路: 常驻 node 后端(React 组件经 react-dom/server renderToString)→
 # server{} 的 react_socket → /react/* FastCGI relay;无后端时降级伺服
-# www/react/home.html。等价于 agent-httpd 预设页(www/react/*.html + -R)。
+# www/react/home.html。等价于内置预设内容页。
 #   make react-ssr             # 构建后端 + 检查 + 起后端 + 前台启动(Ctrl-C 停)
 #   make react-ssr-watch       # 同前,lume 用 --watch 热更新
 SSR_CONTENT_PORT ?= 8085

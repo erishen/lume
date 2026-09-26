@@ -1,6 +1,6 @@
 // React SSR 内容页 demo —— lume 直接对接常驻的 node React SSR 后端(无 CGI)。
 //
-//   server { react_socket = "...sock" }  → 内嵌 agent-httpd 把 /react/*
+//   server { react_socket = "...sock" }  → 内置 HTTP 引擎把 /react/*
 //                                          FastCGI relay 到该 UNIX socket
 //   node bin/react-ssr-server <sock>     → 常驻 node 进程:React 组件经
 //                                          react-dom/server renderToString
@@ -14,7 +14,7 @@
 //   GET /js/react-ssr.js      → docroot 静态 bundle(客户端 hydration)
 //
 // 依赖: node + react-ssr 构建链(frontend/react-ssr/ 页面源码 + scripts/
-// build-react-ssr.sh → agent-httpd/bin/react-ssr-server)。make react-ssr 会
+// build-react-ssr.sh → bin/react-ssr-server)。make react-ssr 会
 // 自动构建并先后端后前端启动;直接手动跑:先起后端,再起本文件。
 server {
   host = "127.0.0.1";

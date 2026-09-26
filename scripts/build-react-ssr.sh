@@ -1,6 +1,6 @@
 #!/bin/sh
 # Build the React SSR page sources (frontend/react-ssr/) into the resident
-# node backend (agent-httpd/bin/react-ssr-server) and the hydration client
+# node backend (bin/react-ssr-server) and the hydration client
 # (www/js/react-ssr.js). The lume-side counterpart of agent-httpd's
 # scripts/build-ssr.sh, minus the CGI entry: edit pages/About.tsx etc. under
 # frontend/react-ssr/ and re-run `make react-ssr` (or this script) to see the
@@ -8,7 +8,7 @@
 set -e
 REPO="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 SRC="$REPO/frontend/react-ssr"
-BIN_DIR="$REPO/agent-httpd/bin"
+BIN_DIR="$REPO/bin"
 SERVER_OUT="$BIN_DIR/react-ssr-server"
 CLIENT_OUT="$REPO/www/js/react-ssr.js"
 ESBUILD="$SRC/node_modules/.bin/esbuild"
