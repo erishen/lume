@@ -38,15 +38,25 @@ pass "tool registry + dispatch"
 # 4. live server over HTTP ---------------------------------------------------
 # Redirect the access log to a per-run temp path (access_log in server{}),
 # so tests never write into the repo's ./logs/ directory.
-sed "s|port = [0-9]*;|port = $PORT; access_log = \"$ACCESS_LOG/access.log\";|" examples/demo.lume > /tmp/lume-demo-test.lume
+# demo.lume 拆库后带 import（相对当前文件目录）: sed 到 /tmp 会使相对路径
+# 解析失败（服务起不来），故 import 行同步改写为绝对路径（loader realpath 支持）。
+sed -e "s|port = [0-9]*;|port = $PORT; access_log = \"$ACCESS_LOG/access.log\";|" \
+    -e "s|import \"demo/ui.lume\" as ui;|import \"$PWD/examples/demo/ui.lume\" as ui;|" \
+    examples/demo.lume > /tmp/lume-demo-test.lume
 export LLM_API_KEY=   # force the offline agent demo engine: tests never hit a real LLM
 ./bin/lume /tmp/lume-demo-test.lume > "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
-trap 'kill $SERVER_PID 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
+# prefork 架构下 kill 父进程会留下孤儿 worker 继续占用端口: 用 pkill 按命令行
+# 兜底清掉整个服务实例, 否则下次运行 curl 会打到残留实例(状态被前序测试污染)。
+# prefork 架构下 kill 父进程会留下孤儿 worker: 按端口 lsof 兜底清干净
+# (pkill/pgrep 依赖 sysmond, 在本机沙箱环境不可用)。
+trap 'kill $SERVER_PID 2>/dev/null; lsof -ti tcp:$PORT 2>/dev/null | xargs kill -9 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
 
-for _ in $(seq 1 50); do
+# MCP 冷启动（fs/memory/think resident）在 CI 环境可能超过 5s：探测窗口拉长
+# 到 ~30s（连接被拒时 curl 秒回，循环实际耗时按启动速度自适应）。
+for _ in $(seq 1 200); do
     curl -s -m 1 http://127.0.0.1:$PORT/sum > /dev/null 2>&1 && break
-    sleep 0.1
+    sleep 0.15
 done
 
 [ "$(curl -s -m 3 http://127.0.0.1:$PORT/hello)" = \
@@ -188,20 +198,28 @@ pass "GC stress (300 requests)"
 #     perl keeps this portable across macOS BSD sed / Linux GNU sed.
 WATCH_PORT=8997
 WATCH_PID=0
-trap 'kill $SERVER_PID 2>/dev/null; pkill -f "[b]in/lume /tmp/lume-watch-test" 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
-sed "s|port = [0-9]*;|port = $WATCH_PORT;|" examples/demo.lume > /tmp/lume-watch-test.lume
+# watch 段会覆盖上面的 trap: 同时按端口清主服务与 watch 服务。
+trap 'kill $SERVER_PID 2>/dev/null; lsof -ti tcp:$PORT 2>/dev/null | xargs kill -9 2>/dev/null; lsof -ti tcp:$WATCH_PORT 2>/dev/null | xargs kill -9 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
+sed -e "s|port = [0-9]*;|port = $WATCH_PORT;|" \
+    -e "s|import \"demo/ui.lume\" as ui;|import \"$PWD/examples/demo/ui.lume\" as ui;|" \
+    examples/demo.lume > /tmp/lume-watch-test.lume
 ./bin/lume --watch /tmp/lume-watch-test.lume > "$SERVER_LOG" 2>&1 &
 WATCH_PID=$!
-for _ in $(seq 1 50); do
+# 探测窗口 ~30s（watch 首启同样有 MCP 冷启动）
+for _ in $(seq 1 200); do
     curl -s -m 1 http://127.0.0.1:$WATCH_PORT/sum > /dev/null 2>&1 && break
-    sleep 0.1
+    sleep 0.15
 done
 [ "$(curl -s -m 3 http://127.0.0.1:$WATCH_PORT/sum)" = "40 + 2 = 42" ] || fail "watch: child not serving after start"
 pass "watch: starts and serves"
 
 # valid edit -> watcher restarts the child, new route is live
 perl -pi -e 's/^run\(\);$/route "GET", "\/watch-alive", func(req) { return "alive"; };\nrun();/' /tmp/lume-watch-test.lume
-sleep 2
+# child 重启同样要 MCP 冷启动: 轮询等新路由就绪(最多 ~30s)
+for _ in $(seq 1 200); do
+    [ "$(curl -s -m 1 http://127.0.0.1:$WATCH_PORT/watch-alive)" = "alive" ] && break
+    sleep 0.15
+done
 [ "$(curl -s -m 3 http://127.0.0.1:$WATCH_PORT/watch-alive)" = "alive" ] || fail "watch: valid edit did not reload"
 pass "watch: valid edit reloads new route"
 
