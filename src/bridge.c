@@ -7,6 +7,8 @@
 
 /* from agent-httpd util.c (internal.h) — URL-decode a query segment */
 extern void url_decode(char *dst, const char *src);
+/* from agent-httpd auth.c — base64-decode a Basic-auth header payload */
+extern void b64_decode(const char *in, char *out, size_t out_size);
 
 /* bridge.c — the language's runtime translated into libagenthttpd.a calls.
  *
@@ -36,6 +38,34 @@ static void vm_after_request(VM *vm) {
 
 /* ---------- request <-> DSL map ---------- */
 
+/* Authenticated username for this request, or NULL when auth is disabled or
+ * no Basic header is present. The framework already ran check_basic_auth
+ * (event.c fast path / http.c worker path) before dispatch, so a non-NULL
+ * Basic payload here means the credentials matched an htpasswd entry.
+ * Decoding from the per-request HttpRequest (not a process global) keeps this
+ * correct under the prefork worker pool. g_auth_file (set once at startup)
+ * gates the feature. */
+/* Writes the authenticated username into buf (NUL-terminated) and returns 1
+ * when a Basic-auth username is available, 0 otherwise. The framework already
+ * ran check_basic_auth (event.c fast path / http.c worker path) before
+ * dispatch, so a Basic payload here matched an htpasswd entry. Decoding from
+ * the per-request HttpRequest (not a process global) keeps this correct under
+ * the prefork worker pool. g_auth_file (set once at startup) gates it. */
+static int auth_username(const HttpRequest *req, char *buf, size_t buf_size) {
+    /* g_auth_file via agenthttpd.h/httpd.h (included by lumi.h) */
+    if (!g_auth_file[0]) return 0;
+    const char *ah = req->authorization;
+    if (!ah || strncasecmp(ah, "Basic ", 6) != 0) return 0;
+    char creds[512];
+    b64_decode(ah + 6, creds, sizeof(creds));
+    char *colon = strchr(creds, ':');
+    if (!colon) return 0;
+    *colon = '\0';
+    if (!creds[0]) return 0;
+    snprintf(buf, buf_size, "%s", creds);
+    return 1;
+}
+
 static Value request_to_value(VM *vm, const HttpRequest *req, const char *label) {
     Obj *m = AS_OBJ(make_map(vm));
     vm_push(vm, val_obj((Obj *)m)); /* root while filling */
@@ -43,6 +73,12 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
     if (label) map_set(vm, m, "label", make_string_cstr(vm, label));
     map_set(vm, m, "method", make_string_cstr(vm, req->method));
     map_set(vm, m, "path", make_string_cstr(vm, req->path));
+    {
+        char user_buf[64];
+        map_set(vm, m, "user",
+                auth_username(req, user_buf, sizeof(user_buf))
+                    ? make_string_cstr(vm, user_buf) : val_null());
+    }
     map_set(vm, m, "remote_addr",
             req->remote_addr[0] ? make_string_cstr(vm, req->remote_addr)
                                 : val_null());

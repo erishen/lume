@@ -1,0 +1,129 @@
+// ABAC (Attribute-Based Access Control) demo — the mechanism shape of
+// spring-abac, expressed in the Lume DSL. No strategy engine, no SpEL:
+// the "policy" is plain Lume functions, and the framework's sandboxed
+// interpreter *is* the policy engine.
+//
+//   (subject, resource, environment) --policy expression--> PERMIT / DENY
+//
+// Attributes:
+//   subject     req.user        Basic Auth username (htpasswd, server{})
+//               + attribute table below (stands in for a directory source)
+//   resource    ?doc=          doc id -> { clearance, department } table
+//   environment now()          wall clock: writes are denied outside 09-18
+//                              Beijing time ("no deletion after hours")
+//
+// Deny-by-default: every unknown subject/resource and every rule miss
+// yields DENY — only an explicit permit lets a request through.
+//
+//   make abac                       # builds htpasswd + starts :8086
+//   curl -u admin:admin123 'http://localhost:8086/docs?doc=board'
+//   curl -u carol:carol123 'http://localhost:8086/docs?doc=roadmap'  # 403
+//   curl -u carol:carol123 -X POST 'http://localhost:8086/docs/delete?doc=roadmap'
+//                                   # 403 outside working hours
+//
+// Accounts (same as spring-abac's README demo table):
+//   admin  EXEC/5/CN   carol ENG/4/US   alice ENG/3/CN   bob SALES/2/CN
+
+// ---- subject attributes (who asks) ------------------------------------
+let subjects = {
+  admin: { department: "EXEC", clearance: 5, region: "CN", title: "admin" },
+  carol: { department: "ENG", clearance: 4, region: "US", title: "manager" },
+  alice: { department: "ENG", clearance: 3, region: "CN", title: "engineer" },
+  bob:   { department: "SALES", clearance: 2, region: "CN", title: "sales" },
+};
+
+// ---- resource attributes (what is asked for) ---------------------------
+// clearance 4 = CONFIDENTIAL; 3 = INTERNAL; 2 = RESTRICTED; 5 = TOP.
+let docs = {
+  board:    { clearance: 5, department: "EXEC" },
+  roadmap:  { clearance: 4, department: "ENG" },
+  internal: { clearance: 3, department: "ENG" },
+  pipeline: { clearance: 2, department: "SALES" },
+};
+
+type Decision = {
+  decision: string,   // "PERMIT" | "DENY"
+  reason: string,
+  subject: string,
+  resource: string,
+  method: string,
+};
+
+// ---- policy expression: attributes -> PERMIT/DENY ----------------------
+func decide(req): Decision {
+  let res = req.query_params.doc;
+  let subj = get(subjects, req.user, null);
+  if (subj == null) {
+    return { decision: "DENY", reason: "unknown or unauthenticated subject",
+             subject: req.user, resource: res, method: req.method };
+  }
+  let doc = get(docs, res, null);
+  if (doc == null) {
+    return { decision: "DENY", reason: "unknown resource",
+             subject: req.user, resource: res, method: req.method };
+  }
+  // clearance: subject must be at least as cleared as the resource
+  if (doc.clearance > subj.clearance) {
+    return { decision: "DENY",
+             reason: "clearance " + str(subj.clearance) + " < required "
+                     + str(doc.clearance),
+             subject: req.user, resource: res, method: req.method };
+  }
+  // department: own department, or EXEC crosses departments
+  if (doc.department != subj.department and subj.department != "EXEC") {
+    return { decision: "DENY",
+             reason: "department mismatch (" + doc.department
+                     + " not readable by " + subj.department + ")",
+             subject: req.user, resource: res, method: req.method };
+  }
+  // CONFIDENTIAL (clearance 4) additionally requires region CN
+  if (doc.clearance == 4 and subj.region != "CN") {
+    return { decision: "DENY",
+             reason: "CONFIDENTIAL cannot be read from outside CN (region "
+                     + subj.region + ")",
+             subject: req.user, resource: res, method: req.method };
+  }
+  // environment: writes denied outside Beijing 09:00-18:00
+  if (req.method != "GET") {
+    let hour = int((now() + 28800) % 86400 / 3600);   // UTC+8
+    if (hour < 9 or hour >= 18) {
+      return { decision: "DENY",
+               reason: "no writes after hours (Beijing hour=" + str(hour) + ")",
+               subject: req.user, resource: res, method: req.method };
+    }
+  }
+  return { decision: "PERMIT", reason: "attributes satisfy policy",
+           subject: req.user, resource: res, method: req.method };
+}
+
+// PERMIT -> 200 + decision JSON; DENY -> 403 + decision JSON
+func respond(d: Decision) {
+  if (d.decision == "PERMIT") { return d; }
+  return { status: 403, type: "application/json", body: stringify(d) };
+}
+
+// ---- routes ------------------------------------------------------------
+// read: resource picked via ?doc= (row-level, like document-service)
+get "/docs", (req) => { return respond(decide(req)); };
+
+// write: delete is the "deletion" the after-hours rule guards
+post "/docs/delete", (req) => { return respond(decide(req)); };
+
+// plain intro page with curl examples
+get "/", (req) => {
+  return "<h1>ABAC demo</h1>"
+       + "<p>Read: <code>curl -u USER:PASS 'http://localhost:8086/docs?doc=ID'</code></p>"
+       + "<p>Delete: <code>curl -u USER:PASS -X POST "
+       + "'http://localhost:8086/docs/delete?doc=ID'</code></p>"
+       + "<p>Accounts: admin/admin123 carol/carol123 alice/alice123 bob/bob123.</p>"
+       + "<p>Docs: board(TOP/EXEC) roadmap(CONF/ENG) internal(INT/ENG) "
+       + "pipeline(RESTR/SALES).</p>";
+};
+
+server {
+  port = 8086;
+  workers = 4;
+  htpasswd = "./.data/abac.htpasswd";   // make abac 生成(4 个 demo 账号)
+  auth_realm = "abac-demo";
+}
+run();

@@ -43,7 +43,7 @@ DEMO     := examples/demo.lume
 HELLO    := examples/hello.lume
 INVEST   := examples/invest.lume
 HUB      := examples/hub.lume
-EXAMPLES := $(DEMO) examples/lang-basics.lume $(HELLO) $(INVEST) $(HUB) examples/sqlite-write.lume examples/query-demo.lume examples/react-ssr.lume
+EXAMPLES := $(DEMO) examples/lang-basics.lume $(HELLO) $(INVEST) $(HUB) examples/sqlite-write.lume examples/query-demo.lume examples/react-ssr.lume examples/abac.lume
 # dev / dev-minimal 用的默认端口 (echo 与启动前清端口用)。
 PORT ?= 8082
 HUB_PORT ?= 8083
@@ -190,6 +190,31 @@ query-demo-watch:
 	$(call KILL_SERVER,$(QUERY_DEMO_PORT),[q]uery-demo.lume)
 	@echo "==> lume --watch examples/query-demo.lume on :$(QUERY_DEMO_PORT) (URL query params demo)"; \
 	./$(TARGET) --watch examples/query-demo.lume
+
+# ABAC 属性访问控制示例: examples/abac.lume on :$(ABAC_PORT)(默认 8086)。
+# 生成 .data/abac.htpasswd(4 个 demo 账号,htpasswd bcrypt),再起服务。
+ABAC_PORT ?= 8086
+ABAC_HTPASSWD ?= .data/abac.htpasswd
+
+abac: all check
+	@mkdir -p .data; \
+	htpasswd -B -b -c $(ABAC_HTPASSWD) admin admin123 && \
+	htpasswd -B -b $(ABAC_HTPASSWD) carol carol123 && \
+	htpasswd -B -b $(ABAC_HTPASSWD) alice alice123 && \
+	htpasswd -B -b $(ABAC_HTPASSWD) bob bob123
+	$(call KILL_SERVER,$(ABAC_PORT),[a]bac.lume)
+	@echo "==> lume examples/abac.lume on :$(ABAC_PORT) (ABAC: attributes -> PERMIT/DENY)"; \
+	./$(TARGET) examples/abac.lume
+
+abac-watch:
+	@mkdir -p .data; \
+	htpasswd -B -b -c $(ABAC_HTPASSWD) admin admin123 && \
+	htpasswd -B -b $(ABAC_HTPASSWD) carol carol123 && \
+	htpasswd -B -b $(ABAC_HTPASSWD) alice alice123 && \
+	htpasswd -B -b $(ABAC_HTPASSWD) bob bob123
+	$(call KILL_SERVER,$(ABAC_PORT),[a]bac.lume)
+	@echo "==> lume --watch examples/abac.lume on :$(ABAC_PORT) (ABAC demo)"; \
+	./$(TARGET) --watch examples/abac.lume
 
 # --- React SSR 常驻后端(node bin/react-ssr-server,经 FastCGI relay) ---
 # server{} 的 react_socket 指向 $(REACT_SSR_SOCK),内嵌 agent-httpd 把

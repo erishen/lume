@@ -51,6 +51,7 @@ make dev-minimal  # hello, minimal intro          → http://localhost:8082
 make invest       # invest, portfolio assistant   → http://localhost:8082
 make hub          # hub, gateway capability hub   → http://localhost:8083
 make react-ssr   # React SSR via resident node backend → http://localhost:8085
+make abac        # ABAC demo: attributes → PERMIT/DENY  → http://localhost:8086
 
 make test         # full suite: C unit + tool dispatch + real HTTP/SSE + GC stress
 make check        # type-check only, no server
@@ -111,7 +112,7 @@ Quick start and Containers sections.
 | Path | Contents |
 |---|---|
 | `src/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, ~5.5k lines of C11 |
-| `examples/` | 8 `.lume` examples (demo / hello / invest / hub / lang-basics / sqlite-write / query-demo / react-ssr) |
+| `examples/` | 9 `.lume` examples (demo / hello / invest / hub / lang-basics / sqlite-write / query-demo / react-ssr / abac) |
 | `frontend/` | React 18 + TS + Tailwind 4 client (`src/`, esbuild `--splitting`) + React SSR page sources (`react-ssr/`, built by `scripts/build-react-ssr.sh`) |
 | `www/` | docroot: hand-written HTML shells + build artifacts (mixed; don't delete wholesale) |
 | `tests/` | C unit tests (`smoke.c`) + tool dispatch (`tools_driver.c`) + end-to-end (`run_all.sh`) |
