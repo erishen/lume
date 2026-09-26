@@ -122,7 +122,7 @@ async function streamFromLlm(message: string, history: ChatMessage[], sink: Chat
       model: LLM_MODEL,
       stream: true,
       messages: [
-        { role: "system", content: "You are the demo assistant embedded in agent-httpd's React SSR teaching app. Answer concisely." },
+        { role: "system", content: "You are the demo assistant embedded in lume's React SSR teaching app. Answer concisely." },
         ...history,
         { role: "user", content: message },
       ],
@@ -225,15 +225,15 @@ function cannedReply(message: string): string {
     /^(what|why|how|when|who|where|which|can|could|does|do|is|are|tell)/.test(m);
 
   if (/^(hi|hello|hey|yo)\b/.test(m)) {
-    return "Hello! This reply is generated locally by agent-httpd's demo engine — no external calls. " +
+    return "Hello! This reply is generated locally by lume's demo engine — no external calls. " +
       "It is streamed token-by-token over SSE through the FastCGI chain, exactly like a real LLM reply would be. " +
       "Ask me about the server, or set LLM_API_KEY to talk to a real model.";
   }
-  if (m.includes("agent-httpd") || m.includes("server")) {
-    return "agent-httpd is a ~3,000-line teaching HTTP server in C: keep-alive, a prefork worker pool with " +
-      "SCM_RIGHTS fd passing, FastCGI client+server, ETag/304, sendfile with Range/206, per-IP rate limiting " +
-      "and graceful drain. This chat page rides the FastCGI streaming path: your POST reaches the resident " +
-      "React backend, which emits SSE events as STDOUT frames.";
+  if (m.includes("lume") || m.includes("server")) {
+    return "lume is a single-binary Agent DSL server in C11: the Lume scripting language, a built-in HTTP " +
+      "engine (keep-alive, worker pool, FastCGI relay, SSE streaming, SQLite) — one executable. This chat " +
+      "page rides the FastCGI streaming path: your POST reaches the resident React backend, which emits SSE " +
+      "events as STDOUT frames.";
   }
   if (m.includes("stream") || m.includes("sse")) {
     return "The stream works like this: the browser POSTs to /react/api/chat, nginx passes it over FastCGI " +
@@ -243,12 +243,12 @@ function cannedReply(message: string): string {
   }
   if (isQuestion) {
     return "Good question — but I am the offline demo engine, so my answer is canned: I detect questions, echo " +
-      "a bit of structure, and pace the words to demonstrate streaming. Try asking about agent-httpd, streaming " +
+      "a bit of structure, and pace the words to demonstrate streaming. Try asking about lume, streaming " +
       "or SSE — those I know. For real answers, set LLM_API_KEY and LLM_MODEL.";
   }
   return "You said: \"" + message.slice(0, 80) + (message.length > 80 ? "…" : "") + "\" — " +
     message.trim().split(/\s+/).length + " words received. As the demo engine I mostly mirror and pace; " +
-    "ask about agent-httpd, streaming or SSE, or plug in a real model via LLM_API_KEY.";
+    "ask about lume, streaming or SSE, or plug in a real model via LLM_API_KEY.";
 }
 
 /* The FastCGI caller passes `net.Socket`-based writers; this type import is

@@ -6,7 +6,7 @@
 // removes render cold-start entirely, same role as PHP-FPM/puma/unicorn.
 //
 // It implements just enough of the FCGI server-side protocol to work with
-// nginx fastcgi_pass and agent-httpd -R forwarding:
+// nginx fastcgi_pass and lume’s built-in HTTP engine forwarding:
 //   read   BEGIN_REQUEST | PARAMS* | STDIN(empty)
 //   write  STDOUT(HTTP response) | END_REQUEST
 
@@ -415,7 +415,7 @@ if (httpPort > 0) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "no-referrer");
-    res.setHeader("Server", "AgentHTTPD");
+    res.setHeader("Server", "Lume");
     if (PURGE_CLIENT_CACHE) res.setHeader("Clear-Site-Data", '"cache"');
     try {
       const url = req.url || "/react";
@@ -464,7 +464,7 @@ if (httpPort > 0) {
     }
   });
   httpSrv.listen(httpPort, "127.0.0.1", () => {
-    console.log("React SSR HTTP on 127.0.0.1:" + httpPort + " (for agent-httpd -v relay)");
+    console.log("React SSR HTTP on 127.0.0.1:" + httpPort + " (for lume engine relay)");
   });
   process.on("SIGINT", () => {
     httpSrv.close();

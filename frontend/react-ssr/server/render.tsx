@@ -100,8 +100,8 @@ export const safeJson = (obj: RenderData): string => JSON.stringify(obj).replace
 export function renderHead(mode: RenderMode): string {
   const title =
     mode === "csr"
-      ? "React Router CSR via AgentHTTPD"
-      : "React Router SSR via AgentHTTPD";
+      ? "React Router CSR · Lume"
+      : "React Router SSR · Lume";
   return `<!DOCTYPE html>
 <html lang="en" class="bg-ink">
 <head>
@@ -131,8 +131,8 @@ export function renderTail(data: RenderData): string {
 function csrShell(mode: RenderMode, data: RenderData): string {
   const title =
     mode === "csr"
-      ? "React Router CSR via AgentHTTPD"
-      : "React Router SSR via AgentHTTPD";
+      ? "React Router CSR · Lume"
+      : "React Router SSR · Lume";
   return `<!DOCTYPE html>
 <html lang="en" class="bg-ink">
 <head>

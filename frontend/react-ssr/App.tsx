@@ -70,7 +70,7 @@ function Layout({ nodeVersion, mode }: { nodeVersion: string; mode: RenderMode }
             to="/react"
             className="mr-auto font-bold tracking-tight no-underline text-slate-100 hover:text-accent"
           >
-            <code className="text-amber-300">agent-httpd</code>
+            <code className="text-amber-300">lume</code>
             <span className="mx-1 text-slate-500">&#215;</span>
             <span className="bg-gradient-to-r from-sky-400 to-violet-400 bg-clip-text text-transparent">
               React
@@ -195,7 +195,7 @@ function Home({ params, method, serverTime, nodeVersion }: AppProps) {
           Server-side React &middot; {React.version}
         </p>
         <h1 className="mt-0 bg-gradient-to-r from-sky-400 via-violet-400 to-fuchsia-400 bg-clip-text text-4xl font-extrabold leading-tight text-transparent">
-          React Router &#215; AgentHTTPD
+          React Router &#215; Lume
         </h1>
         <p className="mt-2 text-slate-400">
           A client-routed React app, server-rendered by a C web server, then{" "}
@@ -228,7 +228,7 @@ function Home({ params, method, serverTime, nodeVersion }: AppProps) {
         <h2 className="mt-0 text-xl font-semibold">Rendered on the server</h2>
         <p className="text-sm leading-6 text-slate-400">
           This page is produced by a React component tree executed as a CGI
-          program behind <code className="rounded bg-ink px-1.5 py-0.5 text-amber-300">agent-httpd</code>{" "}
+          program behind <code className="rounded bg-ink px-1.5 py-0.5 text-amber-300">lume</code>{" "}
           using{" "}
           <code className="rounded bg-ink px-1.5 py-0.5 text-amber-300">react-dom/server</code>{" "}
           + <code className="rounded bg-ink px-1.5 py-0.5 text-amber-300">StaticRouter</code>,

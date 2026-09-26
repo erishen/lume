@@ -97,13 +97,13 @@ const EXAMPLES: { kind: ActKind; label: string; prompt: string }[] = [
   // points at, so a machine-specific absolute path here would both mislead
   // readers and bake a local username into the shipped bundle.
   { kind: "mcp", label: "列项目目录", prompt: "通过 fs MCP 的 list_directory 工具，列出网站根目录（docroot）下的文件和子目录。" },
-  { kind: "mcp", label: "存一条事实", prompt: "用 memory MCP 把『agent-httpd 是一个用 C 写的小型教学用 HTTP 服务器』这条事实写入知识库。" },
+  { kind: "mcp", label: "存一条事实", prompt: "用 memory MCP 把『lume 是一个用 C11 写的小型 Agent DSL 服务器』这条事实写入知识库。" },
   { kind: "mcp", label: "分步推理论证", prompt: "借助 think MCP 的 sequentialthinking 工具，一步步推理一下 llm-router 的 skill 同步设计有什么优点和隐患。" },
   // — skill — local, router & project skills
   { kind: "skill", label: "跑 demo-lab", prompt: "运行 demo-lab 技能，看看它演示了哪些能力。" },
   { kind: "skill", label: "代码评审", prompt: "用 code-review 技能对 src/core/router.c 做一次代码评审，指出可能的问题。" },
   { kind: "skill", label: "周度投资诊断", prompt: "运行 weekly-investment 技能，生成本周的持仓诊断与配置建议摘要。" },
-  { kind: "skill", label: "生成项目 README", prompt: "用 generate-readme 技能，根据 src/ 目录的结构为 agent-httpd 生成一份简洁的 README 草稿。" },
+  { kind: "skill", label: "生成项目 README", prompt: "用 generate-readme 技能，根据 src/ 目录的结构为 lume 生成一份简洁的 README 草稿。" },
   { kind: "skill", label: "安全扫描", prompt: "运行 security-scan 技能，扫描 src/ 目录下的常见安全隐患并给出整改建议。" },
   // — memory — session-scoped facts
   { kind: "memory", label: "记偏好再回忆", prompt: "先记住『我最喜欢的颜色是蓝色』，然后马上问我喜欢什么颜色，验证它真的记住了。" },
@@ -118,7 +118,7 @@ const EXAMPLES: { kind: ActKind; label: string; prompt: string }[] = [
 // Bootstrap a sticky session id once (client only): minted and persisted on
 // first visit, it is what keeps transcript + facts alive across reloads on
 // the server (.data/sessions/<id>.json).
-const SESSION_KEY = "agent-httpd.chat.session";
+const SESSION_KEY = "lume.chat.session";
 function sessionKey(): string {
   if (typeof window === "undefined") return "";
   try {

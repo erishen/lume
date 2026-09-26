@@ -18,7 +18,7 @@ function About({ params, method }: { params: Params; method: string }) {
         <li className="rounded-lg border border-edge/60 bg-ink/40 p-3">
           <span className="font-semibold text-slate-200">1. Browser hits <code className="text-sky-300">/react/about</code></span>
           <span className="block text-slate-400">
-            agent-httpd relays it via FastCGI to the resident backend (-R).
+            lume relays it via FastCGI to the resident backend.
           </span>
         </li>
         <li className="rounded-lg border border-edge/60 bg-ink/40 p-3">
