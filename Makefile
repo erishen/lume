@@ -43,7 +43,7 @@ DEMO     := examples/demo.lume
 HELLO    := examples/hello.lume
 INVEST   := examples/invest.lume
 HUB      := examples/hub.lume
-EXAMPLES := $(DEMO) examples/lang-basics.lume $(HELLO) $(INVEST) $(HUB) examples/sqlite-write.lume examples/query-demo.lume examples/react-ssr.lume examples/abac.lume
+EXAMPLES := $(DEMO) examples/lang-basics.lume $(HELLO) $(INVEST) $(HUB) examples/sqlite-write.lume examples/query-demo.lume examples/react-ssr.lume examples/abac.lume examples/modules/app.lume examples/modules-server.lume
 # dev / dev-minimal 用的默认端口 (echo 与启动前清端口用)。
 PORT ?= 8082
 HUB_PORT ?= 8083
@@ -62,7 +62,7 @@ define KILL_SERVER
 	done
 endef
 SRCS     := src/main.c src/lexer.c src/parser.c src/value.c \
-            src/typecheck.c src/interp.c src/builtins.c src/vdom.c \
+            src/typecheck.c src/interp.c src/builtins.c src/loader.c src/vdom.c \
             src/bridge.c src/token.c src/iquest.c
 OBJS     := $(SRCS:src/%.c=build/%.o)
 
@@ -191,12 +191,44 @@ query-demo-watch:
 	@echo "==> lume --watch examples/query-demo.lume on :$(QUERY_DEMO_PORT) (URL query params demo)"; \
 	./$(TARGET) --watch examples/query-demo.lume
 
+# 多文件模块演示: examples/modules/app.lume (import/export)。
+# 纯计算示例(tax.lume 策略库 + app.lume 入口),不绑定端口,跑完即退;
+# 演示命名空间导入、显式导出、模块顶层只执行一次。已在 make check 内。
+#   make modules            # 构建 + 检查 + 运行
+#   make modules-watch      # --watch:改 modules 下的 .lume 自动重校验重跑
+#                          (非 server 脚本,child 跑完即退,watcher 等下次编辑)
+modules: all check
+	@echo "==> lume examples/modules/app.lume (import/export demo)"; \
+	./$(TARGET) examples/modules/app.lume
+
+modules-watch: all check
+	@echo "==> lume --watch examples/modules/app.lume (import/export demo)"; \
+	./$(TARGET) --watch examples/modules/app.lume
+
+# 多文件模块的 UI 展示: examples/modules-server.lume on :$(MODULES_UI_PORT)
+# (默认 8090)。import examples/modules/tax.lume 库,路由调用模块导出函数;
+# React 前端(frontend/src/modules/app.tsx -> www/modules/app.js)提供
+# 税额计算器 + 模块导出清单。
+#   make modules-ui          # 构建 + 检查 + 清端口 + 前台启动(Ctrl-C 停)
+#   make modules-ui-watch    # 热更新:改 examples/modules-server.lume 自动重起
+MODULES_UI_PORT ?= 8090
+modules-ui: all check ui
+	$(call KILL_SERVER,$(MODULES_UI_PORT),[m]odules-server.lume)
+	@echo "==> lume examples/modules-server.lume on :$(MODULES_UI_PORT) (import/export UI demo)"; \
+	./$(TARGET) examples/modules-server.lume
+
+modules-ui-watch: all check ui
+	$(call KILL_SERVER,$(MODULES_UI_PORT),[m]odules-server.lume)
+	@echo "==> lume --watch examples/modules-server.lume on :$(MODULES_UI_PORT) (import/export UI demo)"; \
+	./$(TARGET) --watch examples/modules-server.lume
+
 # ABAC 属性访问控制示例: examples/abac.lume on :$(ABAC_PORT)(默认 8086)。
-# 生成 .data/abac.htpasswd(4 个 demo 账号,htpasswd bcrypt),再起服务。
+# 生成 .data/abac.htpasswd(4 个 demo 账号,htpasswd bcrypt),构建 React 前端
+# (frontend/src/abac/app.tsx -> www/abac/app.js),再起服务。
 ABAC_PORT ?= 8086
 ABAC_HTPASSWD ?= .data/abac.htpasswd
 
-abac: all check
+abac: all check ui
 	@mkdir -p .data; \
 	htpasswd -B -b -c $(ABAC_HTPASSWD) admin admin123 && \
 	htpasswd -B -b $(ABAC_HTPASSWD) carol carol123 && \
@@ -204,6 +236,7 @@ abac: all check
 	htpasswd -B -b $(ABAC_HTPASSWD) bob bob123
 	$(call KILL_SERVER,$(ABAC_PORT),[a]bac.lume)
 	@echo "==> lume examples/abac.lume on :$(ABAC_PORT) (ABAC: attributes -> PERMIT/DENY)"; \
+	@echo "     cold start ~10s (MCP init) - wait, then http://localhost:$(ABAC_PORT)/ (admin/admin123)"; \
 	./$(TARGET) examples/abac.lume
 
 abac-watch:
@@ -214,6 +247,7 @@ abac-watch:
 	htpasswd -B -b $(ABAC_HTPASSWD) bob bob123
 	$(call KILL_SERVER,$(ABAC_PORT),[a]bac.lume)
 	@echo "==> lume --watch examples/abac.lume on :$(ABAC_PORT) (ABAC demo)"; \
+	@echo "     cold start ~10s (MCP init) - wait, then http://localhost:$(ABAC_PORT)/ (admin/admin123)"; \
 	./$(TARGET) --watch examples/abac.lume
 
 # --- React SSR 常驻后端(node bin/react-ssr-server,经 FastCGI relay) ---

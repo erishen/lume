@@ -52,6 +52,8 @@ make invest       # invest, portfolio assistant   → http://localhost:8082
 make hub          # hub, gateway capability hub   → http://localhost:8083
 make react-ssr   # React SSR via resident node backend → http://localhost:8085
 make abac        # ABAC demo: attributes → PERMIT/DENY  → http://localhost:8086
+make modules     # multi-file import/export demo (no server)
+make modules-ui  # import/export demo + React UI  → http://localhost:8090
 
 make test         # full suite: C unit + tool dispatch + real HTTP/SSE + GC stress
 make check        # type-check only, no server
@@ -112,7 +114,7 @@ Quick start and Containers sections.
 | Path | Contents |
 |---|---|
 | `src/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, ~5.5k lines of C11 |
-| `examples/` | 9 `.lume` examples (demo / hello / invest / hub / lang-basics / sqlite-write / query-demo / react-ssr / abac) |
+| `examples/` | 11 `.lume` examples + reusable libs: `invest/ledger.lume` (portfolio tools), `abac/policy.lume` (ABAC policy engine), `demo/ui.lume` (SSR page components), `modules/tax.lume` (tax policy) — entry files `import` them |
 | `frontend/` | React 18 + TS + Tailwind 4 client (`src/`, esbuild `--splitting`) + React SSR page sources (`react-ssr/`, built by `scripts/build-react-ssr.sh`) |
 | `www/` | docroot: hand-written HTML shells + build artifacts (mixed; don't delete wholesale) |
 | `tests/` | C unit tests (`smoke.c`) + tool dispatch (`tools_driver.c`) + end-to-end (`run_all.sh`) |
@@ -128,7 +130,7 @@ Quick start and Containers sections.
 - [docs/LUME.md](docs/LUME.md) — **User guide**: language quick tour
   (types / control flow / Result), built-ins, route & tool registration, the
   `el()` / `html()` page APIs, SSR serialization details, agent chat wiring
-  and the `/react/api/chat` SSE event envelope, server-state rules.
+  and the `/react/api/chat` SSE event envelope, server-state rules, multi-file modules (`import` / `export`).
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — **Developer guide**: layout,
   interpreter core conventions (read before changing code), how to add
   built-ins / statements / types, testing conventions, UI layering,
