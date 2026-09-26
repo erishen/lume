@@ -13,9 +13,9 @@
 //   无后端时                   → 降级伺服 docroot 静态页 www/react/home.html
 //   GET /js/react-ssr.js      → docroot 静态 bundle(客户端 hydration)
 //
-// 依赖: node + react-ssr 构建链(pnpm install + agent-httpd scripts/build-ssr.sh
-// → agent-httpd/bin/react-ssr-server)。make react-ssr 会自动构建并先后端后
-// 前端启动;直接手动跑:先起后端,再起本文件。
+// 依赖: node + react-ssr 构建链(frontend/react-ssr/ 页面源码 + scripts/
+// build-react-ssr.sh → agent-httpd/bin/react-ssr-server)。make react-ssr 会
+// 自动构建并先后端后前端启动;直接手动跑:先起后端,再起本文件。
 server {
   host = "127.0.0.1";
   port = 8085;
