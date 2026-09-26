@@ -74,6 +74,7 @@ jobs:
       - name: Build React SSR backend
         run: |
           cd frontend/react-ssr && pnpm install --frozen-lockfile
+          cd ../..
           sh scripts/build-react-ssr.sh
 
       - name: Smoke-check all examples
