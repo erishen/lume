@@ -2,6 +2,14 @@
 
 All notable changes to the Lume VS Code extension are documented here.
 
+## [0.3.7] - 2026-09-27
+
+### Added
+
+- Syntax highlighting for the symbolic logical operators introduced in
+  lume: `!` (unary not), `||` (or), `&&` (and), alongside the keyword
+  forms `not` / `or` / `and`. `!` is matched with a negative lookahead
+  so `!=` (not-equal) keeps its own highlight.
 ## [0.3.6] - 2026-09-27
 
 ### Added
