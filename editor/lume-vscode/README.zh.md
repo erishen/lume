@@ -27,7 +27,7 @@ VS Code 里打开扩展视图(`Cmd/Ctrl+Shift+X`),搜 **「Lume DSL」**
 
 ```bash
 VSCODE_EXT=~/.vscode/extensions
-ln -s ../work/research/lume/editor/lume-vscode "$VSCODE_EXT/cnb.lume-0.1.0"
+ln -s ../work/research/lume/editor/lume-vscode "$VSCODE_EXT/cnb.lume-0.2.0"
 ```
 
 然后重启 VS Code(或 `Cmd+Shift+P` → "Developer: Reload Window")。
@@ -41,7 +41,7 @@ ln -s ../work/research/lume/editor/lume-vscode "$VSCODE_EXT/cnb.lume-0.1.0"
 
 ```bash
 make vsix        # 在仓库根目录执行
-# → editor/lume-vscode/lume-0.1.0.vsix
+# → editor/lume-vscode/lume-0.2.0.vsix
 ```
 
 用 VS Code "Extensions: Install from VSIX..." 安装。发新版记得先递增

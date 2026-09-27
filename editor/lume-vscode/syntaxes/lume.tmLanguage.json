@@ -64,15 +64,19 @@
       "patterns": [
         {
           "name": "keyword.control.lume",
-          "match": "\\b(?:if|else|while|return)\\b"
+          "match": "\\b(?:if|else|while|for|return|break|continue|try)\\b"
         },
         {
           "name": "keyword.declaration.lume",
-          "match": "\\b(?:let|func)\\b"
+          "match": "\\b(?:let|func|import|export)\\b"
         },
         {
           "name": "keyword.statement.lume",
-          "match": "\\b(?:server|route|tool|run)\\b"
+          "match": "\\b(?:server|route|tool|verbs|run|mcps|skills)\\b"
+        },
+        {
+          "name": "keyword.other.lume",
+          "match": "\\b(?:as|in)\\b"
         }
       ]
     },
@@ -80,7 +84,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.lume",
-          "match": "\\b(?:print|str|len|keys|get|json|stringify|now)\\b"
+          "match": "\\b(?:print|str|len|keys|values|entries|get|put|json|stringify|now|int|float|bool|type|try|push|pop|insert|remove|map|filter|reduce|range|sum|min|max|sort|get_time|read_file|recall|remember|skill-run|fetch_url|sql_query|sql_schema|sql_tables|sql_write|tools|discovery_endpoints|calc)\\b"
         }
       ]
     },
@@ -92,7 +96,7 @@
         },
         {
           "name": "keyword.operator.lume",
-          "match": "==|!=|<=|>=|<|>|\\+|-|\\*|/|%|=|\\?"
+          "match": "==|!=|<=|>=|<|>|=>|\\+|-|\\*|/|%|=|\\?"
         }
       ]
     },

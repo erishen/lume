@@ -27,7 +27,7 @@ In VS Code, open the Extensions view (`Cmd/Ctrl+Shift+X`), search
 
 ```bash
 VSCODE_EXT=~/.vscode/extensions
-ln -s ../work/research/lume/editor/lume-vscode "$VSCODE_EXT/cnb.lume-0.1.0"
+ln -s ../work/research/lume/editor/lume-vscode "$VSCODE_EXT/cnb.lume-0.2.0"
 ```
 
 Then reload VS Code (`Cmd+Shift+P` → "Developer: Reload Window"). After
@@ -41,7 +41,7 @@ editing `syntaxes/*.json`, reload — no reinstall needed.
 
 ```bash
 make vsix        # from the repo root
-# → editor/lume-vscode/lume-0.1.0.vsix
+# → editor/lume-vscode/lume-0.2.0.vsix
 ```
 
 Install the vsix via VS Code "Extensions: Install from VSIX...". Bumping a
