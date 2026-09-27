@@ -138,6 +138,12 @@ Quick start and Containers sections.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — **Architecture**: system
   overview and design decisions, process / memory model, layering, request
   lifecycles, deployment topology and the security boundary.
+- [docs/STYLE.md](docs/STYLE.md) — **Style guide**: how to write `.lume`
+  with the current feature set (arrow expression bodies, `try` fixed keys,
+  string-key map literals, `spa`, write-path discipline), with a pre-commit
+  self-check list.
+- [docs/PITFALLS.md](docs/PITFALLS.md) — **Pitfall ledger**: real-world
+  traps with their fix status; read before writing business `.lume`.
 
 ## Containers
 
