@@ -1,0 +1,127 @@
+// Lume 内置函数声明 —— 由 C 运行时提供，非 .lume 源码定义。
+// 本文件仅供编辑器“跳转到定义 / 大纲”参考：Ctrl+Click 内置函数会
+// 跳到这里查看签名；不会被编译或 import。
+// 生成来源：interp.c bridge_seed_builtins() 注册表（38 个，2026-09-27）。
+
+// ── 输出与类型转换 ──
+// 输出到日志（运行时脱敏）
+func print(value) {}
+
+// 转字符串
+func str(value) {}
+
+// 转整数；解析失败回落 fallback（2026-09-27 起）
+func int(value, fallback) {}
+
+// 转浮点；解析失败回落 fallback
+func float(value, fallback) {}
+
+// 转布尔
+func bool(value) {}
+
+// 转字符串（与 str 同义）
+func string(value) {}
+
+// 值的可读序列化
+func stringify(value) {}
+
+// ── 集合操作 ──
+// 长度（列表/映射/字符串）
+func len(value) {}
+
+// 映射的键列表
+func keys(map) {}
+
+// 映射取值，缺键回落 fallback
+func get(map, key, fallback) {}
+
+// 映射写值
+func put(map, key, value) {}
+
+// 列表追加（DSL 层）
+func push(list, item) {}
+
+// 整数区间 [start, end)
+func range(start, end) {}
+
+// 映射/列表变换
+func map(list_or_map, fn) {}
+
+// 过滤
+func filter(list_or_map, fn) {}
+
+// 归约
+func reduce(list, fn, initial) {}
+
+// ── JSON / 时间 / 环境 ──
+// 解析 JSON 文本（失败置 VM error）
+func json(text) {}
+
+// 当前时间戳（秒）
+func now() {}
+
+// 读环境变量
+func env(name) {}
+
+// 时间戳格式化
+func strftime(fmt, ts) {}
+
+// ── 文件系统 ──
+// 目录/文件清单
+func files(path) {}
+
+// 读文件（超时/不存在返回空）
+func read_file(path) {}
+
+// 写文件（原子写，0600）
+func write_file(path, content) {}
+
+// 建目录
+func mkdir(path) {}
+
+// flock 加锁（路径）
+func lock_file(path) {}
+
+// 解锁
+func unlock_file(path) {}
+
+// ── 数据库（sqlite / PG 后端） ──
+// SQL 查询（sqlite/PG 后端）
+func sql_query(sql, params) {}
+
+// SQL 写操作
+func sql_write(sql, params) {}
+
+// ── 异常捕获 ──
+// 捕获函数内 VM error，返回 {ok}/{err}
+func try(fn) {}
+
+// ── Agent 运行时（工具/技能/MCP） ──
+// 已注册工具名列表
+func tools() {}
+
+// 已索引技能 {name,desc} 列表
+func skills() {}
+
+// MCP 条目（args 已脱敏）
+func mcps() {}
+
+// 发现端点
+func discovery_endpoints() {}
+
+// 工具/技能/MCP 目录
+func catalog() {}
+
+// ── DOM / 渲染 ──
+// 创建 vdom 元素
+func el(tag, attrs, children) {}
+
+// 渲染 vdom
+func render(vdom) {}
+
+// HTML 文本（XSS 转义）
+func html(text) {}
+
+// ── 模块 ──
+// 运行/导入另一份 .lume 文件
+func run(file) {}

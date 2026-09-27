@@ -5,12 +5,33 @@
 
 const vscode = require('vscode');
 const path = require('path');
+const fs = require('fs');
 const sym = require('./lume-symbols');
+
+// 内置函数声明文件（由 interp.c bridge_seed_builtins() 注册表生成）：
+// Ctrl+Click 内置函数时跳到这里的签名声明。
+const BUILTINS_URI = vscode.Uri.file(path.join(__dirname, 'builtins.lume'));
 
 function documentLines(document) {
   const lines = [];
   for (let i = 0; i < document.lineCount; i++) lines.push(document.lineAt(i).text);
   return lines;
+}
+
+// 内置函数查找：扫 builtins.lume（一次读取，静态文件）
+let _builtinsCache = null;
+function builtinLocation(name) {
+  if (_builtinsCache === null) {
+    try {
+      _builtinsCache = sym.scanDocumentLines(
+        fs.readFileSync(BUILTINS_URI.fsPath, 'utf8').split('\n')
+      );
+    } catch (e) {
+      _builtinsCache = []; // 文件缺失则内置跳转不可用
+    }
+  }
+  const s = sym.findInSymbols(_builtinsCache, name, false);
+  return s ? new vscode.Location(BUILTINS_URI, new vscode.Position(s.line, s.col)) : null;
 }
 
 async function findDefinition(document, position) {
@@ -34,9 +55,12 @@ async function findDefinition(document, position) {
     return s ? new vscode.Location(targetUri, new vscode.Position(s.line, s.col)) : null;
   }
 
-  // 同文件
+  // 同文件用户代码优先（用户可定义同名覆盖内置）
   const s = sym.findInSymbols(sym.scanDocumentLines(lines), w.name, false);
-  return s ? new vscode.Location(document.uri, new vscode.Position(s.line, s.col)) : null;
+  if (s) return new vscode.Location(document.uri, new vscode.Position(s.line, s.col));
+
+  // 兜底：内置函数 → builtins.lume 声明
+  return builtinLocation(w.name);
 }
 
 function activate(context) {

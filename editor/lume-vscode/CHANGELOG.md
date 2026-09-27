@@ -2,6 +2,16 @@
 
 All notable changes to the Lume VS Code extension are documented here.
 
+## [0.3.2] - 2026-09-27
+
+### Added
+
+- **Built-in function jump**: Go to Definition now falls back to
+  `builtins.lume` (generated from the `bridge_seed_builtins()` registry,
+  38 functions with signatures & one-line docs), so `int`/`map`/`try`/
+  `sql_query`/`render`… resolve instead of dead-ending. User-defined
+  same-name symbols still win.
+
 ## [0.3.1] - 2026-09-27
 
 ### Changed

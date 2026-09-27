@@ -2,7 +2,7 @@
   "name": "lume",
   "displayName": "Lume DSL",
   "description": "Syntax highlighting + Go-to-Definition & outline for the Lume scripting DSL",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "license": "MIT",
   "publisher": "erishen",
   "engines": {
