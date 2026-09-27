@@ -49,12 +49,23 @@ version? Increment `version` in `package.json` first.
 
 ## Highlight coverage
 
-- Keywords: `server route tool func let return if else while`
+- Keywords: `server route tool verbs run mcps skills`, `func let import export`,
+  `if else while for return break continue try`, `as in`
+- Arrow operator: `=>` (expression and block bodies)
 - Types: `type int float string bool Result` (storage.type, TS-style)
 - Literals: `true false null`, numbers, strings (with `\n \t \\ \"` escapes)
-- Built-ins: `print str len keys get json stringify now`
+- Built-ins: `print str len keys values entries get put json stringify now int
+  float bool type try push pop insert remove map filter reduce range sum min
+  max sort get_time read_file recall remember skill-run fetch_url sql_query
+  sql_schema sql_tables sql_write tools discovery_endpoints calc` and more
 - Logic / comparison / assignment operators, `?`
 - Comments and auto-pairing
+
+> v0.2.0 (2026-09-27) added the module-system keywords (`import export as`),
+> v0.4.x control flow (`for break continue try`), verb routes
+> (`verbs mcps skills`), the `=>` arrow, and a much fuller builtin-function
+> list. The grammar is a pure TextMate highlighter — `--check` (the real
+> compiler front-end) remains the authority for syntax validity.
 
 ## Known trade-offs
 

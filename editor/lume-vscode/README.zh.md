@@ -49,12 +49,22 @@ make vsix        # 在仓库根目录执行
 
 ## 高亮覆盖
 
-- 关键字:`server route tool func let return if else while`
+- 关键字:`server route tool verbs run mcps skills`、`func let import export`、
+  `if else while for return break continue try`、`as in`
+- 箭头运算符:`=>`(表达式体与块体)
 - 类型:`type int float string bool Result`(storage.type,TS 风格)
 - 字面量:`true false null`、数字、字符串(含 `\n \t \\ \"` 转义)
-- 内建函数:`print str len keys get json stringify now`
+- 内建函数:`print str len keys values entries get put json stringify now int
+  float bool type try push pop insert remove map filter reduce range sum min
+  max sort get_time read_file recall remember skill-run fetch_url sql_query
+  sql_schema sql_tables sql_write tools discovery_endpoints calc` 等
 - 逻辑/比较/赋值运算符、`?`
 - 注释与自动配对
+
+> v0.2.0(2026-09-27)新增模块系统关键字(`import export as`)、v0.4.x 控制流
+> (`for break continue try`)、动词路由(`verbs mcps skills`)、`=>` 箭头,
+> 并大幅补全内建函数表。grammar 是纯 TextMate 高亮器——语法是否合法仍以
+> `--check`(真正的编译前端)为准。
 
 ## 已知取舍
 
