@@ -2,6 +2,14 @@
 
 All notable changes to the Lume VS Code extension are documented here.
 
+## [0.3.1] - 2026-09-27
+
+### Changed
+
+- Drop the explicit `activationEvents` entry: VS Code auto-generates
+  `onLanguage:lume` from `contributes.languages` (since 1.74), so declaring it
+  manually was redundant.
+
 ## [0.3.0] - 2026-09-27
 
 ### Added
