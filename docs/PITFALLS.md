@@ -135,6 +135,14 @@ API 404、非 HTML 请求（`fetch`、curl 无 Accept）、HEAD 全部保持原�
 调用 `put(m,k,v)`、`get(m,k)` 合法（表达式层接受方法关键字），
 但 `let put = ...` 不合法（声明层只收纯标识符）。两边行为不一致，记住即可。
 
+### import 命名空间 vs 内置函数（已修复 v0.4.2）
+`import "m.lume" as tools` 曾经与内置 `tools()` 重名时报 `duplicate name`，
+而 `let len = 3` 遮蔽内置是合法的——两条声明路径行为不一致。v0.4.2 起
+import 命名空间与 `let`/`func` 同语义：**内置名允许遮蔽**。仍拦：两个
+import 同名、import 与用户声明（`let`/`func`）同名。注意：遮蔽内置后该名字
+的内置调用不可用（`as tools` 后 `tools()` 会尝试调用命名空间对象而报错），
+确实还需要内置函数时，换个命名空间名（如 `as topics`）。
+
 ### hash 路由刷新覆盖（已随 SPA fallback 解决）
 旧前端用 `#/items` 路由，刷新时浏览器会把 `#` 后的部分当作 URL 的一部分发给服务端。
 现在用 `spa = true` 走 history 路由，不再需要 hash。

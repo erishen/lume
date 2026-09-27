@@ -95,8 +95,12 @@ void ck_stmt(Checker *c, Node *n) {
                 ck_fail(c, n->line, "'import' is only available in a file module");
                 return;
             }
+            /* 与 let/func 同语义: 内置名允许遮蔽(scope_decl 也是这么处理的,
+             * P1 重名拦截只拦用户声明之间)——`import "m.lume" as tools` 不会
+             * 撞内置 tools()。仍拦: 命名空间重名(scope_get_ns)与用户声明重名。 */
             if (scope_get_ns(c->scope, n->as.imp.ns) ||
-                scope_get(c->scope, n->as.imp.ns)) {
+                (!is_builtin_name(n->as.imp.ns) &&
+                 scope_get(c->scope, n->as.imp.ns))) {
                 ck_fail(c, n->line, "duplicate name '%s'",
                         n->as.imp.ns);
                 return;
