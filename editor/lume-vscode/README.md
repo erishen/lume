@@ -11,7 +11,9 @@ download needed, no vsce packaging required for local use.
 
 ```
 editor/lume-vscode/
-├── package.json                    # language id "lume", .lume extension, grammar registration
+├── package.json                    # language id "lume", .lume extension, grammar + language features
+├── extension.js                    # activates Definition & DocumentSymbol providers
+├── lume-symbols.js                 # static symbol scanner (pure logic, node-testable)
 ├── language-configuration.json     # // and /* */ comments, {}()[] pairs
 └── syntaxes/lume.tmLanguage.json   # TextMate grammar (highlighting rules)
 ```
@@ -46,6 +48,19 @@ make vsix        # from the repo root
 
 Install the vsix via VS Code "Extensions: Install from VSIX...". Bumping a
 version? Increment `version` in `package.json` first.
+
+## Language features (v0.3.0)
+
+- **Go to Definition** — `F12` / `Cmd+Click`:
+  - same-file: jump to `func`/`let` definitions;
+  - cross-file: `ns.name` calls (e.g. `data.load_stage_by_id(...)`) resolve
+    through `import "lib/data.lume" as data` to the target module's `export`
+    definition.
+- **Outline**: top-level `func`/`let` (incl. `export`) appear in the symbol
+  tree; locals inside function/tool/route bodies are excluded.
+- Implemented as a static scanner (no LSP, zero dependencies) — good enough
+  for typical `.lume` files; it does not parse expressions or resolve
+  aliases beyond the `import … as` map.
 
 ## Highlight coverage
 

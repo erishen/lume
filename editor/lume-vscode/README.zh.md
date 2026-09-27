@@ -11,7 +11,9 @@
 
 ```
 editor/lume-vscode/
-├── package.json                    # 语言 id "lume"、.lume 后缀、grammar 登记
+├── package.json                    # 语言 id "lume"、.lume 后缀、grammar 与语言功能登记
+├── extension.js                    # 激活定义跳转与大纲符号 Provider
+├── lume-symbols.js                 # 静态符号扫描器（纯逻辑，可 node 单测）
 ├── language-configuration.json     # // 与 /* */ 注释、{}()[] 配对
 └── syntaxes/lume.tmLanguage.json   # TextMate 语法(高亮规则)
 ```
@@ -46,6 +48,17 @@ make vsix        # 在仓库根目录执行
 
 用 VS Code "Extensions: Install from VSIX..." 安装。发新版记得先递增
 `package.json` 里的 `version`。
+
+## 语言功能（v0.3.0）
+
+- **跳转到定义** — `F12` / `Cmd+Click`：
+  - 同文件：跳转到 `func` / `let` 定义；
+  - 跨文件：`ns.name` 调用（如 `data.load_stage_by_id(...)`）按
+    `import "lib/data.lume" as data` 解析到目标模块的 `export` 定义。
+- **大纲**：顶层 `func` / `let`（含 `export`）出现在符号树；函数体/tool 体/
+  路由体内的局部变量不收录。
+- 实现为静态扫描（无 LSP、零依赖）——对常规 `.lume` 文件足够；不解析
+  表达式，别名解析只认 `import … as` 映射。
 
 ## 高亮覆盖
 

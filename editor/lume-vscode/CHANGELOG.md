@@ -2,6 +2,19 @@
 
 All notable changes to the Lume VS Code extension are documented here.
 
+## [0.3.0] - 2026-09-27
+
+### Added
+
+- **Go to Definition** (F12 / Cmd+Click): same-file `func`/`let` jumping, and
+  cross-file jumping for `ns.name` calls resolved through `import "…" as ns`
+  to the target module's `export` definitions.
+- **Outline / Document Symbols**: top-level `func` / `let` (incl. `export`)
+  shown in the symbol tree; locals inside function/tool/route bodies are
+  excluded via brace-depth tracking.
+- Implemented as a static scanner (`extension.js` + `lume-symbols.js`, no LSP,
+  no dependencies). Language features activate on `onLanguage:lume`.
+
 ## [0.2.0] - 2026-09-27
 
 ### Added

@@ -1,13 +1,17 @@
 {
   "name": "lume",
   "displayName": "Lume DSL",
-  "description": "Syntax highlighting for the Lume scripting DSL",
-  "version": "0.2.0",
+  "description": "Syntax highlighting + Go-to-Definition & outline for the Lume scripting DSL",
+  "version": "0.3.0",
   "license": "MIT",
   "publisher": "erishen",
   "engines": {
     "vscode": "^1.75.0"
   },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:lume"
+  ],
   "categories": [
     "Programming Languages"
   ],
