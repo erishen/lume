@@ -95,6 +95,9 @@ static void lex_string(LexOut *o, const char *str_start) {
         if (*p == '\n') {
             lx_error(lx, "unterminated string literal");
             emit(o, TOK_ERROR, str_start, 0);
+            lx->pos += 1; /* past the opening quote: without this the lexer
+                              re-processes the same '"' forever (infinite
+                              loop) instead of surfacing the error */
             return;
         }
         if (*p == '\\') {
@@ -106,6 +109,7 @@ static void lex_string(LexOut *o, const char *str_start) {
     if (*p != '"') {
         lx_error(lx, "unterminated string literal");
         emit(o, TOK_ERROR, str_start, 0);
+        lx->pos += 1; /* same as above: escape the infinite loop */
         return;
     }
     p++; /* closing quote */
