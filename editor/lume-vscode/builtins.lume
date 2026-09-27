@@ -1,7 +1,7 @@
 // Lume 内置函数声明 —— 由 C 运行时提供，非 .lume 源码定义。
 // 本文件仅供编辑器“跳转到定义 / 大纲”参考（Ctrl+Click 内置函数跳到这里），
 // 不会被编译或 import。每个函数附行为说明与实现位置。
-// 生成来源：interp.c bridge_seed_builtins() 注册表（38 个）。
+// 生成来源：interp.c bridge_seed_builtins() 注册表（39 个）。
 // 生成脚本：editor/lume-vscode/scripts/gen-builtins.py（lume 加内置后重跑即可）。
 
 // ── 模块 ──
@@ -139,3 +139,9 @@ func render(vdom) {}  // 实现: src/vdom.c
 
 // HTML 文本（自动 XSS 转义）。参数：text → string。实现：src/vdom.c
 func html(text) {}  // 实现: src/vdom.c
+
+// ── 字符串变换 ──
+// 字面量全局替换：replace(s, from, to) 把 s 中所有 from 替换为 to。
+//   from 为空或无匹配 → 返回原串；UTF-8 按字节序列匹配（中文可用）。
+//   实现：src/builtins_str.c
+func replace(s, from, to) {}  // 实现: src/builtins_str.c

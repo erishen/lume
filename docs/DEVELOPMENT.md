@@ -64,7 +64,7 @@ VS Code 扩展 `editor/lume-vscode/` 提供 `.lume` 的完整编辑体验：
 | 注释与括号 | `//` `/* */` 注释、`{}()[]` 自动配对（language-configuration） |
 | 跳转到定义 | 同文件 `func`/`let`；跨文件 `ns.name` 按 `import … as` 解析到 `export`；内置函数直达 **C 实现**（Peek 里同时给 `builtins.lume` 文档声明） |
 | 大纲符号 | 顶层 `func`/`let`（含 `export`）；函数体/tool 体/路由体内的局部变量不收录 |
-| 内置函数文档 | `builtins.lume`（38 个：签名 + 行为说明 + 实现位置），由 `scripts/gen-builtins.py` 从 `bridge_seed_builtins()` 注册表自动生成，lume 加内置后重跑即可同步 |
+| 内置函数文档 | `builtins.lume`（39 个：签名 + 行为说明 + 实现位置），由 `scripts/gen-builtins.py` 从 `bridge_seed_builtins()` 注册表自动生成，lume 加内置后重跑即可同步 |
 
 内置函数跳 C 实现需要定位 lume 仓库根：优先 `lume.sourceRoot` 设置，
 未配置时在工作区自动探测（BFS 深度 3，目录名含 `lume` 优先）。
@@ -122,6 +122,11 @@ func greeting(u: User): string {
   return "hi, " + u.name + " (age " + str(u.age) + ")";
 }
 
+// 动态路径段：路径含 `:name` 段（`/api/stage/:id`）时，framework 匹配
+// （agent-httpd src/core/framework.c route_path_matches）逐段匹配并捕获
+// URL 解码后的值到 HttpRequest.path_param_*，bridge.c route_shim 同步
+// 逐段定位 DSL 路由，request_to_value 暴露为 req.params。匹配优先级：
+// 字面量精确 > 动态段 > 尾部 `*`（framework_route_dispatch 三遍扫描）。
 route "GET", "/hello", func(req) {
   return { status: 200, type: "text/plain", body: "hi" };
 };
@@ -182,6 +187,8 @@ run();   // 启动服务器（阻塞）
 `run()` `print(...)` `str(...)` `int(...)` `float(...)` `bool(...)` `string(...)`
 `len(x)` `keys(m)` `get(m,k[,def])`
 `json(s)` `stringify(v)` `now()`（注册在 `interp.c: bridge_seed_builtins`）。
+字符串变换：`replace(s, from, to)`（`src/builtins_str.c`，字面量全局替换，
+空 from / 无匹配返回原串）。
 发现类内建：`env(k)`、`files(dir)`、`read_file(path)`、`tools()`、`skills()`、`mcps()`——
 `tools()`/`skills()` 枚举 libagenthttpd.a 的注册表（工具:本地内建 + DSL tool +
 MCP + router 代理;技能:SKILL.md 索引）,`files()`/`read_file()` 供目录/目录清单

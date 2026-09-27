@@ -28,6 +28,7 @@ SIG = {
     "int": "int(value, fallback)", "float": "float(value, fallback)",
     "bool": "bool(value)", "string": "string(value)", "stringify": "stringify(value)",
     "len": "len(value)", "keys": "keys(map)", "get": "get(map, key, fallback)",
+    "replace": "replace(s, from, to)",
     "put": "put(map, key, value)", "push": "push(list, item)",
     "range": "range(start, end)", "map": "map(list_or_map, fn)",
     "filter": "filter(list_or_map, fn)", "reduce": "reduce(list, fn, initial)",
@@ -47,7 +48,8 @@ IMPL = {
     "print": "src/builtins.c", "str": "src/builtins.c", "int": "src/builtins.c",
     "float": "src/builtins.c", "bool": "src/builtins.c", "string": "src/builtins.c",
     "stringify": "src/builtins.c", "len": "src/builtins.c", "keys": "src/builtins.c",
-    "get": "src/builtins.c", "json": "src/builtins.c", "push": "src/builtins.c",
+    "get": "src/builtins.c",
+    "replace": "src/builtins_str.c", "json": "src/builtins.c", "push": "src/builtins.c",
     "try": "src/builtins.c", "now": "src/builtins.c",
     # builtins_hof.c（高阶函数）
     "range": "src/builtins_hof.c", "map": "src/builtins_hof.c",
@@ -120,6 +122,9 @@ DOC = {
     "el": ("创建 vdom 元素。参数：tag, attrs, children → vdom。实现：src/vdom.c"),
     "render": ("渲染 vdom 为 HTML。参数：vdom → string。实现：src/vdom.c"),
     "html": ("HTML 文本（自动 XSS 转义）。参数：text → string。实现：src/vdom.c"),
+    "replace": ("字面量全局替换：replace(s, from, to) 把 s 中所有 from 替换为 to。",
+                "from 为空或无匹配 → 返回原串；UTF-8 按字节序列匹配（中文可用）。",
+                "实现：src/builtins_str.c"),
 }
 
 # 分组（顺序与注册表一致，便于阅读）
@@ -133,6 +138,7 @@ GROUPS = [
     ("异常捕获", ["try"]),
     ("Agent 运行时（工具/技能/MCP）", ["tools", "skills", "mcps", "discovery_endpoints", "catalog"]),
     ("DOM / 渲染", ["el", "render", "html"]),
+    ("字符串变换", ["replace"]),
 ]
 
 missing = [n for n in names if n not in DOC or n not in IMPL or n not in SIG]

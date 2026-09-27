@@ -2,6 +2,16 @@
 
 All notable changes to the Lume VS Code extension are documented here.
 
+## [0.3.6] - 2026-09-27
+
+### Added
+
+- `replace(s, from, to)` in `builtins.lume` (global literal replacement;
+  empty `from` or no match returns the string unchanged). Generator
+  `gen-builtins.py` gained the SIG/IMPL/DOC entries and a new "字符串变换"
+  group — 39 builtins now (was 38), still verified against the interp.c
+  registry.
+
 ## [0.3.5] - 2026-09-27
 
 ### Fixed

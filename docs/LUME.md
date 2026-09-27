@@ -149,7 +149,8 @@ return { type: "text/plain", body: "hello" };
 `remote_addr`、`host`、`content_type`、`content_length`、`user_agent`、
 `body`、`query`(原始查询串,不含 `?`;无查询 → `null`)、`query_params`
 (解析后的参数 map,key/value 均已 URL 解码,`+` → 空格,段无 `=` 时值为
-空串,重复 key 后者覆盖;无查询 → 空 map)。
+空串,重复 key 后者覆盖;无查询 → 空 map)、`params`(动态路径段捕获,
+`:name` 段 → 解码后的值;路由无动态段 → 空 map)。
 
 ### 方法与路由缩写
 
@@ -166,7 +167,13 @@ options "/api",        (req) => { return ""; };
 ```
 
 `get "path", fn;` 完全等价于 `route "GET", "path", fn;`,也支持路径通配
-(`get "/files/*", fn`)。已注册的路由在框架内置的"方法门"之前分发,所以
+(`get "/files/*", fn`)。
+
+**动态路径段**:路径可含 `:name` 段(`get "/api/stage/:id", fn`),匹配
+**恰好一个**路径段(不跨 `/`),捕获值经 URL 解码后放进请求 map 的
+`params` 字段:`get(req, "params", {}).id` 取参。字面量与动态段可混用
+(`get "/api/stage/:id/quiz", fn`)。匹配优先级:字面量精确 > 动态段 >
+尾部 `*` 通配,所以 `get "/api/me", fn` 永远赢过 `get "/api/:a", fn`。已注册的路由在框架内置的"方法门"之前分发,所以
 **不需要 `/cgi-bin` 路径**,PUT/PATCH/DELETE 会直接命中你的 handler;方法名
 也不限于上面七个——`route "PROPFIND", "/x", fn` 这类任意字符串同样有效。
 
