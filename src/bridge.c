@@ -565,6 +565,8 @@ void bridge_run(VM *vm) {
         if (found && IS_NUM(v)) cfg.vite_upstream_port = (int)AS_NUM(v);
         v = map_get(vm, m, "no_directory_listing", &found);
         if (found && value_truthy(v)) cfg.no_directory_listing = 1;
+        v = map_get(vm, m, "spa", &found);
+        if (found && value_truthy(v)) cfg.spa = 1; /* SPA history-mode fallback */
 
         /* string fields are strdup'd: agenthttpd_run blocks for the process
          * lifetime, so these intentionally leak. */
