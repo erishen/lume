@@ -817,6 +817,7 @@ void bridge_seed_builtins(VM *vm) {
         {"float", b_float},
         {"bool", b_bool},
         {"string", b_string},
+        {"replace", b_replace},
         {"len", b_len},
         {"keys", b_keys},
         {"get", b_get},

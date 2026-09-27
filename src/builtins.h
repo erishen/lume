@@ -20,6 +20,7 @@ Value b_int(VM *vm, int argc, Value *args);
 Value b_float(VM *vm, int argc, Value *args);
 Value b_bool(VM *vm, int argc, Value *args);
 Value b_string(VM *vm, int argc, Value *args);
+Value b_replace(VM *vm, int argc, Value *args);
 Value b_len(VM *vm, int argc, Value *args);
 Value b_keys(VM *vm, int argc, Value *args);
 Value b_get(VM *vm, int argc, Value *args);

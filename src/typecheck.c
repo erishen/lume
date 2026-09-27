@@ -213,6 +213,7 @@ bool is_builtin_name(const char *name) {
         "tools", "skills", "mcps",
         "discovery_endpoints", "catalog", /* discovery builtins */
         "push", "try", /* collection / error handling (2026-09-27) */
+        "replace", /* string builtins (2026-09-27) */
     };
     for (size_t i = 0; i < sizeof(BUILTINS) / sizeof(BUILTINS[0]); i++)
         if (strcmp(BUILTINS[i], name) == 0) return true;
@@ -390,6 +391,7 @@ bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
             "sql_query", "sql_write", /* sqlite builtins (DSL-level) */
             "lock_file", "unlock_file", /* flock advisory lock (invest ledger) */
             "push", "try", /* 列表追加 / 错误捕获 (2026-09-27) */
+            "replace", /* 字符串内建 (2026-09-27) */
             "tools", "skills", "mcps",
             "discovery_endpoints", "catalog", /* discovery builtins */
         };

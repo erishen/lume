@@ -200,6 +200,15 @@ int main(void) {
           "let a = \"hello\"; let b = \" world\"; print(a + b + \"!\");",
           "hello world!\n");
 
+    check("replace global literal",
+          "print(replace(\"a-b-c\", \"-\", \"+\"));\n"
+          "print(replace(\"banana\", \"an\", \"AN\"));\n"
+          "print(replace(\"hello\", \"x\", \"y\"));\n"
+          "print(replace(\"abc\", \"\", \"X\"));\n"
+          "print(replace(\"中文abc中文\", \"中文\", \"ZH\"));\n"
+          "print(replace(\"aaaa\", \"aa\", \"b\"));\n",
+          "a+b+c\nbANANa\nhello\nabc\nZHabcZH\nbb\n");
+
     check("adjacent string literals merge (JS-style)",
           "print(\"a\" \"b\" \"c\");\n"
           "let s = \"p\" \"q\";\n"
