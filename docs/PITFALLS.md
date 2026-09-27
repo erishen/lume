@@ -68,19 +68,28 @@ m."带 空 格 的 键" = 3;   // 成员访问也能用字符串键了
 整个 handler 直接 500。合法 body 没事，但「宽松解析 + 兜底」写不出来。
 
 **现状（2026-09-27 起）**：`try(func)` 捕获被调函数内部的一切 VM error，返回
-`{ ok: 结果 }` 或 `{ err: 消息 }`：
+**固定双键结构** `{ ok: 结果, err: null }`（成功）或 `{ ok: null, err: 消息 }`
+（失败）——两个键始终都在，`r.err == null` 即成功。参数可以是 `func` 字面量
+或箭头函数（含表达式体 `=> expr`，2026-09-27 起支持）：
 
 ```lume
-let r = try(func() { return json(req.body); });
-if (r.err) {
+let r = try(() => json(req.body));          // 表达式体箭头
+if (r.err != null) {
   return { status: 400, body: { err: "body 不是合法 JSON: " + r.err } };
 }
 return { status: 200, body: r.ok };
 ```
 
-**注意**：`try` 返回的是普通 map（键 `ok` / `err`），不是 Result 类型——
-`r.ok` / `r.err` 直接读即可，**不需要** `?` 操作符（`?` 是给 `{ok}/{err}` 字面量
-结果用的）。error 在 `try` 返回前已被清理，后续语句不受影响。
+**注意一**：`try` 返回的是普通 map，不是 Result 类型——不需要 `?` 操作符
+（`?` 是给 `{ok}/{err}` 字面量结果用的）。error 在 `try` 返回前已被清理。
+
+**注意二（成员访问 vs get()，真实踩坑 2026-09-27）**：Lume 的成员访问
+`m.xxx` 是**严格**的——键缺失时抛 sticky error（`map has no field 'xxx'`），
+不是返回 null；只有 `get(m, key, default)` 是宽容的。曾在 `try` 还返回单键
+结构时，成功路径（map 只有 `ok` 没有 `err`）用 `r.err` 直读判空，反而 500。
+现在 `try` 返回双键结构，`r.ok` / `r.err` 直读安全；但对**未知来源的 map**
+（`json()` 解码、外部数据、上游返回值）判断键是否存在，一律用
+`get(m, key, null)`，不要用成员访问。
 
 ---
 

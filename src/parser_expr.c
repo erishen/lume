@@ -70,7 +70,22 @@ static Node *parse_primary(Parser *p) {
             n->as.funclit.param_types = arrow_types;
             n->as.funclit.arity = arrow_arity;
             n->as.funclit.ret = NULL;    /* arrows carry no return annotation */
-            n->as.funclit.body = parse_block(p);
+            if (check(p, TOK_LBRACE)) {
+                n->as.funclit.body = parse_block(p);  /* `=> { ... }` 块体 */
+            } else {
+                /* `=> expr` 表达式体: 隐式 return, 合成 { return expr; }。
+                 * 注意 `=> {` 一律按块体(与 map 字面量体的歧义按 block 优先,
+                 * 想返回 map 字面量写 `=> ({...})` 即可)。 */
+                Node *expr = parse_expression(p);
+                if (!expr) return NULL;
+                Node *ret = nalloc(N_RETURN, expr->line);
+                ret->as.ret.expr = expr;
+                n->as.funclit.body = nalloc(N_BLOCK, expr->line);
+                n->as.funclit.body->as.block.stmts =
+                    malloc(sizeof(Node *));
+                n->as.funclit.body->as.block.stmts[0] = ret;
+                n->as.funclit.body->as.block.count = 1;
+            }
             if (!n->as.funclit.body) return NULL;
             return n;
         }

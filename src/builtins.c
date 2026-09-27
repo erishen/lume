@@ -267,8 +267,11 @@ static void native_push(VM *vm, int argc, Value *args, Value *out) {
     *out = args[0];
 }
 
-/* try(func) — 捕获被调函数内部置起的 VM error, 返回 { ok: 结果 } 或
- * { err: 消息 }, 不再让整个 handler 500。json() 解析失败、类型错误等
+/* try(func) — 捕获被调函数（func 字面量或 (…) => {…} 箭头函数）内部置起的
+ * VM error。返回固定双键结构 { ok: 结果, err: null }（成功）或
+ * { ok: null, err: 消息 }（失败）：成员访问 r.ok / r.err 永不因缺键抛
+ * sticky error（m.xxx 缺键会报 "map has no field"），r.err == null 即成功。
+ * 对未知来源的 map 仍建议用宽容的 get() 读取。json() 解析失败、类型错误等
  * 一律可接住; error 是 sticky 的, 这里按调用点显式清掉。 */
 static void native_try(VM *vm, int argc, Value *args, Value *out) {
     if (argc != 1 || !IS_OBJ(args[0]) ||
@@ -284,12 +287,14 @@ static void native_try(VM *vm, int argc, Value *args, Value *out) {
     Obj *m = AS_OBJ(make_map(vm));
     vm_push(vm, val_obj((Obj *)m)); /* root while filling */
     if (vm->error) {
+        map_set(vm, m, "ok", val_null());
         map_set(vm, m, "err",
                 make_string_cstr(vm, vm->error_msg[0] ? vm->error_msg : "error"));
         vm->error = false;
         vm->error_msg[0] = '\0';
     } else {
         map_set(vm, m, "ok", result);
+        map_set(vm, m, "err", val_null());
     }
     *out = vm_pop(vm);
 }
