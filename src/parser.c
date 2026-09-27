@@ -67,9 +67,17 @@ bool expect(Parser *p, TokenType t) {
 
 char *ident_name(Parser *p, Token t) {
     (void)p;
-    char *s = malloc((size_t)t.length + 1);
-    memcpy(s, t.start, (size_t)t.length);
-    s[t.length] = '\0';
+    const char *start = t.start;
+    int len = t.length;
+    /* 字符串字面量作 map 键 / 成员名时剥掉首尾引号(键内转义序列原样保留,
+     * 与运行时字符串求值口径不同;含转义的键极罕见,见 docs/PITFALLS.md) */
+    if (t.type == TOK_STRING && len >= 2) {
+        start++;
+        len -= 2;
+    }
+    char *s = malloc((size_t)len + 1);
+    memcpy(s, start, (size_t)len);
+    s[len] = '\0';
     return s;
 }
 
@@ -99,6 +107,7 @@ const char *method_keyword_name(TokenType t) {
 bool is_field_token(TokenType t) {
     return t == TOK_IDENT || t == TOK_TYPE || t == TOK_INT || t == TOK_FLOAT ||
            t == TOK_KW_STRING || t == TOK_BOOL || t == TOK_RESULT ||
+           t == TOK_STRING || /* 字符串字面量 map 键 {"a": 1} / 成员名 (2026-09-27) */
            is_method_keyword(t);
 }
 
