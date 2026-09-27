@@ -838,6 +838,8 @@ void bridge_seed_builtins(VM *vm) {
         {"unlock_file", b_unlock_file},
         {"strftime", b_strftime},
         {"put", b_put},
+        {"push", b_push}, /* DSL 层列表追加 (2026-09-27) */
+        {"try", b_try}, /* 捕获 VM error -> {ok}/{err} (2026-09-27) */
         {"tools", b_tools},
         {"skills", b_skills},
         {"mcps", b_mcps},

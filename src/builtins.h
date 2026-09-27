@@ -41,6 +41,8 @@ Value b_lock_file(VM *vm, int argc, Value *args);
 Value b_unlock_file(VM *vm, int argc, Value *args);
 Value b_strftime(VM *vm, int argc, Value *args);
 Value b_put(VM *vm, int argc, Value *args);
+Value b_push(VM *vm, int argc, Value *args);
+Value b_try(VM *vm, int argc, Value *args);
 Value b_tools(VM *vm, int argc, Value *args);
 Value b_skills(VM *vm, int argc, Value *args);
 Value b_mcps(VM *vm, int argc, Value *args);

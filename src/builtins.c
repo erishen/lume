@@ -252,6 +252,48 @@ static void native_json(VM *vm, int argc, Value *args, Value *out) {
     *out = vm_pop(vm); /* json_parse pushed the result above the args */
 }
 
+/* push(list, item) — DSL 层列表追加(之前 list_push 只在 C 内部可用,
+ * 列表只能 map(fn, keys(m)) 现造, 是明显的人体工学缺口)。返回原列表。 */
+static void native_push(VM *vm, int argc, Value *args, Value *out) {
+    if (argc != 2) {
+        vm_set_error(vm, "push(list, item) needs 2 arguments, got %d", argc);
+        return;
+    }
+    if (!IS_OBJ(args[0]) || AS_OBJ(args[0])->type != OBJ_LIST) {
+        vm_set_error(vm, "push() first argument must be a list");
+        return;
+    }
+    list_push(vm, AS_OBJ(args[0]), args[1]);
+    *out = args[0];
+}
+
+/* try(func) — 捕获被调函数内部置起的 VM error, 返回 { ok: 结果 } 或
+ * { err: 消息 }, 不再让整个 handler 500。json() 解析失败、类型错误等
+ * 一律可接住; error 是 sticky 的, 这里按调用点显式清掉。 */
+static void native_try(VM *vm, int argc, Value *args, Value *out) {
+    if (argc != 1 || !IS_OBJ(args[0]) ||
+        (AS_OBJ(args[0])->type != OBJ_FUNC && AS_OBJ(args[0])->type != OBJ_NATIVE)) {
+        vm_set_error(vm, "try() needs a function");
+        return;
+    }
+    Value callee = args[0];
+    vm_push(vm, callee);
+    call_function(vm, callee, 0);
+    Value result = vm_pop(vm); /* 出错时 call_function 保证槽位上是 null */
+
+    Obj *m = AS_OBJ(make_map(vm));
+    vm_push(vm, val_obj((Obj *)m)); /* root while filling */
+    if (vm->error) {
+        map_set(vm, m, "err",
+                make_string_cstr(vm, vm->error_msg[0] ? vm->error_msg : "error"));
+        vm->error = false;
+        vm->error_msg[0] = '\0';
+    } else {
+        map_set(vm, m, "ok", result);
+    }
+    *out = vm_pop(vm);
+}
+
 static void native_stringify(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "stringify() needs a value"); return; }
     sbuf b = {0};
@@ -300,6 +342,8 @@ Value b_lock_file(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, a
 Value b_unlock_file(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_unlock_file); }
 Value b_strftime(VM *vm, int argc, Value *args)   { return vm_native(vm, argc, args, native_strftime); }
 Value b_put(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_put); }
+Value b_push(VM *vm, int argc, Value *args)       { return vm_native(vm, argc, args, native_push); }
+Value b_try(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_try); }
 Value b_tools(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_tools); }
 Value b_skills(VM *vm, int argc, Value *args)     { return vm_native(vm, argc, args, native_skills); }
 Value b_mcps(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_mcps); }
