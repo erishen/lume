@@ -2,6 +2,16 @@
 
 All notable changes to the Lume VS Code extension are documented here.
 
+## [0.3.5] - 2026-09-27
+
+### Fixed
+
+- `builtins.lume` docs for `env()` and `read_file()` were wrong: `env()` returns
+  **null** for unset or sensitive variable names (not empty string — auth
+  checks compare against null), and `read_file()` returns **null** for missing/
+  unreadable files (not empty string; oversized files set a VM error). Docs
+  regenerated from the actual C behaviour.
+
 ## [0.3.4] - 2026-09-27
 
 ### Added

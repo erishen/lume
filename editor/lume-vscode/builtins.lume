@@ -72,7 +72,8 @@ func json(text) {}  // 实现: src/builtins.c
 // 当前时间戳（秒）。参数：无 → number。实现：src/builtins.c
 func now() {}  // 实现: src/builtins.c
 
-// 读环境变量；未设置返回空字符串。参数：name → string。实现：src/builtins_fs.c
+// 读环境变量；未设置或敏感变量名返回 null（与缺失同形，判断认证开关用 null 比较）。
+//   参数：name → string|null。实现：src/builtins_fs.c
 func env(name) {}  // 实现: src/builtins_fs.c
 
 // 时间戳格式化。参数：fmt, ts → string。实现：src/builtins_fs.c
@@ -82,7 +83,7 @@ func strftime(fmt, ts) {}  // 实现: src/builtins_fs.c
 // 目录/文件清单。参数：path → list[string]。实现：src/builtins_fs.c
 func files(path) {}  // 实现: src/builtins_fs.c
 
-// 读文件；超时或不存在返回空字符串。
+// 读文件；不存在/不可读返回 null（文件过大置 VM error）。
 //   参数：path → string。实现：src/builtins_fs.c
 func read_file(path) {}  // 实现: src/builtins_fs.c
 
