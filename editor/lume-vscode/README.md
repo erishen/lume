@@ -66,9 +66,12 @@ version? Increment `version` in `package.json` first.
   - cross-file: `ns.name` calls (e.g. `data.load_stage_by_id(...)`) resolve
     through `import "lib/data.lume" as data` to the target module's `export`
     definition;
-  - built-ins: `int`/`map`/`try`/`sql_query`… jump to `builtins.lume`
-    (generated from the C registry — signatures + one-line docs); user
-    same-name symbols win.
+  - built-ins: `int`/`map`/`try`/`sql_query`… resolve to **the C
+    implementation** (`native_int` in `src/builtins.c`, `native_map` in
+    `src/builtins_hof.c`, …) plus the `builtins.lume` doc declaration —
+    both offered in a Peek list; user same-name symbols win. The Lume repo
+    root comes from the `lume.sourceRoot` setting or is auto-detected in the
+    workspace (BFS depth 3, folders named `*lume*` win).
 - **Outline**: top-level `func`/`let` (incl. `export`) appear in the symbol
   tree; locals inside function/tool/route bodies are excluded.
 - Implemented as a static scanner (no LSP, zero dependencies) — good enough

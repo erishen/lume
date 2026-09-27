@@ -12,6 +12,52 @@ const sym = require('./lume-symbols');
 // Ctrl+Click 内置函数时跳到这里的签名声明。
 const BUILTINS_URI = vscode.Uri.file(path.join(__dirname, 'builtins.lume'));
 
+// ── lume 源码定位（内置函数 → C 实现跳转）──
+let _sourceRoot = undefined; // undefined=未解析; null=无; string=仓库根
+let _implCache = new Map();
+
+// 解析 lume 仓库根：优先 lume.sourceRoot 配置，其次工作区 BFS 探测（深度 3）。
+// 多命中时：目录名含 "lume" 优先，否则按 BFS 顺序取第一个。
+function resolveSourceRoot() {
+  if (_sourceRoot !== undefined) return _sourceRoot;
+  const cfg = vscode.workspace.getConfiguration('lume').get('sourceRoot', '');
+  if (cfg) {
+    try {
+      if (fs.existsSync(path.join(cfg, 'src', 'builtins.c'))) {
+        _sourceRoot = cfg;
+        return cfg;
+      }
+    } catch (e) { /* fallthrough */ }
+  }
+  const bases = (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath);
+  const hits = sym.findSourceRoots(bases, 3);
+  if (hits.length === 0) {
+    _sourceRoot = null;
+    return null;
+  }
+  const lumeish = hits.find((h) => path.basename(h).toLowerCase().includes('lume'));
+  _sourceRoot = lumeish || hits[0];
+  return _sourceRoot;
+}
+
+// 内置函数 → C 实现位置（native_<name> / b_<name>，结果缓存）
+function builtinImplLocation(name) {
+  if (_implCache.has(name)) return _implCache.get(name);
+  const root = resolveSourceRoot();
+  let loc = null;
+  if (root) {
+    const hit = sym.findNativeLine(root, name);
+    if (hit) {
+      loc = new vscode.Location(
+        vscode.Uri.file(path.join(root, 'src', hit.file)),
+        new vscode.Position(hit.line, 0)
+      );
+    }
+  }
+  _implCache.set(name, loc);
+  return loc;
+}
+
 function documentLines(document) {
   const lines = [];
   for (let i = 0; i < document.lineCount; i++) lines.push(document.lineAt(i).text);
@@ -59,8 +105,13 @@ async function findDefinition(document, position) {
   const s = sym.findInSymbols(sym.scanDocumentLines(lines), w.name, false);
   if (s) return new vscode.Location(document.uri, new vscode.Position(s.line, s.col));
 
-  // 兜底：内置函数 → builtins.lume 声明
-  return builtinLocation(w.name);
+  // 兜底：内置函数 → [C 实现（若能定位 lume 源码）, builtins.lume 声明]
+  const doc = builtinLocation(w.name);
+  const impl = builtinImplLocation(w.name);
+  const locs = [];
+  if (impl) locs.push(impl); // C 实现优先（用户诉求：直达实现代码）
+  if (doc) locs.push(doc);
+  return locs.length ? locs : null;
 }
 
 function activate(context) {

@@ -2,7 +2,7 @@
   "name": "lume",
   "displayName": "Lume DSL",
   "description": "Syntax highlighting + Go-to-Definition & outline for the Lume scripting DSL",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "license": "MIT",
   "publisher": "erishen",
   "engines": {
@@ -32,7 +32,17 @@
         "scopeName": "source.lume",
         "path": "./syntaxes/lume.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Lume",
+      "properties": {
+        "lume.sourceRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Lume 仓库根目录（含 src/builtins.c）。留空则自动在工作区中探测（深度 3 层）。"
+        }
+      }
+    }
   },
   "repository": {
     "type": "git",

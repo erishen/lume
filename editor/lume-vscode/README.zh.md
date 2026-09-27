@@ -65,8 +65,11 @@ make vsix        # 在仓库根目录执行
   - 同文件：跳转到 `func` / `let` 定义；
   - 跨文件：`ns.name` 调用（如 `data.load_stage_by_id(...)`）按
     `import "lib/data.lume" as data` 解析到目标模块的 `export` 定义；
-  - 内置函数：`int`/`map`/`try`/`sql_query`… 跳到 `builtins.lume`
-    （由 C 注册表生成——签名 + 一行说明）；用户同名符号优先。
+  - 内置函数：`int`/`map`/`try`/`sql_query`… 直达 **C 实现代码**
+    （`native_int` 在 `src/builtins.c`、`native_map` 在 `src/builtins_hof.c`…），
+    同时给出 `builtins.lume` 文档声明——Peek 列表里两个都列，用户同名符号优先。
+    lume 仓库根取 `lume.sourceRoot` 配置，未配置时在工作区自动探测
+    （BFS 深度 3，目录名含 `lume` 优先）。
 - **大纲**：顶层 `func` / `let`（含 `export`）出现在符号树；函数体/tool 体/
   路由体内的局部变量不收录。
 - 实现为静态扫描（无 LSP、零依赖）——对常规 `.lume` 文件足够；不解析

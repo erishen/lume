@@ -89,12 +89,71 @@ function findInSymbols(syms, name, exportedOnly) {
   return null;
 }
 
+// ── 内置函数 → C 实现定位（纯逻辑，可 node 单测）──
+
+// BFS 探测：从各 base 出发（深度 ≤ maxDepth，跳过 .*/node_modules/dist），
+// 返回所有含 src/builtins.c 的目录（即 lume 仓库根）。调用方决定选哪个。
+function findSourceRoots(bases, maxDepth) {
+  const fs = require('fs');
+  const path = require('path');
+  const hits = [];
+  const queue = [];
+  for (const b of bases) if (b) queue.push({ dir: b, depth: 0 });
+  let qi = 0;
+  while (qi < queue.length) {
+    const { dir, depth } = queue[qi++];
+    let ok = false;
+    try { ok = fs.existsSync(path.join(dir, 'src', 'builtins.c')); } catch (e) { ok = false; }
+    if (ok) hits.push(dir);
+    if (depth >= maxDepth) continue;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { continue; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const n = e.name;
+      if (n.startsWith('.') || n === 'node_modules' || n === 'dist') continue;
+      queue.push({ dir: path.join(dir, n), depth: depth + 1 });
+    }
+  }
+  return hits;
+}
+
+// 在内置名对应的 C 源码里找实现：优先 `native_<name>(` 定义（static 或非
+// static，如 builtins_hof.c 的 void native_map），退回 `Value b_<name>(`
+// （wrapper 或直接实现，如 b_run）。两遍扫描避免 wrapper 与 native 跨文件
+// 先后干扰。返回 { file, line }。
+function findNativeLine(lumeRoot, name) {
+  const first = scanForNative(lumeRoot, '^(static\\s+)?void native_' + name + '\\(');
+  if (first) return first;
+  return scanForNative(lumeRoot, '^Value b_' + name + '\\(');
+}
+
+function scanForNative(lumeRoot, pattern) {
+  const fs = require('fs');
+  const path = require('path');
+  const dir = path.join(lumeRoot, 'src');
+  let files;
+  try { files = fs.readdirSync(dir); } catch (e) { return null; }
+  const re = new RegExp(pattern);
+  for (const f of files) {
+    if (!f.endsWith('.c')) continue;
+    let lines;
+    try { lines = fs.readFileSync(path.join(dir, f), 'utf8').split('\n'); } catch (e) { continue; }
+    for (let i = 0; i < lines.length; i++) {
+      if (re.test(lines[i].trim())) return { file: f, line: i };
+    }
+  }
+  return null;
+}
+
 module.exports = {
   stripComment,
   scanDocumentLines,
   scanImportLines,
   wordAtLine,
   findInSymbols,
+  findSourceRoots,
+  findNativeLine,
   FUNC_RE,
   LET_RE,
   IMPORT_RE,

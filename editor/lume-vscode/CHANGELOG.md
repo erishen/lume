@@ -2,6 +2,19 @@
 
 All notable changes to the Lume VS Code extension are documented here.
 
+## [0.3.4] - 2026-09-27
+
+### Added
+
+- **Jump to C implementation**: Go to Definition on a built-in now returns the
+  actual `native_<name>` / `b_<name>` location in the Lume C sources
+  (priority) plus the `builtins.lume` doc declaration. The Lume repo root is
+  resolved from the new `lume.sourceRoot` setting, or auto-detected in the
+  workspace (BFS, depth 3; a folder named `*lume*` wins). Pure-lookup logic
+  (`findSourceRoots` / `findNativeLine`) is in `lume-symbols.js` and unit
+  tested against the real repo: int→builtins.c, map→builtins_hof.c,
+  run→builtins.c (b_run), el→vdom.c, unknown→null.
+
 ## [0.3.3] - 2026-09-27
 
 ### Changed
