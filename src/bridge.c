@@ -203,8 +203,13 @@ static char *value_to_json(VM *vm, Value v, size_t *len) {
  *   - list/number/bool/null    -> 200 application/json, JSON-encoded payload
  * So `return { message: "hi" };` and `return { status: 201, body: {...} };`
  * need no explicit stringify()/type. */
-static void result_to_response(VM *vm, Value result, HttpResponse *res) {
+static void result_to_response(VM *vm, Value result, HttpResponse *res,
+                               const char *method, const char *path) {
     if (vm->error) {
+        /* 500 黑盒排查代价高:把 handler 的具体错误打到 stderr,
+         * 与 main.c 的 parse/load error 同一通道,终端立即可见。 */
+        fprintf(stderr, "lume: route %s %s: %s\n", method, path,
+                vm->error_msg[0] ? vm->error_msg : "handler error");
         set_error_response(res, 500, "Lume handler error");
         return;
     }
@@ -272,6 +277,8 @@ static void result_to_response(VM *vm, Value result, HttpResponse *res) {
 
 fail:
     free(owned_body);
+    fprintf(stderr, "lume: route %s %s: %s\n", method, path,
+            vm->error_msg[0] ? vm->error_msg : "handler failed to serialize");
     set_error_response(res, 500, "Lume handler error");
     return;
 }
@@ -313,7 +320,7 @@ static int route_shim(HttpRequest *req, HttpResponse *res) {
                 vm_set_error(vm, "route handler for %s %s returned a bad value",
                              req->method, req->path);
         }
-        result_to_response(vm, result, res);
+        result_to_response(vm, result, res, req->method, req->path);
         vm_pop(vm);
         vm_after_request(vm);
         /* Return 0 = handled; the framework serializes the filled response.
