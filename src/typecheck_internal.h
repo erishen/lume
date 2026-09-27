@@ -59,6 +59,9 @@ void ck_fail(Checker *c, size_t line, const char *fmt, ...);
 void export_add(Checker *c, const char *name, Type *t);
 CScope *scope_new(CScope *parent);
 void scope_put(CScope *s, const char *name, Type *t);
+void scope_decl(Checker *c, CScope *s, const char *name, Type *t,
+                size_t line); /* 同层重名编译错(用户声明之间, 内置名可遮蔽) */
+bool is_builtin_name(const char *name);
 Type *scope_get(CScope *s, const char *name);
 void scope_put_ns(CScope *s, const char *name, Module *m);
 Module *scope_get_ns(CScope *s, const char *name);

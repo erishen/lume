@@ -194,6 +194,44 @@ void scope_put(CScope *s, const char *name, Type *t) {
     s->syms = sym;
 }
 
+/* 声明入口: 同层重名直接编译错(用户声明之间)。历史上 let/变量与 func 进
+ * 同一个 CScope, scope_put 覆盖式写入——`let crm_lock` + `export func
+ * crm_lock()` 编译全绿、运行时按声明顺序静默覆盖, 只在 fork worker 里炸
+ * (最坏一类 bug)。只查当前层不沿 parent 链, 内层遮蔽(shadowing)照常
+ * 允许; 与内置函数重名也放行(用户声明遮蔽内置名是既有合法用法, 如
+ * `let type = "x"`)。 */
+bool is_builtin_name(const char *name) {
+    static const char *const BUILTINS[] = {
+        "run", "print", "str", "int", "len", "keys", "get",
+        "json", "stringify", "now", "el", "render", "html",
+        "float", "bool", "string", "type", "Result", /* type words usable as idents */
+        "write", "read", /* built-in verb groups (see seed_verb_groups) */
+        "env", "files", "read_file", "write_file", "mkdir", "strftime", "put",
+        "range", "map", "filter", "reduce", /* collection tools */
+        "sql_query", "sql_write", /* sqlite builtins (DSL-level) */
+        "lock_file", "unlock_file", /* flock advisory lock (invest ledger) */
+        "tools", "skills", "mcps",
+        "discovery_endpoints", "catalog", /* discovery builtins */
+        "push", "try", /* collection / error handling (2026-09-27) */
+    };
+    for (size_t i = 0; i < sizeof(BUILTINS) / sizeof(BUILTINS[0]); i++)
+        if (strcmp(BUILTINS[i], name) == 0) return true;
+    return false;
+}
+
+void scope_decl(Checker *c, CScope *s, const char *name, Type *t, size_t line) {
+    if (!is_builtin_name(name)) {
+        for (CSym *it = s->syms; it; it = it->next) {
+            if (strcmp(it->name, name) == 0) {
+                ck_fail(c, line,
+                        "duplicate declaration of '%s' in the same scope", name);
+                return;
+            }
+        }
+    }
+    scope_put(s, name, t);
+}
+
 Type *scope_get(CScope *s, const char *name) {
     for (CScope *sc = s; sc; sc = sc->parent) {
         for (CSym *it = sc->syms; it; it = it->next)
@@ -351,6 +389,7 @@ bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
             "range", "map", "filter", "reduce", /* collection tools */
             "sql_query", "sql_write", /* sqlite builtins (DSL-level) */
             "lock_file", "unlock_file", /* flock advisory lock (invest ledger) */
+            "push", "try", /* 列表追加 / 错误捕获 (2026-09-27) */
             "tools", "skills", "mcps",
             "discovery_endpoints", "catalog", /* discovery builtins */
         };
@@ -402,8 +441,8 @@ bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
                             : any_type();
         Type *ret = s->as.func.ret ? resolve(&c, s->as.func.ret, s->line)
                                    : any_type();
-        scope_put(c.scope, s->as.func.name, type_func(s->as.func.arity,
-                                                      params, ret));
+        scope_decl(&c, c.scope, s->as.func.name,
+                   type_func(s->as.func.arity, params, ret), s->line);
         if (s->is_export)
             export_add(&c, s->as.func.name,
                        scope_get(c.scope, s->as.func.name));

@@ -23,7 +23,8 @@ void ck_fn(Checker *c, char **names, Type *ft, Node *body) {
     int loop_saved = c->loop_depth;
     c->scope = scope_new(saved);
     for (int i = 0; i < ft->count; i++)
-        scope_put(c->scope, names[i], ft->types[i]);
+        scope_decl(c, c->scope, names[i], ft->types[i],
+                   body ? body->line : 0); /* 参数间重名/与函数体 let 重名即报错 */
     c->cur_ret = ft->ret;
     c->in_func = true;
     c->loop_depth = 0;
@@ -129,8 +130,8 @@ void ck_stmt(Checker *c, Node *n) {
                 ck_fail(c, n->line, "'%s' is not assignable to the declared type '%s' of '%s'",
                         ty_str(it), ty_str(annot), n->as.let.name);
             }
-            scope_put(c->scope, n->as.let.name,
-                      annot ? annot : (it ? it : any_type()));
+            scope_decl(c, c->scope, n->as.let.name,
+                       annot ? annot : (it ? it : any_type()), n->line);
             if (n->is_export)
                 export_add(c, n->as.let.name,
                            scope_get(c->scope, n->as.let.name));
@@ -157,7 +158,9 @@ void ck_stmt(Checker *c, Node *n) {
                 Type *elem = NULL;
                 if (it && it->kind == TY_LIST) elem = it->elem;
                 /* maps/structs iterate their keys; anything else degrades to
-                 * `any` (the runtime enforces list-or-map) */
+                 * `any` (the runtime enforces list-or-map)。迭代变量是"绑定
+                 * 复用"而非声明: 外层已有同名时复用该变量(运行时 env_set
+                 * 覆盖值), 所以不走 scope_decl 的重名检测。 */
                 scope_put(c->scope, n->as.fors.var, elem ? elem : any_type());
                 c->loop_depth++;
                 ck_stmt(c, n->as.fors.body);
@@ -225,7 +228,7 @@ void ck_stmt(Checker *c, Node *n) {
             return;
         case N_VERBS:
             ck_expr(c, n->as.verbs.methods, NULL);
-            scope_put(c->scope, n->as.verbs.name, any_type());
+            scope_decl(c, c->scope, n->as.verbs.name, any_type(), n->line);
             return;
         case N_ASSIGN: {
             Type *vt = scope_get(c->scope, n->as.assign.name);
