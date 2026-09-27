@@ -3,7 +3,8 @@
 写 `.lume` 文件,就能跑起一个 HTTP 服务、一套页面和一个可接真实大模型
 的 Agent。本指南只讲 Lume 这一层:**业务开发只需要写 `.lume`(以及可选的
 前端脚本和 CSS),不需要接触其他任何语言。** 维护者视角的 C 内部说明见
-[DEVELOPMENT.md](DEVELOPMENT.md)。
+[DEVELOPMENT.md](DEVELOPMENT.md)。**写业务前先读 [PITFALLS.md](PITFALLS.md)**
+——同名覆盖、map 键、json 失败、SPA 路由这些实战坑都在那,能少踩半天坑。
 
 ---
 
