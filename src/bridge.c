@@ -130,6 +130,18 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
     map_set(vm, m, "query_params", val_obj((Obj *)pm));
     vm_pop(vm);
 
+    /* Path params from dynamic route segments (":name"), captured by the
+     * framework route matcher into the request. Empty map for literal
+     * routes. Exposed as req.params (segment name -> decoded value). */
+    Obj *pp = AS_OBJ(make_map(vm));
+    vm_push(vm, val_obj((Obj *)pp)); /* root while filling */
+    for (int i = 0; i < req->path_param_count; i++) {
+        map_set(vm, pp, req->path_param_names[i],
+                make_string_cstr(vm, req->path_param_values[i]));
+    }
+    map_set(vm, m, "params", val_obj((Obj *)pp));
+    vm_pop(vm);
+
     return val_obj((Obj *)m); /* still rooted on the stack */
 }
 
@@ -294,7 +306,30 @@ static int route_pattern_match(const char *pattern, const char *path) {
     size_t n = q ? (size_t)(q - path) : strlen(path);
     if (plen && pattern[plen - 1] == '*')
         return n >= plen - 1 && strncmp(pattern, path, plen - 1) == 0;
-    return n == plen && strncmp(pattern, path, plen) == 0;
+    if (n == plen && strncmp(pattern, path, plen) == 0) return 1;
+    if (!memchr(pattern, ':', plen)) return 0;
+
+    /* Dynamic ':name' segments: match exactly one path segment (never '/'),
+     * any value. No capture here — the framework matcher already wrote the
+     * decoded values into the request (request_to_value exposes req.params). */
+    const char *pp = pattern, *cp = path;
+    for (;;) {
+        const char *pe = strchr(pp, '/');
+        const char *ce = strchr(cp, '/');
+        size_t pl = pe ? (size_t)(pe - pp) : strlen(pp);
+        size_t cl = ce ? (size_t)(ce - cp) : strlen(cp);
+        if (pl > 1 && pp[0] == ':') {
+            /* dynamic segment: matches any single segment */
+        } else if (pl == cl && strncmp(pp, cp, pl) == 0) {
+            /* literal segment equal */
+        } else {
+            return 0;
+        }
+        if (!pe && !ce) return 1; /* both ended */
+        if (!pe || !ce) return 0; /* segment count mismatch */
+        pp = pe + 1;
+        cp = ce + 1;
+    }
 }
 
 /* C callback registered via agenthttpd_route. A single shim serves every DSL
