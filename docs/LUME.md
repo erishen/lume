@@ -446,6 +446,10 @@ UI 相关内建(`el` / `render` / `html`)见下面的 **页面开发** 一节。
 
 ---
 
+> 编辑器提示：在 VS Code 中 Ctrl+Click 任意内建函数可直达其 C 实现
+> （`native_<name>`），Peek 里同时给出签名与行为说明（完整 38 个见
+> `editor/lume-vscode/builtins.lume`，由注册表自动生成）。
+
 ## 页面开发:两套写法,可互相组合
 
 服务端只有 Lume,没有模板文件。两种生成 HTML 的写法:

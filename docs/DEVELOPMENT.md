@@ -56,12 +56,28 @@ lume/
 
 ## 编辑器支持
 
-VS Code 用本地扩展 `editor/lume-vscode/` 提供 `.lume` 语法高亮/注释/括号配对。
-安装:软链到扩展目录后重载窗口(安装与维护详见该扩展的 README.md):
+VS Code 扩展 `editor/lume-vscode/` 提供 `.lume` 的完整编辑体验：
 
-```bash
-ln -s "$PWD/editor/lume-vscode" ~/.vscode/extensions/cnb.lume-0.1.0
-```
+| 能力 | 说明 |
+|---|---|
+| 语法高亮 | TextMate grammar（字符串/注释/关键字/数字/函数/运算符） |
+| 注释与括号 | `//` `/* */` 注释、`{}()[]` 自动配对（language-configuration） |
+| 跳转到定义 | 同文件 `func`/`let`；跨文件 `ns.name` 按 `import … as` 解析到 `export`；内置函数直达 **C 实现**（Peek 里同时给 `builtins.lume` 文档声明） |
+| 大纲符号 | 顶层 `func`/`let`（含 `export`）；函数体/tool 体/路由体内的局部变量不收录 |
+| 内置函数文档 | `builtins.lume`（38 个：签名 + 行为说明 + 实现位置），由 `scripts/gen-builtins.py` 从 `bridge_seed_builtins()` 注册表自动生成，lume 加内置后重跑即可同步 |
+
+内置函数跳 C 实现需要定位 lume 仓库根：优先 `lume.sourceRoot` 设置，
+未配置时在工作区自动探测（BFS 深度 3，目录名含 `lume` 优先）。
+
+安装（二选一）：
+
+1. **打包安装**：`cd editor/lume-vscode && npx --yes @vscode/vsce package --allow-missing-repository -o dist/`，
+   再用 VS Code "Extensions: Install from VSIX..." 选择 `dist/lume-<version>.vsix`；
+2. **软链开发**：`ln -s "$PWD/editor/lume-vscode" ~/.vscode/extensions/cnb.lume-0.3.4`，
+   重载窗口即生效——改仓库文件后只需重载，无需重打包。
+
+局限：跳转与大纲是**静态启发式**（正则 + 花括号深度），不解析表达式；
+跨文件只认 `import … as` 映射。详见该扩展的 README.md 与 docs/PITFALLS.md。
 
 ## 常规操作
 
