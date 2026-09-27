@@ -55,7 +55,10 @@ version? Increment `version` in `package.json` first.
   - same-file: jump to `func`/`let` definitions;
   - cross-file: `ns.name` calls (e.g. `data.load_stage_by_id(...)`) resolve
     through `import "lib/data.lume" as data` to the target module's `export`
-    definition.
+    definition;
+  - built-ins: `int`/`map`/`try`/`sql_query`… jump to `builtins.lume`
+    (generated from the C registry — signatures + one-line docs); user
+    same-name symbols win.
 - **Outline**: top-level `func`/`let` (incl. `export`) appear in the symbol
   tree; locals inside function/tool/route bodies are excluded.
 - Implemented as a static scanner (no LSP, zero dependencies) — good enough
