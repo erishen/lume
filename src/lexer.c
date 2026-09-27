@@ -216,7 +216,13 @@ Token *lex_all(const char *source, char *errbuf, size_t errbuf_size,
                     : TOK_EQ;
                 break;
             case '!':
-                t = source[o.lx.pos + 1] == '=' ? (width = 2, TOK_NEQ) : TOK_ERROR;
+                t = source[o.lx.pos + 1] == '=' ? (width = 2, TOK_NEQ) : TOK_NOT;
+                break;
+            case '|':
+                t = source[o.lx.pos + 1] == '|' ? (width = 2, TOK_OR) : TOK_ERROR;
+                break;
+            case '&':
+                t = source[o.lx.pos + 1] == '&' ? (width = 2, TOK_AND) : TOK_ERROR;
                 break;
             default:
                 t = TOK_ERROR;
