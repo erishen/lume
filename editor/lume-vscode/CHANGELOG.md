@@ -2,6 +2,19 @@
 
 All notable changes to the Lume VS Code extension are documented here.
 
+## [0.3.3] - 2026-09-27
+
+### Changed
+
+- **Richer built-in jump target**: `builtins.lume` now carries detailed docs
+  per function — behaviour, parameter semantics, return type, edge cases and
+  the implementing C file (`src/builtins.c` / `_hof` / `_fs` / `_sql` /
+  `_catalog` / `vdom.c`), with concrete signatures.
+- **Generator checked in**: `scripts/gen-builtins.py` regenerates
+  `builtins.lume` from the `bridge_seed_builtins()` registry (run it after
+  adding built-ins; verified 38/38, no drift).
+- **vsix output moved** to `editor/lume-vscode/dist/` (kept gitignored).
+
 ## [0.3.2] - 2026-09-27
 
 ### Added

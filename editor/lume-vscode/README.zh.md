@@ -14,8 +14,18 @@ editor/lume-vscode/
 ├── package.json                    # 语言 id "lume"、.lume 后缀、grammar 与语言功能登记
 ├── extension.js                    # 激活定义跳转与大纲符号 Provider
 ├── lume-symbols.js                 # 静态符号扫描器（纯逻辑，可 node 单测）
+├── builtins.lume                   # 内置函数声明（自动生成；跳转目标）
+├── scripts/gen-builtins.py         # 从 C 注册表重新生成 builtins.lume
 ├── language-configuration.json     # // 与 /* */ 注释、{}()[] 配对
-└── syntaxes/lume.tmLanguage.json   # TextMate 语法(高亮规则)
+├── syntaxes/lume.tmLanguage.json   # TextMate 语法(高亮规则)
+└── dist/                           # 打包的 .vsix 产物（gitignore）
+```
+
+## 打包 vsix
+
+```bash
+cd editor/lume-vscode
+npx --yes @vscode/vsce package --allow-missing-repository -o dist/
 ```
 
 ## 安装

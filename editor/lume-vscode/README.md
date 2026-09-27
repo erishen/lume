@@ -14,8 +14,18 @@ editor/lume-vscode/
 ├── package.json                    # language id "lume", .lume extension, grammar + language features
 ├── extension.js                    # activates Definition & DocumentSymbol providers
 ├── lume-symbols.js                 # static symbol scanner (pure logic, node-testable)
+├── builtins.lume                   # built-in function declarations (generated; jump target)
+├── scripts/gen-builtins.py         # regenerates builtins.lume from the C registry
 ├── language-configuration.json     # // and /* */ comments, {}()[] pairs
-└── syntaxes/lume.tmLanguage.json   # TextMate grammar (highlighting rules)
+├── syntaxes/lume.tmLanguage.json   # TextMate grammar (highlighting rules)
+└── dist/                           # packed .vsix artifacts (gitignored)
+```
+
+## Building the vsix
+
+```bash
+cd editor/lume-vscode
+npx --yes @vscode/vsce package --allow-missing-repository -o dist/
 ```
 
 ## Install

@@ -24,7 +24,7 @@ frontend/node_modules/
 frontend/react-ssr/node_modules/
 frontend/react-ssr/tailwind.css
 # vscode 扩展的 vsix 包是 vsce package 产物,可重编,不入库。
-editor/lume-vscode/*.vsix
+editor/lume-vscode/dist/*.vsix
 # www/ 里只有两类文件:手写的 HTML 壳(www/*/index.html、chat.html …)入库,
 # React bundle / esbuild 分包 chunk / Tailwind 产物忽略。新增 www/ 下的
 # 手写资源请用非 js/css 扩展名,或按下面的否定模式显式放行。
