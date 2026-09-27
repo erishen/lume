@@ -16,6 +16,19 @@ CFLAGS   += -I src $(addprefix -I, $(AH_INC))
 # 带 -lsqlite3; 容器构建的 -static 则拉 libsqlite3.a(Dockerfile 已装 dev 包)。
 LDFLAGS  += -lsqlite3
 
+# 数据库驱动插件开关(与 agent-httpd 子模块一致;默认关闭零依赖):
+# WITH_PG=1 / WITH_MYSQL=1 时 bin/lume 同样链接对应客户端库
+WITH_PG ?= 0
+WITH_MYSQL ?= 0
+ifeq ($(WITH_PG),1)
+    PQ_LIB := $(shell pg_config --libdir 2>/dev/null)
+    LDFLAGS += -L$(PQ_LIB) -lpq
+endif
+ifeq ($(WITH_MYSQL),1)
+    MYSQL_LIBS := $(shell mysql_config --libs 2>/dev/null) -L$(shell brew --prefix 2>/dev/null)/lib
+    LDFLAGS += $(MYSQL_LIBS)
+endif
+
 # --- 平台 feature-test: 与 agent-httpd/Makefile:8-22 逐字同款 ---
 # main.c 用 sigaction/sigemptyset (--watch 热重载的信号处理), 它们是 POSIX
 # 199309 定义; glibc 不会默认放行, 要 -D_GNU_SOURCE 才显; macOS clang 则
@@ -61,10 +74,15 @@ define KILL_SERVER
 		i=$$((i+1)); [ $$i -ge 10 ] && break; sleep 0.3; \
 	done
 endef
-SRCS     := src/main.c src/lexer.c src/parser.c src/value.c \
-            src/typecheck.c src/interp.c src/builtins.c src/loader.c src/vdom.c \
+SRCS     := src/main.c src/lexer.c src/parser.c src/parser_stmt.c src/parser_expr.c \
+            src/value.c src/typecheck.c src/typecheck_expr.c src/typecheck_stmt.c \
+            src/interp.c src/builtins.c src/builtins_sql.c src/builtins_fs.c \
+            src/builtins_catalog.c src/builtins_hof.c src/loader.c src/vdom.c \
             src/bridge.c src/token.c src/iquest.c
 OBJS     := $(SRCS:src/%.c=build/%.o)
+
+# 内部头:任一 * 片的共享声明变化,所有依赖它的 .o 都要重建
+INT_HDRS := $(wildcard src/*_internal.h)
 
 all: bin $(TARGET)
 
@@ -72,7 +90,7 @@ all: bin $(TARGET)
 # 子模块源文件变化即触发 lib 重建（否则 llm.c 等改动不会带进 bin/lume）。
 AH_DEPS := $(shell find $(AH)/src -name '*.c' -o -name '*.h')
 $(AH_LIB): $(AH_DEPS)
-	$(MAKE) -C $(AH) lib
+	$(MAKE) -C $(AH) lib WITH_PG=$(WITH_PG) WITH_MYSQL=$(WITH_MYSQL)
 
 build:
 	mkdir -p build
@@ -80,7 +98,7 @@ build:
 bin:
 	mkdir -p bin
 
-build/%.o: src/%.c src/lume.h | build $(AH_LIB)
+build/%.o: src/%.c src/lume.h $(INT_HDRS) | build $(AH_LIB)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJS) $(AH_LIB) | bin
@@ -408,7 +426,7 @@ build-asan:
 build-asan/tests:
 	mkdir -p build-asan/tests
 
-build-asan/%.o: src/%.c src/lume.h | build-asan $(AH_LIB)
+build-asan/%.o: src/%.c src/lume.h $(INT_HDRS) | build-asan $(AH_LIB)
 	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -c $< -o $@
 
 $(ASAN_TARGET): $(ASAN_OBJS) $(AH_LIB) | build-asan bin
