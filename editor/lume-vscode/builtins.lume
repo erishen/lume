@@ -55,14 +55,14 @@ func push(list, item) {}  // 实现: src/builtins.c
 // 整数区间 [start, end)。参数：start, end → list[number]。实现：src/builtins_hof.c
 func range(start, end) {}  // 实现: src/builtins_hof.c
 
-// 映射/列表变换。参数：list_or_map, fn → list。实现：src/builtins_hof.c
-func map(list_or_map, fn) {}  // 实现: src/builtins_hof.c
+// 映射/列表变换。参数：fn, list_or_map → list。实现：src/builtins_hof.c
+func map(fn, list_or_map) {}  // 实现: src/builtins_hof.c
 
-// 过滤。参数：list_or_map, fn → list。实现：src/builtins_hof.c
-func filter(list_or_map, fn) {}  // 实现: src/builtins_hof.c
+// 过滤。参数：fn, list_or_map → list。实现：src/builtins_hof.c
+func filter(fn, list_or_map) {}  // 实现: src/builtins_hof.c
 
-// 归约。参数：list, fn, initial → any。实现：src/builtins_hof.c
-func reduce(list, fn, initial) {}  // 实现: src/builtins_hof.c
+// 归约。参数：fn, list, initial → any。实现：src/builtins_hof.c
+func reduce(fn, list, initial) {}  // 实现: src/builtins_hof.c
 
 // ── JSON / 时间 / 环境 ──
 // 解析 JSON 文本；解析失败置 VM error（handler 会 500，用 try() 兜底）。
