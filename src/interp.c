@@ -841,6 +841,18 @@ void bridge_seed_builtins(VM *vm) {
         {"put", b_put},
         {"push", b_push}, /* DSL 层列表追加 (2026-09-27) */
         {"try", b_try}, /* 捕获 VM error -> {ok}/{err} (2026-09-27) */
+        /* 数值内建 (2026-09-28, builtins_math.c) */
+        {"abs", b_abs},
+        {"sqrt", b_sqrt},
+        {"exp", b_exp},
+        {"log", b_log},
+        {"ln", b_ln},
+        {"pow", b_pow},
+        {"floor", b_floor},
+        {"ceil", b_ceil},
+        {"round", b_round},
+        {"min", b_min},
+        {"max", b_max},
         {"tools", b_tools},
         {"skills", b_skills},
         {"mcps", b_mcps},
@@ -853,6 +865,9 @@ void bridge_seed_builtins(VM *vm) {
     for (size_t i = 0; i < sizeof(built) / sizeof(built[0]); i++)
         env_set(vm, vm->globals, built[i].name,
                 make_native(vm, built[i].name, built[i].fn));
+    /* 数值常量（非函数；用户 let 同名可局部遮蔽，与内建一致） */
+    env_set(vm, vm->globals, "pi", val_num(3.141592653589793));
+    env_set(vm, vm->globals, "e", val_num(2.718281828459045));
     seed_verb_groups(vm);
     vm->default_handler = make_native(vm, "__default_route", b_default_route);
 }

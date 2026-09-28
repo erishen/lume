@@ -2,7 +2,7 @@
 
 > 正向清单：**该怎么写**。`PITFALLS.md` 告诉你「别踩什么」，这里告诉你「踩过的坑之后
 > 正确的写法长什么样」。约定全部经过 `--check` 与真实 HTTP 冒烟验证，示例取自
-> `work/research/crm`（Lume + React CRM，可整份对照）。
+> `work/research/lume-crm`（Lume + React CRM，可整份对照）。
 >
 > 适用版本：含 `try` 固定键 / 箭头表达式体 / 字符串键 map / `push` / `spa` 的二进制
 > （git log 自 `39ac355` 起；`make` 重新构建后生效）。
@@ -92,7 +92,7 @@ put(crm_table(d, "customers"), str(cid), cust_m(...));
 - 新增 `push(list, item)`（`39ac355`）可用于构建期列表；
   但实体存储仍推荐 map（O(1) 按键读写 + 键即 id），列表只做展示层现造。
 
-## 5. 写路径纪律（invest / crm 同款三条）
+## 5. 写路径纪律（invest / lume-crm 同款三条）
 
 1. **锁**：读-改-写全程持 `lock_file(path, 3000)`，拿不到 → 409 / err 返回；
    锁文件的**父目录要自己 `mkdir`**（`lock_file` 只建锁文件本身）。

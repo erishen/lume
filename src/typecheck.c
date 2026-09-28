@@ -214,6 +214,9 @@ bool is_builtin_name(const char *name) {
         "discovery_endpoints", "catalog", /* discovery builtins */
         "push", "try", /* collection / error handling (2026-09-27) */
         "replace", /* string builtins (2026-09-27) */
+        /* math builtins (2026-09-28, builtins_math.c) */
+        "abs", "sqrt", "exp", "log", "ln", "pow", "floor", "ceil", "round",
+        "min", "max", "pi", "e",
     };
     for (size_t i = 0; i < sizeof(BUILTINS) / sizeof(BUILTINS[0]); i++)
         if (strcmp(BUILTINS[i], name) == 0) return true;
@@ -392,6 +395,9 @@ bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
             "lock_file", "unlock_file", /* flock advisory lock (invest ledger) */
             "push", "try", /* 列表追加 / 错误捕获 (2026-09-27) */
             "replace", /* 字符串内建 (2026-09-27) */
+            /* math builtins (2026-09-28) */
+            "abs", "sqrt", "exp", "log", "ln", "pow", "floor", "ceil", "round",
+            "min", "max", "pi", "e",
             "tools", "skills", "mcps",
             "discovery_endpoints", "catalog", /* discovery builtins */
         };
