@@ -6,10 +6,14 @@
 
 ![CI](https://github.com/erishen/lume/actions/workflows/ci.yml/badge.svg)
 
-自足 agent DSL 服务器:业务逻辑写在 `.lume` 脚本里,一个 C11 二进制直接伺服
-静态站点 + JSON API + SSE 聊天 + Agent 工具 + SSR 页面。没有 Node 运行时、
-没有 nginx、没有独立 React 后端——静态页直接 COPY 进二进制旁,聊天走进程内
-SSE,工具注册在进程内。
+单二进制 **C11 后端框架**:业务逻辑写在 `.lume` 脚本里,一个 ~1.7MB 的可执行
+文件直接伺服静态站点 + JSON API + SSE 聊天 + LLM Agent 工具 + SSR 页面,自带
+原生 SQLite。没有 Node 运行时、没有 nginx、没有独立 React 后端——静态页直接
+COPY 进二进制旁,聊天走进程内 SSE,工具注册在进程内。
+
+> ℹ️ 与 [lumeland/lume](https://github.com/lumeland/lume)(Deno 静态站点生成器)
+> 及 [lume/lume](https://github.com/lume/lume)(CSS3D/WebGL UI 工具包)**无关联**
+> ——只是恰好同名的不同项目。
 
 Lume 是 DSL 层,HTTP/聊天/MCP/会话由 [agent-httpd](agent-httpd/) submodule
 提供,静态链 `libagenthttpd.a`。agent-httpd 版本由 gitlink 锁定(见 `.gitmodules`),

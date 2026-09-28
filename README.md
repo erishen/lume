@@ -6,11 +6,16 @@
 
 ![CI](https://github.com/erishen/lume/actions/workflows/ci.yml/badge.svg)
 
-A self-contained agent DSL server: business logic lives in `.lume` scripts,
-and a single C11 binary serves static sites + JSON APIs + SSE chat + agent
-tools + SSR pages. No Node runtime, no nginx, no separate React backend —
-static pages are copied straight beside the binary, chat runs in-process SSE,
-tools are registered in-process.
+A single-binary **C11 backend framework**: business logic lives in `.lume`
+scripts, and one ~1.7 MB executable serves static sites + JSON APIs + SSE
+chat + LLM agent tools + SSR pages with native SQLite. No Node runtime, no
+nginx, no separate React backend — static pages are copied straight beside
+the binary, chat runs in-process SSE, tools are registered in-process.
+
+> ℹ️ **Not related to** [lumeland/lume](https://github.com/lumeland/lume) (the
+> Deno static site generator) or [lume/lume](https://github.com/lume/lume)
+> (the CSS3D/WebGL UI toolkit) — different projects that happen to share the
+> name.
 
 Lume is the DSL layer; HTTP / chat / MCP / sessions come from the
 [agent-httpd](agent-httpd/) submodule, statically linked as
