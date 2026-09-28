@@ -13,6 +13,10 @@
 #   LUME_PREFIX   install root (default: $HOME/.local; binary goes to $PREFIX/bin)
 #   LUME_SHA256   expected sha256 of the binary, verified when set
 #   LUME_REPO     GitHub repo to fetch from (default: erishen/lume)
+#   LUME_STATIC   1 = fetch the statically-linked binary (lume-<os>-<arch>-static,
+#                 zero glibc/libsqlite3 runtime dep; for FROM scratch / alpine
+#                 containers and minimal hosts). Only Linux assets ship a static
+#                 variant.
 set -eu
 
 REPO="${LUME_REPO:-erishen/lume}"
@@ -40,6 +44,9 @@ case "$(uname -m)" in
 esac
 
 asset="lume-$os-$arch.tar.gz"
+if [ -n "${LUME_STATIC:-}" ]; then
+  asset="lume-$os-$arch-static.tar.gz"
+fi
 if [ "$VERSION" = "latest" ]; then
   url="https://github.com/$REPO/releases/latest/download/$asset"
 else

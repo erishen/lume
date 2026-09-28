@@ -45,7 +45,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsqlite3-dev
+          sudo apt-get install -y libsqlite3-dev libcrypt-dev m4
 
       - name: Build lume
         run: make
@@ -83,6 +83,27 @@ jobs:
       - name: Report platform and binary type
         run: uname -s -m && file bin/lume
 
+      # 静态二进制(容器/scratch 用):与 docker/Dockerfile 同一串 -static 编法,
+      # 编到独立文件名 bin/lume-static, 不覆盖上面的动态 bin/lume(动态版仍进
+      # 普通 tarball)。零动态依赖 => 可直接 COPY 进 FROM scratch / alpine, 无需
+      # glibc/libsqlite3 运行时。仅 Linux 产(静态 glibc);macOS 走动态 dylib。
+      # 非 tag 事件也跑, 让静态编回归在发布前暴露(同普通 Build lume 的意图)。
+      - name: Build static lume (container/scratch)
+        if: runner.os == 'Linux'
+        run: |
+          rm -rf build agent-httpd/bin agent-httpd/build
+          make all TARGET=bin/lume-static \
+            CFLAGS_EXTRA="-D_GNU_SOURCE -DHAVE_CRYPT -DHAVE_CRYPT_H -ffunction-sections -fdata-sections -Wno-format-truncation -Wno-stringop-truncation" \
+            LDFLAGS_EXTRA="-lcrypt -lm -static -Wl,--gc-sections"
+          echo "==> static binary type:"; file bin/lume-static
+          # 静态二进制必须零动态依赖, 否则 scratch 镜像里 SQLite/启动会崩
+          if ldd bin/lume-static 2>&1 | grep -q "not a dynamic executable"; then
+            echo "==> confirmed: fully static (no glibc/libsqlite3 runtime dep)"
+          else
+            echo "static build leaked dynamic deps:"; ldd bin/lume-static; exit 1
+          fi
+          ./bin/lume-static --check examples/hub.lume
+
       # The release asset is a tarball, not a bare binary: the web UI bundles
       # (www/*.js) are gitignored build output, so the frontend must ride
       # inside the artifact or an installed binary would serve broken
@@ -101,6 +122,18 @@ jobs:
           else
             shasum -a 256 "${{ matrix.asset }}.tar.gz" > "${{ matrix.asset }}.sha256"
           fi
+
+      # 静态版 tarball:仅含 bin/lume(静态) + install.sh(供 LUME_STATIC=1 拉取),
+      # 不含 www/examples(那些随宿主项目走, 容器里不需要)。命名 <asset>-static。
+      - name: Stage static release tarball
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
+        run: |
+          mkdir -p "dist/${{ matrix.asset }}-static/bin"
+          cp bin/lume-static "dist/${{ matrix.asset }}-static/bin/lume"
+          cp install.sh "dist/${{ matrix.asset }}-static/"
+          cd dist
+          tar -czf "${{ matrix.asset }}-static.tar.gz" "${{ matrix.asset }}-static"
+          sha256sum "${{ matrix.asset }}-static.tar.gz" > "${{ matrix.asset }}-static.sha256"
 
       # darwin: rebuild x86_64 via clang cross-compilation and stage a
       # second tarball (verified locally: CC="clang -target
@@ -137,6 +170,13 @@ jobs:
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
+        with:
+          name: ${{ matrix.asset }}-static
+          path: dist/${{ matrix.asset }}-static.*
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/') && runner.os == 'macOS'
         with:
           name: lume-darwin-x64
@@ -154,6 +194,15 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes 2>/dev/null || true
           gh release upload "$GITHUB_REF_NAME" \
             "dist/${{ matrix.asset }}.tar.gz" "dist/${{ matrix.asset }}.sha256" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Attach static release assets (${{ matrix.asset }}-static)
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "dist/${{ matrix.asset }}-static.tar.gz" "dist/${{ matrix.asset }}-static.sha256" \
             --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Attach cross-built darwin-x64 assets
