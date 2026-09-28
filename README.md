@@ -35,6 +35,14 @@ a trusted, loopback-only surface:
 - **Enable Basic Auth** for any non-loopback bind. Container deployments do this
   via the bundled `htpasswd` + `.env`; **local `make dev` / `make invest` do
   _not_ enable auth by default** — keep them on `localhost` only.
+- **The Basic-Auth gate is global** — it fronts built-in routes and custom
+  routes declared in the `.lume` script alike (the `http.c`/`event.c` auth
+  check runs before any routing). Hash formats: bcrypt (`$2a$/$2b$/$2y$`)
+  verifies through the bundled portable implementation on every platform;
+  `$5$`/`$6$` go through libcrypt, which Linux (glibc/musl) supports but
+  **macOS/BSD libcrypt is DES-only** — there those entries always deny, and
+  lume prints a loud warning at startup. For portable files prefer
+  `htpasswd -bnB` (bcrypt).
 - **Data egress.** When `LLM_API_KEY` is set, chat content, session memory and
   the SQLite schema are sent to `LLM_API_URL`. For a public/third-party provider
   this is "providing personal data to a third party" under PIPL — the in-app

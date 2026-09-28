@@ -29,6 +29,12 @@ Lume 的 HTTP 服务器**自身不带鉴权**。聊天端点(`/react/api/chat`)�
   不可信的局域网/公网。
 - **非回环绑定时务必开启 Basic Auth**。容器部署通过内置 `htpasswd` + `.env` 实现;
   **本地的 `make dev` / `make invest` 默认不开启鉴权**——只在 `localhost` 用。
+- **Basic Auth 门是全局的**——内置路由与 `.lume` 脚本里声明的自定义路由共用同一道
+  前置门(`http.c`/`event.c` 在路由分发之前校验)。哈希格式:bcrypt
+  (`$2a$/$2b$/$2y$`)走 lume 自带可移植校验器,全平台一致;`$5$`/`$6$` 走系统
+  libcrypt,Linux(glibc/musl)正常,**macOS/BSD 的 libcrypt 只有 DES**——那里
+  `$5$`/`$6$` 条目会永远拒绝(启动时会打响亮警告),可移植的 htpasswd 文件请用
+  `htpasswd -bnB` 生成 bcrypt。
 - **数据出境**。设置 `LLM_API_KEY` 后,聊天内容、会话记忆与 SQLite schema 会发往
   `LLM_API_URL`。若用公网/第三方 provider,这在 PIPL 意义下属于「向第三方提供个人
   信息」——应用内的设置/发现页已做披露,但若用他人数据来跑,需自备隐私告知与同意流。
