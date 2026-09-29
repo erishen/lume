@@ -818,6 +818,7 @@ void bridge_seed_builtins(VM *vm) {
         {"bool", b_bool},
         {"string", b_string},
         {"replace", b_replace},
+        {"crypt_sha512", b_crypt_sha512},
         {"len", b_len},
         {"keys", b_keys},
         {"get", b_get},

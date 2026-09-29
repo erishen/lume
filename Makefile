@@ -77,7 +77,7 @@ endef
 SRCS     := src/main.c src/lexer.c src/parser.c src/parser_stmt.c src/parser_expr.c \
             src/value.c src/typecheck.c src/typecheck_expr.c src/typecheck_stmt.c \
             src/interp.c src/builtins.c src/builtins_sql.c src/builtins_fs.c \
-            src/builtins_catalog.c src/builtins_hof.c src/builtins_str.c src/builtins_math.c src/loader.c src/vdom.c \
+            src/builtins_catalog.c src/builtins_hof.c src/builtins_str.c src/builtins_math.c src/builtins_crypt.c src/loader.c src/vdom.c \
             src/bridge.c src/token.c src/iquest.c
 OBJS     := $(SRCS:src/%.c=build/%.o)
 
@@ -104,7 +104,7 @@ build/%.o: src/%.c src/lume.h $(INT_HDRS) | build $(AH_LIB)
 $(TARGET): $(OBJS) $(AH_LIB) | bin
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(AH_LIB) $(LDFLAGS) -lm
 
-check: all
+check: all crypt-test
 	@for f in $(EXAMPLES); do ./$(TARGET) --check $$f || exit 1; done
 
 dump: all
@@ -451,3 +451,10 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 	@echo "ok   ASan/UBSan all passed"
 
 .PHONY: all check dump dev dev-minimal invest hub demo-sqlite demo-sqlite-watch invest-watch hub-watch run ui ui-items vsix image image-push test clean asan
+# crypt_sha512 内建单测（glibc 生成 $6$ / macOS 平台报错 都算 PASS）。
+crypt-test: all
+	@./$(TARGET) tests/test-crypt.lume > /tmp/lume-crypt-test.out 2>&1; \
+	rc=$$?; cat /tmp/lume-crypt-test.out; \
+	if [ $$rc -ne 0 ] || grep -q FAIL /tmp/lume-crypt-test.out; then \
+		echo "==> crypt 单测失败 (rc=$$rc)"; exit 1; fi; \
+	echo "==> crypt 单测全部通过"
