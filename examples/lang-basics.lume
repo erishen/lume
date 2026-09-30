@@ -48,3 +48,9 @@ print("float arithmetic = " + str(2 * (1.5 + 2.25)));
 print("int->float widening = " + str(widened()));
 print(strict_bools());
 report();                                  // prints 21 / 7 = 3
+
+// cast-and-get sugar: str/int/float accept (map, key, default?) and read +
+// convert in one step, equivalent to str(get(m, "k", default)). Missing key
+// falls back to the default; found value is converted to the cast's type.
+let acc = { name: "ACME", n: "42", amt: 3.5 };
+print("accessor = " + str(acc, "name", "") + "|" + str(acc, "missing", "D") + "|" + str(int(acc, "n", 0)) + "|" + str(float(acc, "amt", 0.0)));

@@ -22,7 +22,7 @@ make > /dev/null 2>&1 || fail "make"
 # pure-language script must compute, print and exit 0
 OUT=$(./bin/lume examples/lang-basics.lume 2>&1)
 [ "$?" -eq 0 ] || fail "run lang-basics"
-for token in "sq_dist(3,4) = 25" "strict bools ok" "21 / 7 = 3"; do
+for token in "sq_dist(3,4) = 25" "strict bools ok" "21 / 7 = 3" "accessor = ACME|D|42|3.5"; do
     printf '%s' "$OUT" | grep -Fq "$token" || fail "lang-basics missing '$token'"
 done
 pass "build + parse demo/lang-basics"
