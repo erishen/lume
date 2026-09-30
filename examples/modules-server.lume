@@ -1,0 +1,49 @@
+// modules-server.lume — 多文件模块的服务端演示
+//
+// 与 examples/modules/app.lume（CLI 版）共用同一个策略库
+// examples/modules/tax.lume：同一份 `export let / export func / export type`
+// 既能在命令行脚本里 import，也能在服务器路由里 import——库只写一次。
+//
+//   运行
+//   ─────
+//   make modules-ui        # 构建前端并启动 :8090
+//   或手动：
+//   cd frontend && pnpm run build   # 生成 www/modules/app.js
+//   ./bin/lume examples/modules-server.lume
+//
+//   页面
+//   ─────
+//   http://localhost:8090/           # React 前端（税额计算器 + 模块导出清单）
+//   http://localhost:8090/api/tax?amount=1000&zone=free-trade   # JSON API
+
+import "modules/tax.lume" as tax;
+
+// JSON 响应 helper(json() 不是内建,照 query-demo 的自定义形态)
+func json(body) {
+  return { type: "application/json", body: stringify(body) };
+}
+
+server {
+  port = 8090;
+  workers = 4;
+  docroot = "./www";      // 静态资源:www/modules/app.js、www/app.css
+  views = "modules";      // 页面壳:www/modules/index.html(/ -> index.html)
+}
+
+// 税额计算 API：GET /api/tax?amount=1000&zone=free-trade
+// route handler 里直接调用模块导出的函数（tax.apply）与常量（tax.BASE_RATE）
+get "/api/tax", (req) => {
+  let amount = float(get(req.query_params, "amount", "1000"));
+  let zone = get(req.query_params, "zone", "mainland");
+  let order = { amount: amount, zone: zone };
+  return json({
+    amount: amount,
+    zone: zone,
+    rate: tax.rate_for(zone),        // 来自模块导出的函数
+    tax: tax.apply(order),           // 来自模块导出的函数（内部读模块私有/导出常量）
+    base_rate: tax.BASE_RATE,        // 来自模块导出的常量
+    preferential_rate: tax.PREFERENTIAL_RATE,
+  });
+};
+
+run();

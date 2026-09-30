@@ -1,0 +1,177 @@
+// examples/abac/policy.lume — ABAC 策略库(模块化拆分:库侧)
+//
+// 属性访问控制(Attribute-Based Access Control)的"策略引擎"部分:
+//   主体/资源/环境属性 + 策略表达式(decide) + 审计写入,
+// 与 HTTP 层(路由/认证/响应)解耦——入口 examples/abac.lume import 本库,
+// 路由 handler 只负责把请求翻译成 decide(user, res, action) 调用。
+//
+//   四要素
+//   ─────
+//   subject     谁在访问          → subjects 属性表(用户名 → 属性)
+//   resource    访问什么          → resources 属性表(资源 id → 属性)
+//   action      做什么            → read / delete / approve(动作 + 路径决定)
+//   environment 什么环境          → now():写操作仅限北京时间 09:00–18:00
+//
+//   决策链(按序短路,任一 DENY 即拒绝,最后才 PERMIT)
+//   ─────
+//   1. 主体未知/未认证            → DENY(deny-by-default)
+//   2. 资源未知                   → DENY
+//   3. 动作不在资源允许集          → DENY
+//   4. clearance 不足             → DENY
+//   5. 部门不匹配(EXEC 可跨部门)  → DENY
+//   6. CONFIDENTIAL 且区域非 CN    → DENY(读取也受限)
+//   7. 管理动作(delete/approve)  → 额外门槛 + 工作时间
+//
+//   用法(见 examples/abac.lume 入口 / make abac)
+//   ─────
+//   import "abac/policy.lume" as policy;
+//   let d = policy.decide(user, resource, action);   // 策略引擎
+//   policy.audit_write(d);                           // 每次决策留痕
+//
+// 未导出的顶层绑定(subjects / resources / action_min_clearance / AUDIT_PATH)
+// 对入口不可见——策略数据与策略实现都被封装在库内。
+
+// ============ 1. 属性源(生产环境应来自目录服务 / DB,这里用表模拟) ============
+
+let subjects = {
+  admin: { department: "EXEC",  clearance: 5, region: "CN", title: "admin" },
+  carol: { department: "ENG",   clearance: 4, region: "US", title: "manager" },
+  alice: { department: "ENG",   clearance: 3, region: "CN", title: "engineer" },
+  bob:   { department: "SALES", clearance: 2, region: "CN", title: "sales" },
+};
+
+let resources = {
+  board:    { clearance: 5, department: "EXEC",  actions: ["read", "approve"] },
+  roadmap:  { clearance: 4, department: "ENG",   actions: ["read", "delete", "approve"] },
+  internal: { clearance: 3, department: "ENG",   actions: ["read", "delete"] },
+  pipeline: { clearance: 2, department: "SALES", actions: ["read", "delete"] },
+};
+
+// 管理动作的额外 clearance 门槛(delete/approve 比普通读取要求更高)
+let action_min_clearance = {
+  read: 0,       // 读取只受资源自身 clearance 约束
+  delete: 4,     // 删除至少 CONFIDENTIAL 级
+  approve: 5,    // 审批至少 TOP 级(+ 部门必须是 EXEC)
+};
+
+// 审计文件(git-ignored 的 .data/,每行一条 JSON)
+let AUDIT_PATH = ".data/abac-audit.jsonl";
+
+// decide() 的返回形状:decision + 逐步推理记录(reason)
+export type Decision = {
+  decision: string,   // "PERMIT" | "DENY"
+  reason: string,     // 策略引擎逐步推理的 trace
+  subject: string,
+  resource: string,
+  action: string,
+};
+
+// ============ 2. 策略表达式(核心:函数即策略) ============
+
+// decide(user, res, action) → { decision, reason }
+// reason 是逐步推理记录(字符串累积,`+` 追加步骤),供审计与 /decide 调试展示。
+export func decide(user, res, action): Decision {
+  let trace = "";
+
+  // --- 1) 主体:未认证 / 不在属性表 = 未知主体 → DENY(deny-by-default)
+  let subj = get(subjects, user, null);
+  if (subj == null) {
+    trace = trace + "[subject '" + user + "' unknown or unauthenticated] ";
+    return { decision: "DENY", reason: trace, subject: user,
+             resource: res, action: action };
+  }
+
+  // --- 2) 资源:未知资源 → DENY
+  let doc = get(resources, res, null);
+  if (doc == null) {
+    trace = trace + "[resource '" + res + "' unknown] ";
+    return { decision: "DENY", reason: trace, subject: user,
+             resource: res, action: action };
+  }
+
+  // --- 3) 动作:资源不支持该动作 → DENY
+  let allowed = doc.actions;
+  let ok_action = false;
+  for (let i = 0; i < len(allowed); i = i + 1) {
+    if (get(allowed, i, "") == action) { ok_action = true; }
+  }
+  if (not ok_action) {
+    trace = trace + "[action '" + action + "' not allowed on '" + res + "'] ";
+    return { decision: "DENY", reason: trace, subject: user,
+             resource: res, action: action };
+  }
+
+  // --- 4) clearance:主体等级必须 >= 资源等级
+  if (doc.clearance > subj.clearance) {
+    trace = trace + "[clearance " + str(subj.clearance) + " < required "
+          + str(doc.clearance) + " for '" + res + "'] ";
+    return { decision: "DENY", reason: trace, subject: user,
+             resource: res, action: action };
+  }
+
+  // --- 5) 部门:本部门可读;EXEC 跨部门豁免(公司治理约定)
+  if (doc.department != subj.department and subj.department != "EXEC") {
+    trace = trace + "[department mismatch: '" + doc.department
+          + "' not readable by '" + subj.department + "'] ";
+    return { decision: "DENY", reason: trace, subject: user,
+             resource: res, action: action };
+  }
+
+  // --- 6) 环境-区域:CONFIDENTIAL(4) 资料仅限 CN 区域读取
+  if (doc.clearance == 4 and subj.region != "CN") {
+    trace = trace + "[CONFIDENTIAL cannot be read from outside CN (region '"
+          + subj.region + "')] ";
+    return { decision: "DENY", reason: trace, subject: user,
+             resource: res, action: action };
+  }
+
+  // --- 7) 环境-时间:管理动作(delete/approve)仅限北京时间 09:00–18:00
+  if (action != "read") {
+    let hour = int((now() + 28800) % 86400 / 3600);   // now() 是 epoch 秒,+8h 得北京时间
+    let gate = get(action_min_clearance, action, 0);
+    if (subj.clearance < gate) {
+      trace = trace + "[action '" + action + "' needs clearance " + str(gate)
+            + " (subject has " + str(subj.clearance) + ")] ";
+      return { decision: "DENY", reason: trace, subject: user,
+               resource: res, action: action };
+    }
+    if (action == "approve" and subj.department != "EXEC") {
+      trace = trace + "[approve requires EXEC department (subject is '"
+            + subj.department + "')] ";
+      return { decision: "DENY", reason: trace, subject: user,
+               resource: res, action: action };
+    }
+    if (hour < 9 or hour >= 18) {
+      trace = trace + "[no " + action + " after hours (Beijing hour="
+            + str(hour) + ")] ";
+      return { decision: "DENY", reason: trace, subject: user,
+               resource: res, action: action };
+    }
+    trace = trace + "[environment ok: Beijing hour " + str(hour) + " within 09-18] ";
+  }
+
+  trace = trace + "[attributes satisfy policy] ";
+  return { decision: "PERMIT", reason: trace, subject: user,
+           resource: res, action: action };
+}
+
+// ============ 3. 审计(可审计性是 ABAC 的硬要求:每次决策留痕) ============
+
+// 追加一条决策记录到 .data/abac-audit.jsonl。
+// 进程内全局状态在 prefork 多 worker 下不可靠(每个 worker 一份副本),
+// 所以落文件 + flock 串行化,任何 worker 写都安全。
+export func audit_write(entry) {
+  lock_file(AUDIT_PATH, 3000);
+  let cur = read_file(AUDIT_PATH);
+  let base = "";
+  if (cur != null) { base = cur; }
+  write_file(AUDIT_PATH, base + stringify(entry) + "\n");
+  unlock_file();
+}
+
+// 供 GET /audit 读取全部记录(demo 规模直接全量返回)
+export func audit_read_all() {
+  let cur = read_file(AUDIT_PATH);
+  if (cur == null) { return ""; }
+  return cur;
+}

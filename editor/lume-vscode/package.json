@@ -1,0 +1,52 @@
+{
+  "name": "lume",
+  "displayName": "Lume DSL",
+  "description": "Syntax highlighting + Go-to-Definition & outline for the Lume scripting DSL",
+  "version": "0.3.7",
+  "license": "MIT",
+  "publisher": "erishen",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "main": "./extension.js",
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "lume",
+        "aliases": [
+          "Lume",
+          "lume"
+        ],
+        "extensions": [
+          ".lume"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lume",
+        "scopeName": "source.lume",
+        "path": "./syntaxes/lume.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Lume",
+      "properties": {
+        "lume.sourceRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Lume 仓库根目录（含 src/builtins.c）。留空则自动在工作区中探测（深度 3 层）。"
+        }
+      }
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/erishen/lume.git"
+  },
+  "homepage": "https://github.com/erishen/lume"
+}

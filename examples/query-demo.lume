@@ -1,0 +1,55 @@
+// Lume example: reading URL query strings in route handlers.
+//
+//   make && bin/lume examples/query-demo.lume
+//   browse:
+//     http://localhost:8087/echo?name=Ada&tag=hello%20world&flag&tag=again
+//     http://localhost:8087/api/hello?name=Lume
+//     http://localhost:8087/api/hello
+//
+// Every route handler receives a request map with two query fields:
+//
+//   req.query         — the raw query string, no leading '?' (null when absent)
+//   req.query_params  — URL-decoded params map: '+' -> space, %XX -> byte,
+//                       a segment without '=' gets an empty value, repeated
+//                       keys are last-wins; an absent query is an empty map.
+//
+// req.path still carries the whole URI including the query string; routing
+// matches on the path only, so /echo?a=1 and /echo hit the same handler.
+
+type Reply = {
+  status: int,
+  type: string,
+  body: string,
+};
+
+func json(body) {
+  return { status: 200, type: "application/json", body: stringify(body) };
+}
+
+// Echo the raw query string and the decoded params side by side so the
+// difference is visible: `?tag=hello%20world&flag` reads back raw as
+// "tag=hello%20world&flag", decoded as { tag: "hello world", flag: "" }.
+route "GET", "/echo", func (req) {
+  return json({
+    path: req.path,
+    query: req.query,
+    params: req.query_params,
+  });
+};
+
+// Real use: read a named parameter with a default. A missing key reads as
+// null (or get() with a fallback), so ?name= or no query at all both give
+// "stranger"; a %XX/+ encoded value arrives already decoded.
+route "GET", "/api/hello", func (req) {
+  let name = get(req.query_params, "name", "stranger");
+  let style = get(req.query_params, "style", "plain");
+  let greeting = "Hello";
+  if (style == "polite") { greeting = "Nice to meet you"; }
+  return json({ greeting: greeting + ", " + name + "!" });
+};
+
+server {
+  host = "127.0.0.1";
+  port = 8087;
+}
+run();

@@ -1,0 +1,16 @@
+/* Tailwind entry for the standalone /items page (www/items.html).
+ *
+ * Unlike app.css there is no SSR markup here, so the page is pure utilities:
+ * items.tsx carries every class and no component layer is needed.
+ *
+ * Build:  cd frontend && pnpm run build:items:css   -> ../www/items.css
+ * Watch:  cd frontend && pnpm run dev:items:css
+ */
+@import "tailwindcss" source(none);
+@import "../theme.css";
+
+@source "./items.tsx";
+
+@layer base {
+  body { @apply bg-bg font-sans text-ink leading-body; }
+}

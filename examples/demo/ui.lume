@@ -1,0 +1,49 @@
+// examples/demo/ui.lume — SSR 页面组件库(模块化拆分:库侧)
+//
+// demo.lume 的页面组件(cls / nav / card / page)拆到这里:组件是纯函数,
+// 只依赖 el() / html() 内建,不碰服务器状态——类比前端 React 组件库,
+// 入口只要 `import "demo/ui.lume" as ui;` 即可复用。想加新页面组件
+// (表格/表单/标签页…)就在库里加 export func,所有入口一起受益。
+// 组件故意不标类型(loose)——vnode 是动态结构,render() 自己会走。
+
+// ------------------------------------------------ server-side components
+// Note: components are deliberately untyped (loose) — a vnode tree is a
+// dynamic structure, and render() knows how to walk it.
+export func cls(active: string, name: string): string {
+  let c: string = "nav";
+  if (active == name) { c = c + " active"; }
+  return c;
+}
+
+export func nav(active) {
+  return el("nav", {},
+    el("a", { class: cls(active, "home"), href: "/" }, "Home"),
+    el("a", { class: cls(active, "counter"), href: "/counter" }, "Counter"),
+    el("a", { class: cls(active, "chat"), href: "/chat" }, "Agent"),
+    el("a", { class: cls(active, "hello"), href: "/hello" }, "API"));
+}
+
+export func card(icon, title, body, color) {
+  return el("div", { class: "card" },
+    el("span", { class: "dot", style: "background:" + color }),
+    el("h3", {}, icon + " " + title),
+    el("p", {}, body));
+}
+
+// template-string shell: {0}=title {4}=body slots, scalar (title) escaped,
+// vnode slots (nav, body list) rendered structurally
+export func page(title, page_id, body) {
+  return html("<!doctype html><html><head>"
+    + "<meta charset='utf-8'>"
+    + "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+    + "<title>{0} · Lume</title>"
+    + "<link rel='stylesheet' href='/app.css'>"
+    + "<script type='module' src='/invest/app.js'></script></head>"
+    + "<body data-page='{1}'>"
+    + "<a class='skip' href='#top'>skip to content</a>"
+    + "{2}"
+    + "<main id='top'>{3}</main>"
+    + "<footer>{4}</footer>"
+    + "</body></html>",
+    title, page_id, nav(page_id), body, "Lume · strongly-typed C DSL on agent-httpd");
+}

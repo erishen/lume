@@ -1,0 +1,16 @@
+/* Design tokens shared by the Lume demo UI. Both Tailwind entries (app.css,
+ * items.css) import this, so the React bundles and the Lume SSR shell read
+ * from one palette. Tailwind v4 turns each token into utilities: --color-accent
+ * becomes bg-accent / text-accent / border-accent, etc. */
+@theme {
+  --color-bg: #0b1020;
+  --color-panel: #121a30;
+  --color-ink: #e7ecf8;
+  --color-muted: #8fa0c0;
+  --color-accent: #38bdf8;
+  --color-accent-ink: #06213a;
+  --color-line: #22304f;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --leading-body: 1.55;
+}

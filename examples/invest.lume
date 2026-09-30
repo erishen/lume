@@ -1,0 +1,67 @@
+// ============================================================================
+// invest.lume —— 投资助手产品服务器(替代 hello.lume 作为 8082 日常驱动)
+//
+// 启动方式:在 lume 目录运行 make invest(或 make invest-watch 热更新)。
+//   不要直接 ./bin/lume 跑这个文件 —— HARNESS_SKILLS_ALLOW /
+//   HARNESS_TOOLS_ALLOW / MCP_ALLOW 只在 make 目标里注入;直跑会让整份
+//   技能/工具/MCP 目录对聊天页可见(启动时会打印告警,见文件末尾)。
+// 页面:  /(仪表盘)  /chat(聊天)  /reports(周报归档)  /settings(设置)
+// 静态层分层:页面壳 + 自家 bundle 在 www/invest/(views 前端);共享的
+// /invest/app.js(聊天 bundle)、/app.css(壳样式)、/chunk-*.js(React 分包,
+// esbuild 把共享 React 抽成一个 chunk,全部页面首访后逐页复用)在 docroot
+// 下。URL 保持根路径不变。
+//
+// 产品 API(GET+/POST /api/settings、GET /api/reports…)由 C 侧 iquest 模块
+// 在 run() 时注册(src/iquest.c),这里不需要再声明路由。
+//
+// 权限边界(知情提示):聊天页的模型经白名单工具可以<b>直接写账本</b>
+// (portfolio_add/remove)并<b>触发本地管线</b>(portfolio-check 在 asset-lens
+// 跑 make、pse-review 跑 autogen-pse 三角色)。写操作有 flock 锁 + 原子写
+// 兜底(不会损坏/丢失文件),但对话内容本身不可信 —— 不要向不受信方透露
+// 账本或 .env 内容。
+// ============================================================================
+
+server {
+  port = 8082;
+  workers = 2;
+  // 只绑回环:本机仪表盘/聊天不向局域网暴露(此前 README 的 127.0.0.1 保护
+  // 只覆盖 compose 容器,本地 make invest 默认 0.0.0.0 会让 LAN 裸奔)。
+  // 需要对外提供时改成 bind = "0.0.0.0" 或删掉该行。
+  bind = "127.0.0.1";
+  docroot = "./www";
+  views = "invest";   // docroot 下的页面子目录:/ → www/invest/index.html 等
+                      // (URL 仍然 /、/chat、/reports.html、/settings.html)
+  // 访问控制: 服务端本身无鉴权, /api/reports 与 /react/api/chat 都是未认证
+  // 端点(聊天里还能经 fs 工具读写文件)。htpasswd 走 env, 本机 make invest
+  // 时未设 → null → 认证保持关闭(不会把自己锁在外面); 容器内由 compose 注入
+  // HTPASSWD_FILE=/app/auth/htpasswd 才启用 Basic Auth。框架只认 $5$/$6$/
+  // bcrypt 强哈希, 明文与弱哈希在加载时直接拒绝。
+  htpasswd   = env("HTPASSWD_FILE");
+  auth_realm = "lume";
+}
+
+// 领域层(账本读写 / portfolio_* 工具 / 周报生成)在 examples/invest/ledger.lume,
+// 本文件 import 该库:模块顶层执行时 tool 声明照常注册进全局工具表,
+// handler 闭包持有库环境——一行 import,全部领域工具即就绪。
+
+import "invest/ledger.lume" as ledger;
+
+// ------------------------------------------------ /discovery
+// 启动时 LLM-router 集成发现到的工具/技能/MCP 一览(GET,跑在 master VM)。
+get "/discovery", (req) => {
+  return {
+    endpoints: discovery_endpoints(),   // 只报配置状态与模型名, 不暴露内网 URL,
+    skills: skills(),
+    tools: tools(),
+    mcps: mcps(),
+  };
+};
+
+// 白名单守门:HARNESS_* 只由 make invest 注入;直跑 ./bin/lume 时 harness
+// 不收敛,整份技能/工具/MCP 目录都会出现在聊天页里。这里显式告警,免得误
+// 以为已经收敛(启动打印在服务 listen 之前)。
+if (env("HARNESS_SKILLS_ALLOW") == null or env("HARNESS_SKILLS_ALLOW") == "") {
+  print("警告: 未设置 HARNESS_SKILLS_ALLOW —— 请用 `make invest` 启动以收敛白名单");
+};
+
+run();   // 启动服务器并阻塞(iQuest API 在此 fork 前注册)

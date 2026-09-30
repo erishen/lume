@@ -1,0 +1,74 @@
+// ABAC(Attribute-Based Access Control,属性访问控制)完整示例 —— 模块化拆分后的入口
+//
+// 策略引擎(属性源 / decide / 审计)已拆到 examples/abac/policy.lume 策略库,
+// 本文件只保留 HTTP 层:认证 + 路由 + 响应,handler 把请求翻译成
+// policy.decide(user, res, action) 调用。策略逻辑改动不再碰入口,反之亦然。
+//
+//   账号(与 spring-abac README 一致)→ 主体属性(见 policy.lume)
+//   ─────
+//   admin  EXEC / clearance 5 / CN      carol  ENG / clearance 4 / US
+//   alice  ENG  / clearance 3 / CN      bob    SALES / clearance 2 / CN
+//
+//   运行
+//   ─────
+//   make abac     # 生成 .data/abac.htpasswd(4 个账号)并启动 :8086
+//   或手动:htpasswd -B -c .data/abac.htpasswd admin admin123(+carol/alice/bob)
+//   ./bin/lume examples/abac.lume
+
+import "abac/policy.lume" as policy;
+
+// ============ 路由(把策略接到真实请求上) ============
+
+// 统一入口:任何受保护操作都先 policy.decide(),再按结果响应
+// PERMIT → 200 JSON(决策详情);DENY → 403 JSON
+func respond(d) {
+  policy.audit_write(d);                // 每次决策都留痕(策略库负责写审计)
+  if (d.decision == "PERMIT") { return d; }
+  return { status: 403, type: "application/json", body: stringify(d) };
+}
+
+// 读取文档:GET /docs?doc=<id>
+get "/docs", (req) => {
+  return respond(policy.decide(req.user, req.query_params.doc, "read"));
+};
+
+// 删除文档:POST /docs/delete?doc=<id>(管理动作,受工作时间约束)
+post "/docs/delete", (req) => {
+  return respond(policy.decide(req.user, req.query_params.doc, "delete"));
+};
+
+// 审批文档:POST /docs/approve?doc=<id>(仅 EXEC,受工作时间约束)
+post "/docs/approve", (req) => {
+  return respond(policy.decide(req.user, req.query_params.doc, "approve"));
+};
+
+// 调试端点:显式指定 user/res/action,展示策略推理过程("具体怎么做")
+//   curl -u admin:admin123 'http://localhost:8086/decide?user=carol&res=roadmap&action=read'
+get "/decide", (req) => {
+  let u = req.query_params.user;
+  let r = req.query_params.res;
+  let a = get(req.query_params, "action", "read");
+  let d = policy.decide(u, r, a);
+  policy.audit_write({ debug: true, user: u, resource: r, action: a,
+                       decision: d.decision, reason: d.reason });
+  return { input: { user: u, resource: r, action: a },
+           result: d, hint: "trace 为策略引擎逐步推理记录" };
+};
+
+// 审计查看:GET /audit(认证即可,demo 简化;生产应加角色限制)
+get "/audit", (req) => {
+  return { lines: policy.audit_read_all() };
+};
+
+// 首页由 React 前端提供:server{} 的 views="abac" 把 / 映射到
+// www/abac/index.html(frontend/src/abac/app.tsx 构建出的 React 单页),
+// 页面通过 /decide 与 /audit 两个 JSON API 驱动决策测试与审计展示。
+server {
+  port = 8086;
+  workers = 4;
+  docroot = "./www";     // 静态资源:www/abac/app.js、www/app.css
+  views = "abac";        // 页面壳:www/abac/index.html(/ -> index.html)
+  htpasswd = "./.data/abac.htpasswd";   // make abac 生成(4 个 demo 账号)
+  auth_realm = "abac-demo";
+}
+run();

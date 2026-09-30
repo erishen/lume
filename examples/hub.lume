@@ -1,0 +1,89 @@
+// tsm-hub 网关能力示例(gateway playground):把 llm-router(:19070)同步下来
+// 的整本目录对客暴露——5 个技能(SKILL.md 语料)+ 3 个通用 MCP(fs/memory/
+// think)+ 2 个投资 MCP(portfolio-check/pse-review)+ router 内置工具。
+//
+//   make hub         → http://localhost:8083
+//                     (构建 + 前端 + 清端口 + 前台启动,Ctrl-C 停)
+//
+// 页面层已经整体搬到 frontend(拆 .lume/C 里的 HTML/CSS 字符串):
+//   - 视觉与样式      frontend/src/hub/(hub-home/catalog/discovery 各一入口包)
+//                     + src/app.css(hub 段落);esbuild 分包会把 React 抽成
+//                     www/chunk-*.js,各页只出 3~10kb 的入口 bunder,
+//                     /app.css 与共享 chunk 首访后逐页复用
+//   - 页面壳          薄静态文件 www/hub/{index,chat,catalog,discovery}.html
+//                     (只挂 bundle,导航/表格/统计全由各页 bundle 拉 JSON 渲染)
+//   - 页面服务        框架层一个 views 根搞定(server{ views = "hub" }):
+//                     URL 先落 <docroot>/hub(含 / → index.html、免扩展名 → .html、
+//                     content-type、etag/range 全套静态语义),views 里没有的
+//                     再回落 docroot 根(共享 chunk 与 /app.css)。
+//   - 本文件只保留    纯数据端点
+//
+// 端点分工(浏览器看的壳 + 机器读的 JSON 都在这):
+//   - /            → views 根 index.html(落地页,React 渲染,含 /catalog 统计)
+//   - /chat        → views 根 chat.html(与 invest 共用 invest 的 app.js 聊天
+//                    bundle:/invest/app.js,data-page="chat",导航/品牌是 Hub
+//                    自己的)
+//   - /catalog     → JSON 完整台账:skills 完整 desc + path、tools desc +
+//                    schema、mcps 合并网关 + 本地并标 source
+//   - /discovery   → JSON 轻量注册表(tools 是名字数组,前端发现条依赖此形状)
+//   - /catalog.html      /discovery.html   → views 根静态,对应 bundle 渲染
+// 想逛哪块直接问 chat 就行,例如:
+//   - 用 skill-run 跑技能: 「用 rust-review 审一下 skills/router/code-review/SKILL.md」
+//   - 玩 fs/memory:        「把 .sandbox 目录列出来」/「记住我的偏好: 律动优先」
+//   - 玩汇率/计算/抓页:     「eur 兑 cny 现在多少」「计算 17% 的 85 是多少」
+//   - 投资 MCP:            「portfolio-check 跑一遍」
+//
+// 能力白名单(profile)由 make hub 注入;单跑本文件不设 env 则全量开放。
+
+server {
+  port = 8083;          // 与 invest(8082)并存
+  workers = 2;
+  docroot = "./www";    // 共享层:/invest/app.js(聊天 bundle,invest 的)、
+                        // /app.css(壳样式)、/chunk-*.js(React 分包)
+  views = "hub";        // docroot 下的页面子目录:URL 先落 <docroot>/hub
+                        // (index/免扩展名映射/类型都在框架层做),hub 页面的
+                        // bundle(hub-home.js 等)也从这里出;没有的(chunk、
+                        // invest/app.js、app.css)再回落 docroot 根 —— DSL
+                        // 路由仍在 views 之前优先
+  // 访问控制: 与 invest.lume 同款 —— htpasswd 走 env, 未设即认证关闭,
+  // 容器内由 compose 注入 HTPASSWD_FILE 才启用 Basic Auth。
+  htpasswd   = env("HTPASSWD_FILE");
+  auth_realm = "lume";
+}
+
+// 原始注册表(纯 GET,跑 master VM):mcps() 读 router 同步目录,
+// skills()/tools() 是本进程实际注册的注册表(过滤后即当前 profile)。
+// 轻量版(与 invest 同款,前端发现条依赖其形状:tools 是名字数组)。
+get "/discovery", (req) => {
+  return {
+    endpoints: discovery_endpoints(),   // 只报配置状态与模型名, 不暴露内网 URL,
+    skills: skills(),
+    tools: tools(),
+    mcps: mcps(),
+  };
+};
+
+// 完整台账:catalog() builtin —— skills 的 desc 是 SKILL.md 里的完整原文
+// (比 discovery 的 160 字节摘要长),tools 带 desc + OpenAI schema,mcps
+// 合并网关同步(fs/memory/think)与本地服务器(portfolio-check/pse-review),
+// 每条带 source 标注。/catalog.html 页面的数据就来自这里。
+get "/catalog", (req) => {
+  return catalog();
+};
+
+// 给模型一个自省工具:确认当前 profile 真正加载了哪些能力(在 fork 出的
+// worker 里也能读——注册表/索引是静态的)。
+tool "hub-inspect", "查看网关本进程实际加载的能力清单(skills/tools/mcps)", {}, (arg) => {
+  return {
+    loaded: {
+      skills: len(skills()),
+      tools: len(tools()),
+      mcps: len(mcps()),
+    },
+    skills: skills(),
+    tools: tools(),
+    mcps: mcps(),
+  };
+};
+
+run();

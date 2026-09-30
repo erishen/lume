@@ -1,0 +1,3 @@
+[submodule "agent-httpd"]
+	path = agent-httpd
+	url = https://github.com/erishen/agent-httpd.git
