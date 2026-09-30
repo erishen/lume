@@ -82,6 +82,10 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
     map_set(vm, m, "remote_addr",
             req->remote_addr[0] ? make_string_cstr(vm, req->remote_addr)
                                 : val_null());
+    map_set(vm, m, "x_forwarded_for",
+            req->x_forwarded_for[0]
+                ? make_string_cstr(vm, req->x_forwarded_for)
+                : val_null());
     map_set(vm, m, "host", req->host[0] ? make_string_cstr(vm, req->host)
                                         : val_null());
     map_set(vm, m, "content_type",
