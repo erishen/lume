@@ -23,6 +23,13 @@ check reports three things:
   host-only   files that exist here and never existed upstream.
   drift       upstream has it, this copy differs.  The only bucket that
               makes check fail.
+
+The upstream comparison needs a lume-core tree next door.  Where there is
+none (CI, a checkout on its own) check falls back to the baseline in
+lang/PIN.manifest: one md5 per synced file, written by `make sync-lang`.
+That is what makes the pin verifiable without the upstream repo, and it is
+the signal CI can act on today - erishen/lume-core exists but is empty,
+so `git clone` cannot be made to resolve the pinned sha yet.
 """
 import hashlib
 import difflib
@@ -34,6 +41,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LANG = os.path.join(ROOT, "lang")
 PIN = os.path.join(LANG, "PIN")
+MANIFEST = os.path.join(LANG, "PIN.manifest")
 DEFAULT_CORE = os.path.join(os.path.dirname(ROOT), "lume-core")
 
 # Files the host owns and must never be replaced by the upstream copy.
@@ -119,6 +127,82 @@ def lang_sources():
                   if f.endswith((".c", ".h")) and os.path.basename(f) != "PIN")
 
 
+def synced_files(files):
+    """The files sync actually copies, i.e. everything but host_owned."""
+    return [f for f in files if f not in HOST_PINNED]
+
+
+def read_manifest():
+    """{filename: md5} from the committed baseline, or None if there is none."""
+    if not os.path.isfile(MANIFEST):
+        return None
+    out = {}
+    with open(MANIFEST, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            name, _, digest = line.partition(" ")
+            if name:
+                out[name] = digest
+    return out
+
+
+def upstream_files(files, core):
+    """What `sync` would actually copy: synced files upstream has.
+
+    Host-only files (bridge, iquest) live here and never upstream, so they
+    are deliberately left out of the baseline - the host is allowed to edit
+    them by hand without a pin bump.
+    """
+    if core is None:
+        return None
+    return [f for f in synced_files(files)
+            if os.path.isfile(os.path.join(core, "src", f))]
+
+
+def write_manifest(files, core):
+    """Record the current md5 of every upstream file as the new baseline."""
+    with open(MANIFEST, "w", encoding="utf-8") as fh:
+        fh.write("# md5 of every synced lang/ file, written by `make sync-lang`.\n")
+        fh.write("# check compares lang/ against this when lume-core is not reachable.\n")
+        for f in upstream_files(files, core) or []:
+            p = os.path.join(LANG, f)
+            if os.path.isfile(p):
+                fh.write("%s %s\n" % (f, md5(p)))
+
+
+def check_manifest(files, core):
+    """Problems the committed baseline reveals, or None when it is absent.
+
+    A synced file that differs from its baseline is exactly what a hand
+    edit looks like: it lands in git without a pin bump, so without this
+    the tree drifts silently until somebody runs check-sync on a machine
+    that has lume-core checked out next door.  With the core tree present
+    the tracked set is what upstream has; without it the baseline's own
+    lines are the set, so CI still catches edits when lume-core is not
+    published.
+    """
+    baseline = read_manifest()
+    if baseline is None:
+        return None
+    tracked = upstream_files(files, core)
+    if tracked is None:
+        tracked = sorted(baseline)
+    bad = []
+    for f in tracked:
+        if f not in baseline:
+            bad.append("%sNEW%s      %-18s no baseline, run `make sync-lang`" % (RED, OFF, f))
+        elif not os.path.isfile(os.path.join(LANG, f)):
+            bad.append("%sDRIFT%s     %-18s baseline entry, file is gone" % (RED, OFF, f))
+        elif baseline[f] != md5(os.path.join(LANG, f)):
+            bad.append("%sDRIFT%s     %-18s differs from lang/PIN.manifest" % (RED, OFF, f))
+    for f in sorted(baseline):
+        if f not in tracked:
+            bad.append("%sSTALE%s     %-18s baseline entry, not a synced file" % (YELLOW, OFF, f))
+    return bad
+
+
 def upstream_delta(name):
     """(lines upstream has that we do, lines we have that upstream does).
 
@@ -172,11 +256,46 @@ def main():
     if mode not in ("sync", "check"):
         sys.exit("usage: sync-lang.py {sync|check}")
 
-    core = core_dir()
-    sha = core_sha(core)
     files = lang_sources()
 
     if mode == "check":
+        # The upstream comparison needs lume-core next door.  CI has no such
+        # tree, and one that exists but carries no commits (erishen/lume-core
+        # is an empty repo today) is the same thing as far as this script is
+        # concerned, so treat both as "core unavailable" and lean on the
+        # committed baseline instead.
+        core = None
+        try:
+            core = core_dir()
+        except SystemExit:
+            pass
+        if core:
+            sha = core_sha(core)
+        else:
+            sha = "(no lume-core tree)"
+            print("==> no lume-core tree here; content drift is not checked - "
+                  "comparing lang/ against the lang/PIN.manifest baseline only")
+
+        # baseline first: the one leg that must always run
+        bad = check_manifest(files, core)
+        if bad is None:
+            print("%sok%s lang/PIN.manifest does not exist yet; "
+                  "run `make sync-lang` to record it" % (GREEN, OFF))
+        else:
+            for line in bad:
+                print(line)
+            if bad:
+                print("%d lang/ file(s) differ from lang/PIN.manifest" % len(bad))
+                return 1
+        if not core:
+            # Say so rather than ending on silence: the job is green because
+            # the baseline holds, not because nothing was compared.
+            n = len(read_manifest() or {})
+            print("%sok%s lang/ still matches its committed baseline - "
+                  "%d synced file(s) in lang/PIN.manifest; upstream content "
+                  "was not compared without lume-core" % (GREEN, OFF, n))
+            return 0
+
         # three buckets, only one of which is an actual problem:
         #   host-owned  -> deliberately pinned, needs a human on upgrade
         #   host-only   -> exists here, never existed upstream (bridge, iquest)
@@ -227,6 +346,8 @@ def main():
                   "a hand-merge is owed" % (len(lagging), LAG_WARN))
         return 0
 
+    core = core_dir()
+    sha = core_sha(core)
     changed = []
     for f in files:
         src = os.path.join(core, "src", f)
@@ -243,6 +364,7 @@ def main():
             fh.write(data)
         changed.append(f)
     write_pin(sha, core_version(core))
+    write_manifest(files, core)   # new baseline for anyone else running check
     if changed:
         print("%sok%s synced %d file(s) from %s @ %s" % (GREEN, OFF, len(changed),
                                                          os.path.basename(core), sha[:12]))
