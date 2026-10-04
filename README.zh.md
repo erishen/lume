@@ -94,7 +94,7 @@ cd ~/.local/share/lume && ~/.local/bin/lume examples/sqlite-write.lume
 
 | 路径 | 内容 |
 |---|---|
-| `lang/` | 词法/语法/类型检查/树遍历解释器 + agent-httpd 桥接,共约 5.5k 行 C11。**钉住**自兄弟项目 lume-core 的语言树(见 `lang/PIN`);同步用 `make sync-lang`,漂移检查 `make check-sync` |
+| `lang/` | 词法/语法/类型检查/树遍历解释器 + agent-httpd 桥接,共约 5.5k 行 C11。**钉住**自兄弟项目 lume-core 的语言树(见 `lang/PIN`);同步用 `make sync-lang`,漂移检查 `make check-sync`(旁边有 lume-core 时比对其钉住的 commit,没有则比对 `lang/PIN.manifest` 基线,CI 走的就是后者) |
 | `examples/` | 6 个 `.lume` 示例(demo / hello / invest / hub / lang-basics / sqlite-write) |
 | `frontend/` | React 18 + TS + Tailwind 4 客户端,esbuild `--splitting` 打包 |
 | `www/` | docroot:手写 HTML 壳 + 构建产物(混合,勿整体删) |

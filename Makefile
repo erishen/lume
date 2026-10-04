@@ -461,6 +461,12 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 # lang/ is a pinned copy of the lume-core language tree (see lang/PIN).
 # Bump the pin with `make sync-lang`; watch for drift with `make check-sync`.
 # Files listed as host_owned in lang/PIN are never overwritten.
+#
+# check-sync does two things.  With a lume-core tree next door it diffs every
+# synced file against the pinned upstream commit.  Without one - that is the
+# CI runner, and erishen/lume-core is an empty repo as of v0.1.0 - it falls
+# back to lang/PIN.manifest, the md5 baseline `make sync-lang` writes, so a
+# hand edit to a synced file still fails there instead of passing silently.
 sync-lang:
 	@python3 scripts/sync-lang.py sync
 

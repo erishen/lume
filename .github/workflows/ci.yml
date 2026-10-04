@@ -43,3 +43,23 @@ jobs:
         working-directory: lume
         run: |
           make -j4 asan
+
+  # The pin in lang/PIN says which lume-core commit lang/ was copied from.
+  # Full drift detection needs a lume-core checkout, which the runner does not
+  # have (and erishen/lume-core is an empty repo, so there is nothing to
+  # clone); check-sync therefore always verifies the committed md5 baseline in
+  # lang/PIN.manifest.  That is the leg that fails here - a synced file
+  # edited by hand without a `make sync-lang` bump.  When lume-core is
+  # published and this tree gets cloned as a sibling, check-sync silently
+  # upgrades to comparing against the pinned commit too.
+  check-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lume
+          submodules: recursive
+      - name: Verify the pin
+        working-directory: lume
+        run: |
+          make check-sync
