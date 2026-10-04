@@ -15,24 +15,50 @@ lexer -> parser(AST) -> type checker(compile-time) -> tree-walk interpreter -> b
 
 ```
 lume/
-├── lang/
-│   ├── lume.h        # 全部公共头：tokens、Type、Node、Value/Obj/GC、VM、桥接原型
-│   ├── token.c       # 枚举 -> 名字表（错误信息用）
-│   ├── lexer.c       # 源码 -> Token 数组
-│   ├── parser.c      # Token -> AST（递归下降），含类型标注/`type` 声明/`?`
-│   ├── typecheck.c   # 静态类型检查器 + Type 类型对象/构造器
-│   ├── value.c       # Value/Obj、GC（mark-sweep）、map/env/string、json 编解码
-│   ├── interp.c      # 树遍历解释器（value stack + jmp_buf 返回展开）+ 内建函数
-│   ├── bridge.c      # DSL <-> libagenthttpd 翻译层（route/tool/run shim）
-│   ├── iquest.c      # 投资助手产品 API（reports/settings 端点，settings 脱敏）
-│   ├── iquest.h      # iquest 注册接口：必须在 agenthttpd_run() 之前调用
-│   └── main.c        # CLI：--check / --dump / 直接执行脚本
-├── examples/         # 每个是一个完整示例；invest/hub/hello 各带前端
-│   ├── demo.lume         # E2E 试验台（SSR + 路由 + 工具），:8081，make dev
-│   ├── invest.lume       # 投资助手产品，:8082，make invest
-│   ├── hub.lume          # 网关能力台，:8083，make hub
-│   ├── hello.lume        # 最小入门（含 /items React 页），:8082，make dev-minimal
-│   └── lang-basics.lume  # 纯语言脚本（无 run()），run_all 用它断言输出
+├── lang/                    # lume-core 语言树的钉住副本，8.6k 行 C11（见 lang/PIN）
+│   ├── PIN                  # 上游 sha/版本 + host_owned 名单
+│   ├── PIN.manifest         # synced 文件的 md5 基线，CI 比对用
+│   ├── lume.h               # 全部公共头：token/Type/Node/Value/Obj/GC/VM/桥接原型
+│   ├── token.c              # 枚举 -> 名字表（错误信息用）
+│   ├── lexer.c              # 源码 -> Token 数组
+│   ├── parser.c             # Token -> AST 入口（递归下降），含类型标注/`type`/`?`
+│   ├── parser_expr.c        # 表达式优先级链（从 parser.c 拆出）
+│   ├── parser_stmt.c        # 语句级解析（声明/控制流/方法简写路由）
+│   ├── parser_internal.h    # parser 内部共享声明
+│   ├── typecheck.c          # 静态类型检查器 + Type 类型对象/构造器
+│   ├── typecheck_expr.c     # 表达式检查 ck_expr / ck_list
+│   ├── typecheck_stmt.c     # 语句与函数体检查 ck_stmt / ck_blk / ck_fn
+│   ├── typecheck_internal.h # typecheck 内部共享声明
+│   ├── value.c              # Value/Obj、GC（mark-sweep）、map/env/string、json 编解码
+│   ├── interp.c             # 树遍历解释器（value stack + jmp_buf 展开）+ 内建函数
+│   ├── vdom.c               # SSR 虚拟 DOM（el/render/html），从 interp.c 拆出
+│   ├── loader.c             # 多文件 import/export 模块加载
+│   ├── bridge.c             # DSL <-> libagenthttpd 翻译层（route/tool/run shim）
+│   ├── builtins.h           # 内建函数指针形态（host_owned，永不覆盖）
+│   ├── builtins.c           # 通用内建实现（host_owned，永不覆盖）
+│   ├── builtins_catalog.c   # 工具/技能/MCP/发现端点类内建
+│   ├── builtins_fs.c        # 文件/环境/目录/lock/时间内建
+│   ├── builtins_str.c       # 字符串内建（replace 等）
+│   ├── builtins_math.c      # abs/sqrt/exp/log/ln/pow/floor/ceil/round/min/max
+│   ├── builtins_crypt.c     # crypt_sha512（系统 crypt(3) -> $6$）
+│   ├── builtins_hof.c       # range / map / filter / reduce
+│   ├── builtins_sql.c       # sql_query / sql_write（host-only）
+│   ├── builtins_internal.h  # 内建层内部共享声明
+│   ├── iquest.c             # 投资助手产品 API（reports/settings，settings 脱敏）
+│   ├── iquest.h             # iquest 注册接口：必须在 agenthttpd_run() 前调用
+│   └── main.c               # CLI：--check / --dump / --watch / 直接执行脚本
+├── examples/                     # 10 个 .lume 入口（另有 5 个 import 的库：abac/policy、demo/ui、invest/ledger、modules/app、modules/tax）；invest/hub/hello 各带前端
+│   ├── demo.lume                 # E2E 试验台（SSR + 路由 + 工具），:8081，make dev
+│   ├── hello.lume                # 最小入门（含 /items React 页），:8082，make dev-minimal
+│   ├── invest.lume               # 投资助手产品，:8082，make invest
+│   ├── hub.lume                  # 网关能力台，:8083，make hub
+│   ├── react-ssr.lume            # React SSR 内容页（/react/* FastCGI relay 到常驻 node 后端），:8085，make react-ssr
+│   ├── sqlite-write.lume         # 原生 SQLite 写能力（显式放行 sql_write），:8084，make demo-sqlite
+│   ├── query-demo.lume           # URL query 串与解码 params 对照，:8087，make query-demo
+│   ├── abac.lume                 # ABAC 属性访问控制（策略在 abac/policy.lume 库），:8086，make abac
+│   ├── modules-server.lume       # 多文件模块的 UI/服务端版（库 modules/tax.lume），:8090，make modules-ui
+│   ├── lang-basics.lume          # 纯语言脚本（无 run()），run_all 用它断言输出
+│   └── modules/                  # 库目录：app.lume（CLI 入口，make modules）+ tax.lume（策略库）
 ├── frontend/src/      # 每 example 一个子目录（src/<name>/ + 共享层）
 │   ├── theme.css         # @theme token，共享层（app.css / items.css 都 @import）
 │   ├── app.css           # 共享壳样式表（所有 www 壳都链接 /app.css）
@@ -91,6 +117,8 @@ make hub              # 网关能力台 → http://localhost:8083（HUB_* 变量
 make hub-watch        # --watch 热更新（invest-watch 同理）
 make test             # 全部测试
 make clean            # 清理 build/ 和 bin/
+make sync-lang        # 从兄弟 lume-core 树重写 lang/ 的 synced 文件 + 刷新 PIN/PIN.manifest
+make check-sync       # 看 lang/ 漂移：synced 是否变了、host-owned 落后上游多少行
 ```
 
 > 每个启动目标的第 1 步(`KILL_SERVER` 宏)都会先清场:杀掉当前监听着目标端口的
@@ -103,6 +131,32 @@ make clean            # 清理 build/ 和 bin/
 
 `main.c` 的 CLI 规则：先 `parse_program`，再 `type_check_program`（永远执行），
 然后解释执行；`--check` 在类型检查后即退出（不产生副作用）。
+
+### 语言树 pin：`lang/` ↔ lume-core
+
+`lang/` 不是 Lume 自己维护的语言树，是兄弟项目 lume-core 的钉住副本。改之前先分清
+自己动的是哪一类——只有第一类是 `make sync-lang` 会覆盖的：
+
+| 身份 | 数量 | 说明 |
+|---|---|---|
+| synced | 13 | 与 core 逐字节相同，会被 `make sync-lang` 覆盖；手写改它会静默丢失（CI 的 `lang/PIN.manifest` md5 基线就是抓这个的） |
+| host-owned | 12 | 与 core 的**真实分叉**（agenthttpd 集成、原生后端 CLI、ToolDef tag、sql_* 内建），永不覆盖，升级 pin 后要手工合并 |
+| host-only | 4 | 只存在于 Lume：`bridge.c`、`builtins_sql.c`、`iquest.c`、`iquest.h` |
+
+升级流程（core 有新东西时）：
+
+```bash
+make sync-lang        # 旁边有 lume-core 目录才拷得上；顺带写 PIN 与 PIN.manifest
+make check-sync       # 三桶报告 + host-owned 落后上游的行数
+make test             # 合并完记得跑
+```
+
+`check-sync` 对「host-owned 落后 >40 行」只提提示、**不 exit 1**——那 12 个文件本来就该
+持续领先上游。真正会让它失败的是 synced 文件漂移。core 的原生后端专属文件
+（`codegen*.c` / `backend*.c` / `llvm_codegen*.c` / `rt.c`）根本不拷：Lume 没有原生后端。
+
+> lume-core 目前还没推到 GitHub（远端是空仓），所以 CI 里的 `check-sync` 走
+> `lang/PIN.manifest` 的 md5 基线那一支。core 一发布同条命令会自动升级成完整内容比对。
 
 ---
 
@@ -123,7 +177,7 @@ func greeting(u: User): string {
 }
 
 // 动态路径段：路径含 `:name` 段（`/api/stage/:id`）时，framework 匹配
-// （agent-httpd src/core/framework.c route_path_matches）逐段匹配并捕获
+// （agent-httpd/src/core/framework.c route_path_matches）逐段匹配并捕获
 // URL 解码后的值到 HttpRequest.path_param_*，bridge.c route_shim 同步
 // 逐段定位 DSL 路由，request_to_value 暴露为 req.params。匹配优先级：
 // 字面量精确 > 动态段 > 尾部 `*`（framework_route_dispatch 三遍扫描）。
@@ -410,7 +464,7 @@ POST/带 body 走 prefork worker,每进程各有一份 VM。所以 demo 里的�
 
 ---
 
-## Agent / LLM 接线（libagenthttpd `src/agent`）
+## Agent / LLM 接线（libagenthttpd，源码在 `agent-httpd/src/agent`）
 
 Lume 直接复用 agent-httpd 的 agent 能力,不需要在 DSL 里再造一套:
 
@@ -421,7 +475,7 @@ Lume 直接复用 agent-httpd 的 agent 能力,不需要在 DSL 里再造一套:
     `session` 键塞进实参 map,DSL 端 `get(a, "session")` 即可取到
     (`lang/bridge.c` 的 `tool_shim`;`tests/tools_driver.c` 的 `echo_sid` 验证)。
   - **chat 端点**:`POST /react/api/chat` 由框架层在路由分发前拦截
-    (`src/agent/llm.c`),Lume 起的所有 server 天然带这条路径,无需 DSL 代码。
+    (`agent-httpd/src/agent/llm.c`),Lume 起的所有 server 天然带这条路径,无需 DSL 代码。
     配合 `/react/api/pse`(POST)、以及 skills/session/mcp 都在框架侧。
 - **server 配置的 env 兜底**:`bridge_run()`(lang/bridge.c)先把
   `llm_env_init()` 提前(加载 CWD `.env`),再按 **`server{}` 字面量 >

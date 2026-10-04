@@ -126,8 +126,8 @@ Quick start and Containers sections.
 
 | Path | Contents |
 |---|---|
-| `lang/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, ~5.5k lines of C11. A **pinned copy** of the sibling lume-core language tree - see `lang/PIN`. `make check-sync` fails if a synced file drifts (against the pinned commit when a lume-core tree is next door, otherwise against the `lang/PIN.manifest` baseline, which CI checks) |
-| `examples/` | 11 `.lume` examples + reusable libs: `invest/ledger.lume` (portfolio tools), `abac/policy.lume` (ABAC policy engine), `demo/ui.lume` (SSR page components), `modules/tax.lume` (tax policy) — entry files `import` them |
+| `lang/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, 8.6k lines of C11 across 29 files. A **pinned copy** of the sibling lume-core language tree - see `lang/PIN`. Three buckets: 13 *synced* (byte-identical to upstream), 12 *host-owned* (never overwritten, deliberately kept here - the host's own bridge/build layer), 4 *host-only* (never existed upstream). `make sync-lang` bumps the pin, `make check-sync` fails on a synced-file drift; host-owned files that fall behind upstream are only *reported*, not failed (CI runs `check-sync`, so it always has a baseline to compare against via `lang/PIN.manifest`) |
+| `examples/` | 10 `.lume` entry files (the rest of the 15 are reusable libs they `import`): `hello` / `lang-basics` / `demo` / `react-ssr` / `invest` / `abac` / `modules-server` / `query-demo` / `hub` / `sqlite-write`, plus libs `invest/ledger.lume` (portfolio tools), `abac/policy.lume` (ABAC policy engine), `demo/ui.lume` (SSR page components), `modules/app.lume`, `modules/tax.lume` |
 | `frontend/` | React 18 + TS + Tailwind 4 client (`src/`, esbuild `--splitting`) + React SSR page sources (`react-ssr/`, built by `scripts/build-react-ssr.sh`) |
 | `www/` | docroot: hand-written HTML shells + build artifacts (mixed; don't delete wholesale) |
 | `tests/` | C unit tests (`smoke.c`) + tool dispatch (`tools_driver.c`) + end-to-end (`run_all.sh`) |
@@ -250,9 +250,9 @@ stays git-ignored.
 ## SQLite support (native)
 
 SQLite is built into the server: `agent-httpd` links libsqlite3 directly
-(`src/agent/sqlite_tool.c`) and registers three native tools whenever
-`SQLITE_DB` points at a database — no Python, no MCP stdio process, and the
-static container image works too:
+(`agent-httpd/src/agent/sqlite_tool.c`) and registers three native tools
+whenever `SQLITE_DB` points at a database - no Python, no MCP stdio process,
+and the static container image works too:
 
 - `sql_query` — a single read-only SELECT; the DB is opened
   `SQLITE_OPEN_READONLY`, so writes/DDL are physically refused even if a
