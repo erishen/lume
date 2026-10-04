@@ -94,8 +94,8 @@ cd ~/.local/share/lume && ~/.local/bin/lume examples/sqlite-write.lume
 
 | 路径 | 内容 |
 |---|---|
-| `lang/` | 词法/语法/类型检查/树遍历解释器 + agent-httpd 桥接,共约 5.5k 行 C11。**钉住**自兄弟项目 lume-core 的语言树(见 `lang/PIN`);同步用 `make sync-lang`,漂移检查 `make check-sync`(旁边有 lume-core 时比对其钉住的 commit,没有则比对 `lang/PIN.manifest` 基线,CI 走的就是后者) |
-| `examples/` | 6 个 `.lume` 示例(demo / hello / invest / hub / lang-basics / sqlite-write) |
+| `lang/` | 词法/语法/类型检查/树遍历解释器 + agent-httpd 桥接,29 个文件共 8.6k 行 C11。**钉住**自兄弟项目 lume-core 的语言树(见 `lang/PIN`),分三桶:13 个 *synced* 与上游逐字节同、12 个 *host_owned* 宿主自持永不覆盖(桥接与构建层的自有代码)、4 个 *host-only* 上游从未有。升级 pin 用 `make sync-lang`;漂移检查 `make check-sync`,synced 文件一改就失败;host_owned 落后上游**只报告不失败**(CI 跑的就是这条,上游不可达时退到 `lang/PIN.manifest` 基线比对) |
+| `examples/` | 10 个 `.lume` 入口文件(全部 15 个里其余 5 个是它们 `import` 的复用库):hello / lang-basics / demo / react-ssr / invest / abac / modules-server / query-demo / hub / sqlite-write,另有库文件 invest/ledger.lume(组合工具)、abac/policy.lume(ABAC 策略引擎)、demo/ui.lume(SSR 页面组件)、modules/app.lume、modules/tax.lume |
 | `frontend/` | React 18 + TS + Tailwind 4 客户端,esbuild `--splitting` 打包 |
 | `www/` | docroot:手写 HTML 壳 + 构建产物(混合,勿整体删) |
 | `tests/` | C 单测(`smoke.c`) + 工具派发(`tools_driver.c`) + 端到端(`run_all.sh`) |
@@ -187,7 +187,7 @@ Mach-O,必须在 Linux 容器内重编。
 ## SQLite 支持(原生)
 
 SQLite 直接内建进服务器:`agent-httpd` 静态链 libsqlite3
-(`src/agent/sqlite_tool.c`),只要 `SQLITE_DB` 指向一个数据库,就注册三个原生
+(`agent-httpd/src/agent/sqlite_tool.c`),只要 `SQLITE_DB` 指向一个数据库,就注册三个原生
 工具——**不需要 Python、没有 MCP stdio 进程,静态容器镜像同样可用**:
 
 - `sql_query` —— 单条只读 SELECT;数据库以 `SQLITE_OPEN_READONLY` 打开,

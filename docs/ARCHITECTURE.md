@@ -104,18 +104,48 @@ main.c: parse_program ──> type_check_program ──> 解释执行 .lume 顶�
 
 ### 3.1 语言前端管线（lang/）
 
+`lang/` **不是 Lume 自己维护的语言树**，而是兄弟项目 lume-core 的**钉住副本**
+（见 `lang/PIN`，共 8.6k 行 C11）。`make sync-lang` 只覆盖 synced 那一份，
+其余两类永远不被动：
+
+| 身份 | 数量 | 含义 |
+|---|---|---|
+| synced | 13 | 与 lume-core 逐字节相同，`make sync-lang` 会覆盖 |
+| host-owned | 12 | 与 core 的**真实分叉**（agenthttpd 集成、原生后端 CLI、ToolDef tag、sql_* 内建）；永不覆盖，升级 pin 时要手工合并 |
+| host-only | 4 | 只存在于 Lume：`bridge.c`、`builtins_sql.c`、`iquest.c`、`iquest.h` |
+
+core 的原生后端专属文件（`codegen*.c`、`backend*.c`、`llvm_codegen*.c`、`rt.c`）
+**完全不拷** —— Lume 没有原生后端，那是 agent-httpd 的领域。
+
 | 文件 | 职责 |
 |---|---|
 | `lume.h` | 全部公共头：TokenType、Type、Node、Value/Obj/GC、VM、桥接原型 |
 | `token.c` | 枚举 → 名字表（错误信息用） |
 | `lexer.c` | 源码 → Token 数组 |
-| `parser.c` | Token → AST（递归下降），含类型标注/`type` 声明/`?` |
+| `parser.c` | Token → AST，递归下降入口（含类型标注/`type` 声明/`?`） |
+| `parser_expr.c` | 表达式优先级链 `parse_primary` → `parse_expression` |
+| `parser_stmt.c` | 语句级解析：声明 / 控制流 / 方法简写路由 |
+| `parser_internal.h` | parser 内部共享声明 |
 | `typecheck.c` | 静态类型检查器 + Type 类型对象/构造器 |
+| `typecheck_expr.c` | 表达式检查 `ck_expr` / `ck_list`（含 `?` 链错误传播） |
+| `typecheck_stmt.c` | 语句与函数体检查 `ck_stmt` / `ck_blk` / `ck_fn` |
+| `typecheck_internal.h` | typecheck 内部共享声明 |
 | `value.c` | Value/Obj、GC、map/env/string、JSON 编解码 |
 | `interp.c` | 树遍历解释器（值栈 + jmp_buf 返回展开）+ 内建函数种子 |
+| `vdom.c` | SSR 虚拟 DOM（`el`/`render`/`html`），从 `interp.c` 拆出 |
 | `bridge.c` | DSL ↔ libagenthttpd 翻译层（route/tool/run shim、内置函数注册） |
-| `main.c` | CLI：`--check` / `--dump` / `--watch` / 直接执行 |
+| `builtins.c` + `builtins.h` | 通用内建实现与函数指针形态 |
+| `builtins_catalog.c` | 工具 / 技能 / MCP / 发现端点 / catalog 内建 |
+| `builtins_fs.c` | 文件 / 环境 / 目录 / `lock_file` / `strftime` 内建 |
+| `builtins_str.c` | 字符串内建（`replace` 等） |
+| `builtins_math.c` | 数值内建 `abs/sqrt/exp/log/ln/pow/floor/ceil/round/min/max` |
+| `builtins_crypt.c` | `crypt_sha512`（系统 `crypt(3)` → `$6$`） |
+| `builtins_hof.c` | 高阶函数 `range` / `map` / `filter` / `reduce` |
+| `builtins_sql.c` | `sql_query` / `sql_write` |
+| `builtins_internal.h` | 内建层内部共享声明 |
+| `loader.c` | 多文件 `import`/`export` 模块加载 |
 | `iquest.c` / `iquest.h` | 投资助手产品 API 层（见 3.4） |
+| `main.c` | CLI：`--check` / `--dump` / `--watch` / 直接执行 |
 
 类型系统要点：基本类型 `int/float/string/bool/null/Result` **全部可空**；
 `int→float` 隐式加宽，其余无隐式转换（无 JS 式 truthiness）；具名结构体
@@ -148,7 +178,7 @@ Lume 静态链接。嵌入 API（`agent-httpd/src/agenthttpd.h`）：
 - `agenthttpd_tool_allowed`：白名单过滤（供 Lume 侧 `HARNESS_TOOLS_ALLOW` 收敛）；
 - `agenthttpd_run(&cfg)`：阻塞至进程生命周期结束。
 
-内部模块（`src/{core,http,agent,security,cgi}`）：HTTP 解析/连接、路由核心
+内部模块（`agent-httpd/src/{core,http,agent,security,cgi}`）：HTTP 解析/连接、路由核心
 （router.c，写 `.data/mcp-servers-router.json` 的 MCP 同步）、agent/工具/技能/
 会话/LLM、安全与 CGI 宿主。
 
