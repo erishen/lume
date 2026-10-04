@@ -41,6 +41,11 @@ SIG = {
     "try": "try(fn)", "tools": "tools()", "skills": "skills()", "mcps": "mcps()",
     "discovery_endpoints": "discovery_endpoints()", "catalog": "catalog()",
     "el": "el(tag, attrs, children)", "render": "render(vdom)", "html": "html(text)",
+    "crypt_sha512": "crypt_sha512(password)",
+    "abs": "abs(x)", "sqrt": "sqrt(x)", "exp": "exp(x)",
+    "log": "log(x)", "ln": "ln(x)", "pow": "pow(x, y)",
+    "floor": "floor(x)", "ceil": "ceil(x)", "round": "round(x)",
+    "min": "min(...)", "max": "max(...)",
 }
 
 IMPL = {
@@ -66,6 +71,15 @@ IMPL = {
     "tools": "lang/builtins_catalog.c", "skills": "lang/builtins_catalog.c",
     "mcps": "lang/builtins_catalog.c", "discovery_endpoints": "lang/builtins_catalog.c",
     "catalog": "lang/builtins_catalog.c",
+    # builtins_crypt.c（口令哈希）
+    "crypt_sha512": "lang/builtins_crypt.c",
+    # builtins_math.c（数值）
+    "abs": "lang/builtins_math.c", "sqrt": "lang/builtins_math.c",
+    "exp": "lang/builtins_math.c", "log": "lang/builtins_math.c",
+    "ln": "lang/builtins_math.c", "pow": "lang/builtins_math.c",
+    "floor": "lang/builtins_math.c", "ceil": "lang/builtins_math.c",
+    "round": "lang/builtins_math.c", "min": "lang/builtins_math.c",
+    "max": "lang/builtins_math.c",
     # 其他
     "run": "lang/interp.c", "el": "lang/vdom.c", "render": "lang/vdom.c", "html": "lang/vdom.c",
 }
@@ -125,20 +139,44 @@ DOC = {
     "replace": ("字面量全局替换：replace(s, from, to) 把 s 中所有 from 替换为 to。",
                 "from 为空或无匹配 → 返回原串；UTF-8 按字节序列匹配（中文可用）。",
                 "实现：lang/builtins_str.c"),
+    "crypt_sha512": ("SHA-512 crypt($6$) 口令哈希，salt 由 pid + 秒级时间拼成（$6$xxxxxxxxxxxx$ 格式）。",
+                     "参数：password → string。平台差异：glibc/Linux 的 crypt(3) 支持 $6$ 正常生成；",
+                     "macOS 的 crypt(3) 只有 legacy DES，拿不到 $6$ 时置 error（不静默降级）；无 crypt() 的",
+                     "平台同样置 error。实现：lang/builtins_crypt.c"),
+    "abs": ("绝对值。参数：x → number。非数值参数 / 缺参置 VM error。实现：lang/builtins_math.c"),
+    "sqrt": ("平方根。参数：x → number。x < 0 置 error（sqrt(): negative argument）。实现：lang/builtins_math.c"),
+    "exp": ("e 的 x 次幂。参数：x → number，精度为 C double。实现：lang/builtins_math.c"),
+    "log": ("自然对数，与 ln 同一实现。参数：x → number；x <= 0 置 error（log(): argument must be positive）。",
+            "注意是 ln 而非 log10。实现：lang/builtins_math.c"),
+    "ln": ("自然对数，log() 的别名。参数：x → number；x <= 0 置 error（报错文案仍写作 log()）。",
+           "实现：lang/builtins_math.c"),
+    "pow": ("幂运算。参数：x, y → number；结果为非有限值（如 0 的负次幂）时置 error（pow(): result not finite）。",
+            "实现：lang/builtins_math.c"),
+    "floor": ("向下取整（朝 -∞）。参数：x → number。实现：lang/builtins_math.c"),
+    "ceil": ("向上取整（朝 +∞）。参数：x → number。实现：lang/builtins_math.c"),
+    "round": ("四舍五入，半值远离零（round(0.5)=1、round(-0.5)=-1，与 floor(x+0.5) 不同）。",
+              "参数：x → number。实现：lang/builtins_math.c"),
+    "min": ("最小值，可变参数（≥1 个数值，逐个比较）。参数：nums... → number；缺参或非数值置 error。",
+            "实现：lang/builtins_math.c"),
+    "max": ("最大值，可变参数（≥1 个数值，逐个比较）。参数：nums... → number；缺参或非数值置 error。",
+            "实现：lang/builtins_math.c"),
 }
 
-# 分组（顺序与注册表一致，便于阅读）
+# 分组（语义聚合；顺序大体跟随 interp.c 注册表，便于对照阅读）
 GROUPS = [
     ("模块", ["run"]),
     ("输出与类型转换", ["print", "str", "int", "float", "bool", "string", "stringify"]),
+    ("字符串变换", ["replace"]),
+    ("密码哈希", ["crypt_sha512"]),
     ("集合操作", ["len", "keys", "get", "put", "push", "range", "map", "filter", "reduce"]),
     ("JSON / 时间 / 环境", ["json", "now", "env", "strftime"]),
     ("文件系统", ["files", "read_file", "write_file", "mkdir", "lock_file", "unlock_file"]),
     ("数据库（sqlite / PG 后端）", ["sql_query", "sql_write"]),
     ("异常捕获", ["try"]),
+    ("数值计算", ["abs", "sqrt", "exp", "log", "ln", "pow",
+                  "floor", "ceil", "round", "min", "max"]),
     ("Agent 运行时（工具/技能/MCP）", ["tools", "skills", "mcps", "discovery_endpoints", "catalog"]),
     ("DOM / 渲染", ["el", "render", "html"]),
-    ("字符串变换", ["replace"]),
 ]
 
 missing = [n for n in names if n not in DOC or n not in IMPL or n not in SIG]
