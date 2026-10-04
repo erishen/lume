@@ -12,6 +12,13 @@ AH_INC      := $(AH)/src $(AH)/src/core $(AH)/src/agent
 CC       ?= cc
 CFLAGS   ?= -std=c11 -Wall -Wextra -O2 -g
 CFLAGS   += -I lang $(addprefix -I, $(AH_INC))
+# LUME_HAS_HTTP=0: 关掉出站 HTTP 内建。语言本体(lume-core,见 lang/PIN)把
+# http_get 的注册做成这个开关, 因为实现在 builtins_http.c 而本树不编译它 ——
+# 不带这个开关的话, 哪天 lang/interp.c 同步成本体的那份, 链接会留下一个
+# 未定义的 b_http_get。显式关掉, 本体那份文件将来就能直接从 host_owned 里
+# 放出来。
+LUME_HAS_HTTP ?= 0
+CFLAGS   += -DLUME_HAS_HTTP=$(LUME_HAS_HTTP)
 # 原生 SQLite 工具在 libagenthttpd.a 里(sqlite_tool.o), 链接 bin/lume 也要
 # 带 -lsqlite3; 容器构建的 -static 则拉 libsqlite3.a(Dockerfile 已装 dev 包)。
 LDFLAGS  += -lsqlite3
