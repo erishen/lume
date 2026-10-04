@@ -10,7 +10,7 @@
 
 ## 1. 系统全景
 
-Lume 是**一个 C11 单二进制**：内嵌一门可强类型脚本 DSL（`src/`），静态链接
+Lume 是**一个 C11 单二进制**：内嵌一门可强类型脚本 DSL（`lang/`），静态链接
 兄弟项目 agent-httpd 的嵌入库 `libagenthttpd.a`（git submodule，见
 [3.3](#33-嵌入运行时-agent-httpd)），成为一个自带静态前端 docroot 的完整
 HTTP 服务器。一个容器 = 整站：静态资源 + DSL 路由 + JSON API +
@@ -19,7 +19,7 @@ HTTP 服务器。一个容器 = 整站：静态资源 + DSL 路由 + JSON API +
 ```
 ┌──────────────────────────── Lume 单二进制 (bin/lume) ────────────────────────────┐
 │                                                                                   │
-│  语言前端 (src/，宿主 C11)         运行时代理           嵌入运行时 (libagenthttpd.a) │
+│  语言前端 (lang/，宿主 C11)         运行时代理           嵌入运行时 (libagenthttpd.a) │
 │                                                                                   │
 │  .lume 源码                                                                        │
 │    │  lexer.c  ──>  Token[]                                                       │
@@ -102,7 +102,7 @@ main.c: parse_program ──> type_check_program ──> 解释执行 .lume 顶�
 
 ## 3. 分层架构
 
-### 3.1 语言前端管线（src/）
+### 3.1 语言前端管线（lang/）
 
 | 文件 | 职责 |
 |---|---|
@@ -140,7 +140,7 @@ DSL 世界（Value/Node/VM）与 agent-httpd 世界（C 路由/工具）的翻�
 ### 3.3 嵌入运行时 agent-httpd
 
 git submodule（`agent-httpd/`，gitlink 锁定），编译为 `bin/libagenthttpd.a`，
-Lume 静态链接。嵌入 API（`src/agenthttpd.h`）：
+Lume 静态链接。嵌入 API（`agent-httpd/src/agenthttpd.h`）：
 
 - `agenthttpd_config`：零值 = 默认（NULL/0 字段走框架默认）；
 - `agenthttpd_route(method, path, handler)`：注册自定义路由；

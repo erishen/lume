@@ -39,7 +39,7 @@
         "lume.sourceRoot": {
           "type": "string",
           "default": "",
-          "description": "Lume 仓库根目录（含 src/builtins.c）。留空则自动在工作区中探测（深度 3 层）。"
+          "description": "Lume 仓库根目录（含 lang/builtins.c）。留空则自动在工作区中探测（深度 3 层）。"
         }
       }
     }

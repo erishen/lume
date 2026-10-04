@@ -1,5 +1,4 @@
 #include "lume.h"
-#include "minijson.h"
 
 /* Object heap (mark-sweep GC), string/map/list/function values, environments,
  * and the JSON <-> Value bridge (tool arguments come in as JSON; tool results
@@ -40,6 +39,7 @@ char *gc_cstr(VM *vm, const char *s) { return gc_strdup(vm, s, strlen(s)); }
 
 static void mark_value(Value v);
 static void mark_obj(Obj *o);
+static void obj_release(Obj *o);
 
 static void mark_value(Value v) {
     if (IS_OBJ(v)) mark_obj(AS_OBJ(v));
@@ -93,6 +93,13 @@ void gc_collect(VM *vm) {
         Obj *o = *link;
         if (!o->is_marked) {
             *link = o->next;
+            /* The heap's own strings (gc_cstr'd native/fn names, map and env
+             * keys, list items) live on malloc rather than inline, so dropping
+             * the header alone would strand them. Skipping this on the reclaim
+             * path — and only doing it at teardown — leaked everything the
+             * collector had swept over the whole run; only the check-only legs
+             * exercised a big enough heap to show it under LSan. */
+            obj_release(o);
             free(o);
         } else {
             o->is_marked = false;
@@ -101,6 +108,77 @@ void gc_collect(VM *vm) {
     }
     vm->bytes_allocated = 0;
     if (vm->gc_threshold < (1u << 30)) vm->gc_threshold *= 2;
+}
+
+/* ---------- teardown ---------- */
+
+/* Release whatever an Obj owns beyond itself. Byte payloads of strings are
+ * inline (obj_string), and ObjFunc.params / ObjFunc.body point into the AST
+ * (node_free's business), so this only covers the heap-side strings and
+ * arrays: the gc_strdup'd keys in maps and envs, the key/value vectors, the
+ * list vector, and the two gc_cstr'd name fields. */
+static void obj_release(Obj *o) {
+    switch (o->type) {
+    case OBJ_STRING:
+        break;              /* payload is inline after the header */
+    case OBJ_NATIVE:
+        free(o->as.native.name);
+        break;
+    case OBJ_FUNC:
+        free(o->as.fn.name);
+        break;              /* params[]/body are the AST's, not ours */
+    case OBJ_LIST:
+        free(o->as.list.items);
+        break;
+    case OBJ_MAP:
+        for (int i = 0; i < o->as.map.count; i++) free(o->as.map.keys[i]);
+        free(o->as.map.keys);
+        free(o->as.map.vals);
+        break;
+    case OBJ_ENV: {
+        Env *e = (Env *)o;
+        for (int i = 0; i < e->vars.count; i++) free(e->vars.keys[i]);
+        free(e->vars.keys);
+        free(e->vars.vals);
+        break;
+    }
+    }
+}
+
+void vm_free(VM *vm) {
+    if (!vm) return; /* vm_free(NULL) is a no-op, so callers need no branch */
+    /* Route records own three strdup'd strings each (bridge_define_route). */
+    for (int i = 0; i < vm->route_count; i++) {
+        free(vm->routes[i].method);
+        free(vm->routes[i].path);
+        free(vm->routes[i].label);
+        vm->routes[i].method = NULL;
+        vm->routes[i].path = NULL;
+        vm->routes[i].label = NULL;
+    }
+    vm->route_count = 0;
+
+    vm->globals = NULL;
+    vm->active_envs = NULL;
+    vm->server_config = NULL;
+    vm->default_handler = val_null();
+    vm->call_result = val_null();
+    vm->stack_count = 0;
+
+    /* The heap: everything still linked is, by definition, unreachable
+     * (gc_collect() already reclaimed the rest), so the whole chain goes
+     * without a mark pass. */
+    Obj *o = vm->objs;
+    vm->objs = NULL;
+    while (o) {
+        Obj *next = o->next;
+        obj_release(o);
+        free(o);
+        o = next;
+    }
+    free(vm->load_stack);
+    vm->load_stack = NULL;
+    vm->load_depth = 0;
 }
 
 /* ---------- value constructors ---------- */

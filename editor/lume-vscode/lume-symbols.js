@@ -92,7 +92,7 @@ function findInSymbols(syms, name, exportedOnly) {
 // ── 内置函数 → C 实现定位（纯逻辑，可 node 单测）──
 
 // BFS 探测：从各 base 出发（深度 ≤ maxDepth，跳过 .*/node_modules/dist），
-// 返回所有含 src/builtins.c 的目录（即 lume 仓库根）。调用方决定选哪个。
+// 返回所有含 lang/builtins.c 的目录（即 lume 仓库根）。调用方决定选哪个。
 function findSourceRoots(bases, maxDepth) {
   const fs = require('fs');
   const path = require('path');
@@ -103,7 +103,7 @@ function findSourceRoots(bases, maxDepth) {
   while (qi < queue.length) {
     const { dir, depth } = queue[qi++];
     let ok = false;
-    try { ok = fs.existsSync(path.join(dir, 'src', 'builtins.c')); } catch (e) { ok = false; }
+    try { ok = fs.existsSync(path.join(dir, 'lang', 'builtins.c')); } catch (e) { ok = false; }
     if (ok) hits.push(dir);
     if (depth >= maxDepth) continue;
     let entries;

@@ -15,7 +15,7 @@ lexer -> parser(AST) -> type checker(compile-time) -> tree-walk interpreter -> b
 
 ```
 lume/
-├── src/
+├── lang/
 │   ├── lume.h        # 全部公共头：tokens、Type、Node、Value/Obj/GC、VM、桥接原型
 │   ├── token.c       # 枚举 -> 名字表（错误信息用）
 │   ├── lexer.c       # 源码 -> Token 数组
@@ -187,7 +187,7 @@ run();   // 启动服务器（阻塞）
 `run()` `print(...)` `str(...)` `int(...)` `float(...)` `bool(...)` `string(...)`
 `len(x)` `keys(m)` `get(m,k[,def])`
 `json(s)` `stringify(v)` `now()`（注册在 `interp.c: bridge_seed_builtins`）。
-字符串变换：`replace(s, from, to)`（`src/builtins_str.c`，字面量全局替换，
+字符串变换：`replace(s, from, to)`（`lang/builtins_str.c`，字面量全局替换，
 空 from / 无匹配返回原串）。
 发现类内建：`env(k)`、`files(dir)`、`read_file(path)`、`tools()`、`skills()`、`mcps()`——
 `tools()`/`skills()` 枚举 libagenthttpd.a 的注册表（工具:本地内建 + DSL tool +
@@ -320,7 +320,7 @@ UI 分两层：**服务端是 Lume**（SSR 壳 + JSON API），**客户端是标
      `{type, props, children}`；`render(tree)`（原生内建）一次性序列化整棵树
      为 HTML。
    - `html("...{0}...{1}...", a, b)`（原生内建）是**模板字符串**，`{N}` 按
-     位置替换第 N 个实参。语义（`src/interp.c` 的 `html_slot`）：
+     位置替换第 N 个实参。语义（`lang/interp.c` 的 `html_slot`）：
      - **独立标量槽**：字符串/数字/bool/null/map → 转义后按文本输出（默认
        安全，用户数据放这里）。
      - **列表槽**：视为子节点序列（children idiom）——vnode 结构性渲染、
@@ -331,7 +331,7 @@ UI 分两层：**服务端是 Lume**（SSR 壳 + JSON API），**客户端是标
      `card()` 返回 vnode、`page()` 返回 `html()` 字符串；`route "GET", "/",
      home_page` 直接引用。函数参数定长，页面内容用**列表**打包给
      `page(title, id, [...])`。
-2. **render()/html() 的序列化规则**（`src/interp.c` 的 `render_value`）：
+2. **render()/html() 的序列化规则**（`lang/interp.c` 的 `render_value`）：
    - 文本与属性值一律 **HTML 转义**（`& < > "`）。
    - `on*` 事件属性在 SSR **丢弃**（事件只活在客户端）。
    - `data_page` → `data-page`（下划线转连字符，保持 Lume 标识符合法；
@@ -419,11 +419,11 @@ Lume 直接复用 agent-httpd 的 agent 能力,不需要在 DSL 里再造一套:
     agent 的工具循环(`tools_dispatch`)会回调 DSL 函数。
   - **会话透传**:工具调用时把 `session_id`(agent 循环的多轮对话 id)作为
     `session` 键塞进实参 map,DSL 端 `get(a, "session")` 即可取到
-    (`src/bridge.c` 的 `tool_shim`;`tests/tools_driver.c` 的 `echo_sid` 验证)。
+    (`lang/bridge.c` 的 `tool_shim`;`tests/tools_driver.c` 的 `echo_sid` 验证)。
   - **chat 端点**:`POST /react/api/chat` 由框架层在路由分发前拦截
     (`src/agent/llm.c`),Lume 起的所有 server 天然带这条路径,无需 DSL 代码。
     配合 `/react/api/pse`(POST)、以及 skills/session/mcp 都在框架侧。
-- **server 配置的 env 兜底**:`bridge_run()`(src/bridge.c)先把
+- **server 配置的 env 兜底**:`bridge_run()`(lang/bridge.c)先把
   `llm_env_init()` 提前(加载 CWD `.env`),再按 **`server{}` 字面量 >
   `PORT`/`WORKERS`/`DOCROOT` 环境变量 > 框架默认**(18080 /
   fork-per-connection / `./www`)填 `agenthttpd_config`。字面量总是赢,
@@ -442,7 +442,7 @@ Lume 直接复用 agent-httpd 的 agent 能力,不需要在 DSL 里再造一套:
   system prompt;每轮完成后把 transcript 持久化到 session 文件。
 - **工具 schema（踩过的坑）**:DSL 里写 `tool ..., { name: "string" }` 是
   语法糖,`bridge_define_tool` 会在注册时自动升级成 OpenAI 要求的
-  `{"name":{"type":"string"}}`（`upgrade_tool_params`,src/bridge.c）。
+  `{"name":{"type":"string"}}`（`upgrade_tool_params`,lang/bridge.c）。
   千万别把裸 `"string"` 直接塞进 `properties`——宽松的中继(sensenova)会
   静默放行,但严格网关(如 llm-router 后端的 agnes)会以
   **HTTP 400 "invalid 'parameters' schema"** 拒收,表现为偶发 `[agent

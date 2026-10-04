@@ -12,7 +12,7 @@
 // 下。URL 保持根路径不变。
 //
 // 产品 API(GET+/POST /api/settings、GET /api/reports…)由 C 侧 iquest 模块
-// 在 run() 时注册(src/iquest.c),这里不需要再声明路由。
+// 在 run() 时注册(lang/iquest.c),这里不需要再声明路由。
 //
 // 权限边界(知情提示):聊天页的模型经白名单工具可以<b>直接写账本</b>
 // (portfolio_add/remove)并<b>触发本地管线</b>(portfolio-check 在 asset-lens

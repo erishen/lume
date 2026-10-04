@@ -11,7 +11,7 @@ AH_INC      := $(AH)/src $(AH)/src/core $(AH)/src/agent
 
 CC       ?= cc
 CFLAGS   ?= -std=c11 -Wall -Wextra -O2 -g
-CFLAGS   += -I src $(addprefix -I, $(AH_INC))
+CFLAGS   += -I lang $(addprefix -I, $(AH_INC))
 # 原生 SQLite 工具在 libagenthttpd.a 里(sqlite_tool.o), 链接 bin/lume 也要
 # 带 -lsqlite3; 容器构建的 -static 则拉 libsqlite3.a(Dockerfile 已装 dev 包)。
 LDFLAGS  += -lsqlite3
@@ -74,15 +74,15 @@ define KILL_SERVER
 		i=$$((i+1)); [ $$i -ge 10 ] && break; sleep 0.3; \
 	done
 endef
-SRCS     := src/main.c src/lexer.c src/parser.c src/parser_stmt.c src/parser_expr.c \
-            src/value.c src/typecheck.c src/typecheck_expr.c src/typecheck_stmt.c \
-            src/interp.c src/builtins.c src/builtins_sql.c src/builtins_fs.c \
-            src/builtins_catalog.c src/builtins_hof.c src/builtins_str.c src/builtins_math.c src/builtins_crypt.c src/loader.c src/vdom.c \
-            src/bridge.c src/token.c src/iquest.c
-OBJS     := $(SRCS:src/%.c=build/%.o)
+SRCS     := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parser_expr.c \
+            lang/value.c lang/typecheck.c lang/typecheck_expr.c lang/typecheck_stmt.c \
+            lang/interp.c lang/builtins.c lang/builtins_sql.c lang/builtins_fs.c \
+            lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/loader.c lang/vdom.c \
+            lang/bridge.c lang/token.c lang/iquest.c
+OBJS     := $(SRCS:lang/%.c=build/%.o)
 
 # 内部头:任一 * 片的共享声明变化,所有依赖它的 .o 都要重建
-INT_HDRS := $(wildcard src/*_internal.h)
+INT_HDRS := $(wildcard lang/*_internal.h)
 
 all: bin $(TARGET)
 
@@ -98,7 +98,7 @@ build:
 bin:
 	mkdir -p bin
 
-build/%.o: src/%.c src/lume.h $(INT_HDRS) | build $(AH_LIB)
+build/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build $(AH_LIB)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJS) $(AH_LIB) | bin
@@ -417,7 +417,7 @@ clean:
 ASAN_CFLAGS   := -fsanitize=address,undefined -fno-omit-frame-pointer
 ASAN_LDFLAGS  := -fsanitize=address,undefined
 ASAN_TARGET   := bin/lume-asan
-ASAN_OBJS     := $(SRCS:src/%.c=build-asan/%.o)
+ASAN_OBJS     := $(SRCS:lang/%.c=build-asan/%.o)
 ASAN_CORE_OBJS := $(filter-out build-asan/main.o, $(ASAN_OBJS))
 
 build-asan:
@@ -426,7 +426,7 @@ build-asan:
 build-asan/tests:
 	mkdir -p build-asan/tests
 
-build-asan/%.o: src/%.c src/lume.h $(INT_HDRS) | build-asan $(AH_LIB)
+build-asan/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build-asan $(AH_LIB)
 	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -c $< -o $@
 
 $(ASAN_TARGET): $(ASAN_OBJS) $(AH_LIB) | build-asan bin
@@ -450,7 +450,16 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 	@ASAN_OPTIONS=detect_leaks=0 ./tests/tools-bin-asan || exit 1
 	@echo "ok   ASan/UBSan all passed"
 
-.PHONY: all check dump dev dev-minimal invest hub demo-sqlite demo-sqlite-watch invest-watch hub-watch run ui ui-items vsix image image-push test clean asan
+.PHONY: all check dump dev dev-minimal invest hub demo-sqlite demo-sqlite-watch invest-watch hub-watch run ui ui-items vsix image image-push test clean asan sync-lang check-sync
+# lang/ is a pinned copy of the lume-core language tree (see lang/PIN).
+# Bump the pin with `make sync-lang`; watch for drift with `make check-sync`.
+# Files listed as host_owned in lang/PIN are never overwritten.
+sync-lang:
+	@python3 scripts/sync-lang.py sync
+
+check-sync:
+	@python3 scripts/sync-lang.py check
+
 # crypt_sha512 内建单测（glibc 生成 $6$ / macOS 平台报错 都算 PASS）。
 crypt-test: all
 	@./$(TARGET) tests/test-crypt.lume > /tmp/lume-crypt-test.out 2>&1; \

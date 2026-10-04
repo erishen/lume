@@ -126,7 +126,7 @@ Quick start and Containers sections.
 
 | Path | Contents |
 |---|---|
-| `src/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, ~5.5k lines of C11 |
+| `lang/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, ~5.5k lines of C11. A **pinned copy** of the sibling lume-core language tree - see `lang/PIN`. `make check-sync` fails if a synced file drifts |
 | `examples/` | 11 `.lume` examples + reusable libs: `invest/ledger.lume` (portfolio tools), `abac/policy.lume` (ABAC policy engine), `demo/ui.lume` (SSR page components), `modules/tax.lume` (tax policy) — entry files `import` them |
 | `frontend/` | React 18 + TS + Tailwind 4 client (`src/`, esbuild `--splitting`) + React SSR page sources (`react-ssr/`, built by `scripts/build-react-ssr.sh`) |
 | `www/` | docroot: hand-written HTML shells + build artifacts (mixed; don't delete wholesale) |
