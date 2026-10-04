@@ -96,8 +96,10 @@ typedef struct Type {
     int count;
     int cap;
     Type *ret;              /* TY_FUNC return type */
+    /* lume-core增量: type_release_all() 的回收链(core src/lume.h)。
+     * host 自持这份 lume.h, 升级 core 时要手工合 —— 见 lang/PIN `host_owned`。 */
+    struct Type *tnext;
 } Type;
-
 Type *type_prim(TypeKind kind);
 Type *type_list(Type *elem);
 Type *type_struct(const char *name);   /* named reference, resolved by checker */
@@ -301,6 +303,10 @@ struct VM {
 
     bool error;
     char error_msg[512];
+    /* lume-core增量: 见 lang/PIN `host_owned` (core lume.h) */
+    int main_status;
+    bool no_fs;
+    bool no_net;
 
     bool loop_break;       /* `break` inside a loop body */
     bool loop_continue;    /* `continue` inside a loop body */
@@ -339,6 +345,9 @@ typedef struct Module {
     Env *env;                 /* module top-level environment (OBJ_ENV) */
     Env *exports;             /* exported bindings (OBJ_ENV) */
     struct { char **names; Type **types; int count; } export_types;
+    /* lume-core增量: 见 lang/PIN `host_owned`。 */
+    bool is_entry;            /* the script the process is running: only
+                               * its top-level main may exec on entry */
     bool loading;             /* on the load stack (cycle detect) */
     bool typechecked;
     bool executed;
@@ -432,6 +441,12 @@ typedef struct Node {
     } as;
 } Node;
 
+/* lume-core owns this declaration (src/lume.h). This tree keeps its own
+ * lume.h because it pulls in agenthttpd.h for the host-only bridge, so any
+ * upstream declaration added here has to be carried over by hand - see
+ * lang/PIN: `host_owned`. */
+void node_free(Node *n);
+
 /* Parse `source` (NUL-terminated). Returns the program node, or NULL with a
  * human-readable error in errbuf (errbuf_size). */
 Node *parse_program(const char *source, char *errbuf, size_t errbuf_size);
@@ -457,6 +472,12 @@ void vm_push(VM *vm, Value v);
 Value vm_pop(VM *vm);
 Value vm_peek(VM *vm, int depth);
 void vm_set_error(VM *vm, const char *fmt, ...);
+
+/* lume-core增量: 同步进来的 typecheck.c / loader.c / interp.c 会调这三个。
+ * 同 node_free —— host 的 lume.h 是 agenthttpd 分支, 升级 core 时要手工合。 */
+void type_release_all(void);
+void loader_free(VM *vm);
+void vm_free(VM *vm);
 
 /* bridge.c — translate DSL constructs into libagenthttpd calls. */
 void bridge_init(VM *vm);                      /* bind the shim's VM pointer */

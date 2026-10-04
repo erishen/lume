@@ -1,0 +1,14 @@
+# lang/ is a pinned copy of the lume-core language tree.
+# Bump it with:  make sync-lang && make check-sync
+# Detect drift without touching anything:  make check-sync
+#
+# Everything under host_owned is never overwritten: each one exists
+# because lume and lume-core genuinely diverged (agenthttpd
+# integration, the native-backend CLI, the ToolDef tag, the seeded
+# sql_* builtins).  A bump may still need a hand-merge in them.
+# The core-specific files (codegen*/backend*/llvm_codegen*/rt.c) are
+# not copied at all - lume has no native backend, agent-httpd owns it.
+core_dir: ../lume-core
+sha: 9234630174fc448ca850f2c80e140446acc20ab6
+synced_at: 2026-10-04 19:15:40
+host_owned: builtins.c builtins.h builtins_catalog.c builtins_fs.c builtins_internal.h interp.c lume.h main.c typecheck.c typecheck_expr.c typecheck_stmt.c vdom.c

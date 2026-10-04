@@ -49,7 +49,7 @@ All notable changes to the Lume VS Code extension are documented here.
 
 - **Richer built-in jump target**: `builtins.lume` now carries detailed docs
   per function — behaviour, parameter semantics, return type, edge cases and
-  the implementing C file (`src/builtins.c` / `_hof` / `_fs` / `_sql` /
+  the implementing C file (`lang/builtins.c` / `_hof` / `_fs` / `_sql` /
   `_catalog` / `vdom.c`), with concrete signatures.
 - **Generator checked in**: `scripts/gen-builtins.py` regenerates
   `builtins.lume` from the `bridge_seed_builtins()` registry (run it after

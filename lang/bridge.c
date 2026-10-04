@@ -261,7 +261,16 @@ static void result_to_response(VM *vm, Value result, HttpResponse *res,
              * it, so "no-store" was unreachable from a script. Allow the
              * envelope to name one; it is the honest fix for responses that
              * embed a per-user identity (username in HTML, /api/account/info)
-             * and must never be served from a cache. */
+             * and must never be served from a cache.
+             *
+             * Scope limit worth knowing before relying on it: this is read only
+             * on the envelope path -- i.e. when the returned map HAS a "body"
+             * key. A route returning a bare map (serialised to JSON as the body
+             * itself, the else-branch below) gets no cache_control, silently.
+             * So a route that both returns a bare map and needs no-store cannot
+             * express it today; it must switch to the envelope form. Nothing
+             * shipped uses that shape, but it is the trap to watch for, and it
+             * fails open (no header) rather than loudly. */
             if (!map_str(vm, m, "cache_control", &explicit_cc, NULL)) goto fail;
             if (IS_OBJ(bv) && AS_OBJ(bv)->type == OBJ_STRING) {
                 body = obj_string(AS_OBJ(bv));

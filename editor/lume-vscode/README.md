@@ -67,8 +67,8 @@ version? Increment `version` in `package.json` first.
     through `import "lib/data.lume" as data` to the target module's `export`
     definition;
   - built-ins: `int`/`map`/`try`/`sql_query`… resolve to **the C
-    implementation** (`native_int` in `src/builtins.c`, `native_map` in
-    `src/builtins_hof.c`, …) plus the `builtins.lume` doc declaration —
+    implementation** (`native_int` in `lang/builtins.c`, `native_map` in
+    `lang/builtins_hof.c`, …) plus the `builtins.lume` doc declaration —
     both offered in a Peek list; user same-name symbols win. The Lume repo
     root comes from the `lume.sourceRoot` setting or is auto-detected in the
     workspace (BFS depth 3, folders named `*lume*` win).

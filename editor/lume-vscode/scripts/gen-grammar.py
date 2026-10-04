@@ -2,8 +2,8 @@
 """生成 editor/lume-vscode/syntaxes/lume.tmLanguage.json 与 lume-core.tmLanguage.json。
 
 关键字与内建函数一律**从注册表抽取**,不在 JSON 里维护手写快照:
-  - src/lexer.c 的 {"name", TOK_*} 字面量表                  → 关键字
-  - src/interp.c 的 bridge_seed_builtins() 注册表             → 内建函数
+  - lang/lexer.c 的 {"name", TOK_*} 字面量表                  → 关键字
+  - lang/interp.c 的 bridge_seed_builtins() 注册表             → 内建函数
 
 两棵树各自抽,所以 host 与 lume-core 的方言差异自动落到各自的语法里:
   - host-only : sql_query / sql_write(驱动 agent-httpd 的 db 层)
@@ -59,7 +59,7 @@ def read(path):
 
 
 def lexer_keywords(lexer_c):
-    """从 src/lexer.c 抽 {"name", TOK_*} 字面量表(到 {"verbs", TOK_VERBS} 为止)。"""
+    """从 lang/lexer.c 抽 {"name", TOK_*} 字面量表(到 {"verbs", TOK_VERBS} 为止)。"""
     src = read(lexer_c)
     start = src.find('{"server"')
     if start < 0:
@@ -76,7 +76,7 @@ def lexer_keywords(lexer_c):
 
 
 def registry_builtins(interp_c):
-    """从 src/interp.c 的 bridge_seed_builtins() 抽 {"name", b_*} 注册项。"""
+    """从 lang/interp.c 的 bridge_seed_builtins() 抽 {"name", b_*} 注册项。"""
     src = read(interp_c)
     m = re.search(r"void bridge_seed_builtins\(VM \*vm\) \{(.*?)\n    \};", src, re.S)
     if not m:
@@ -134,8 +134,8 @@ def main():
               % (os.path.relpath(path, host_root), len(builtins), len(keywords)))
 
     # --- host 方言:本树注册表 ---
-    hk = lexer_keywords(os.path.join(host_root, "src", "lexer.c"))
-    hb = registry_builtins(os.path.join(host_root, "src", "interp.c"))
+    hk = lexer_keywords(os.path.join(host_root, "lang", "lexer.c"))
+    hb = registry_builtins(os.path.join(host_root, "lang", "interp.c"))
     emit(os.path.join(host_syntax, "lume.tmLanguage.json"), template, hb, hk,
          "Lume", "source.lume")
 

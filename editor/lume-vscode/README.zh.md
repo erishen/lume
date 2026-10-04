@@ -66,7 +66,7 @@ make vsix        # 在仓库根目录执行
   - 跨文件：`ns.name` 调用（如 `data.load_stage_by_id(...)`）按
     `import "lib/data.lume" as data` 解析到目标模块的 `export` 定义；
   - 内置函数：`int`/`map`/`try`/`sql_query`… 直达 **C 实现代码**
-    （`native_int` 在 `src/builtins.c`、`native_map` 在 `src/builtins_hof.c`…），
+    （`native_int` 在 `lang/builtins.c`、`native_map` 在 `lang/builtins_hof.c`…），
     同时给出 `builtins.lume` 文档声明——Peek 列表里两个都列，用户同名符号优先。
     lume 仓库根取 `lume.sourceRoot` 配置，未配置时在工作区自动探测
     （BFS 深度 3，目录名含 `lume` 优先）。

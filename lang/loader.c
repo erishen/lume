@@ -145,6 +145,7 @@ static int load_module(VM *vm, const char *path, char *errbuf, size_t errbuf_siz
 /* Collect N_IMPORT statements from a freshly parsed program into the module,
  * rewriting each node's path to its canonical absolute path. */
 static int collect_imports(VM *vm, Module *m, char *errbuf, size_t errbuf_size) {
+    (void)vm; /* the loader rewrites import paths before any VM runs */
     char *dir = path_dirname(m->path);
     if (!dir) return -1;
     for (int i = 0; i < m->prog->as.program.count; i++) {
@@ -175,7 +176,10 @@ static int collect_imports(VM *vm, Module *m, char *errbuf, size_t errbuf_size) 
                               sizeof(char *) * ((size_t)m->import_count + 1));
         if (!m->import_paths || !m->ns_names) { free(dir); return -1; }
         m->import_paths[m->import_count] = canon;
-        m->ns_names[m->import_count] = strdup(s->as.imp.ns);
+        /* Borrowed, not strdup'd: node_free() releases imp.ns together with
+         * the rest of the AST, and loader_free() only frees the two vector
+         * shells. Copying here leaked one string per imported module. */
+        m->ns_names[m->import_count] = s->as.imp.ns;
         m->import_count++;
     }
     free(dir);
@@ -301,6 +305,32 @@ static int exec_module(VM *vm, Module *m, char *errbuf, size_t errbuf_size) {
     return 0;
 }
 
+/* ---------- teardown ---------- */
+
+void loader_free(VM *vm) {
+    for (int i = 0; i < vm->module_count; i++) {
+        Module *m = vm->modules[i];
+        if (!m) continue;
+        node_free(m->prog); /* the AST and every string inside it */
+        free(m->path);
+        /* import_paths[i] and the N_IMPORT node's `path` are the same block —
+         * collect_imports() stores canon in both places — and ns_names[i]
+         * shares the node's `ns`, so only the two vector *shells* are freed
+         * here; the strings themselves die with the node. */
+        free(m->import_paths);
+        free(m->ns_names);
+        for (int j = 0; j < m->export_types.count; j++)
+            free(m->export_types.names[j]);
+        free(m->export_types.names);
+        free(m->export_types.types);
+        free(m);
+    }
+    free(vm->modules);
+    vm->modules = NULL;
+    vm->module_count = 0;
+    vm->export_env = NULL;
+}
+
 /* ---------- public entry ---------- */
 
 int loader_run(VM *vm, const char *entry_path, bool check_only,
@@ -326,6 +356,7 @@ int loader_run(VM *vm, const char *entry_path, bool check_only,
     /* the entry module's top level IS the program: reuse vm->globals so the
      * builtins seeded by bridge_seed_builtins stay visible */
     entry->env = vm->globals;
+    entry->is_entry = true;   /* only its `main()` call sets the exit status */
     if (exec_module(vm, entry, errbuf, errbuf_size) != 0) return 1;
     return 0;
 }
