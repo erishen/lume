@@ -143,7 +143,21 @@ return { type: "text/plain", body: "hello" };
 
 注意:map 里**一旦出现 `body` 键就按"信封"解释**,`status`/`type` 才具有
 特殊含义;若你想返回一个字段名恰好叫 `body` 的 JSON 对象,包一层即可:
-`return { body: { body: "x" } };`。
+`return { body: { body: "x" } };`
+
+**`cache_control`** —— 信封还能指定响应头 `Cache-Control`(默认不发)。
+`HttpResponse` 在 agent-httpd 那边本来就带 `cache_control` 字段,静态文件和
+内建 `/login` 早就在用,只是 route 这条路径没人把 DSL 的值搬过去,于是
+「脚本层设不了缓存策略」曾是真的。现在信封可以带这个键:
+
+```lume
+// 把登录用户名直出进 HTML 的页面:绝不能落缓存(旧页面配新 bundle 会永久
+// 卡在错误角色,而且那份缓存里带着别人的用户名)。
+return { type: "text/html", cache_control: "no-store", body: html };
+```
+
+值超过 64 字符会被截断(切不准的缓存策略比没有更坏)。它只在信封里认,
+普通 map(不带 `body`)当 JSON 载荷返回时无效。。
 
 处理函数收到一个 **请求 map**,字段有:`method`、`path`(含 query 串)、
 `remote_addr`、`host`、`content_type`、`content_length`、`user_agent`、
