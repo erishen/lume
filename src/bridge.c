@@ -237,6 +237,7 @@ static void result_to_response(VM *vm, Value result, HttpResponse *res,
     char *owned_body = NULL;
     const char *body = NULL;
     size_t body_len = 0;
+    const char *explicit_cc = NULL;
 
     if (IS_OBJ(result) && AS_OBJ(result)->type == OBJ_STRING) {
         body = obj_string(AS_OBJ(result));
@@ -252,6 +253,16 @@ static void result_to_response(VM *vm, Value result, HttpResponse *res,
             const char *explicit_type = NULL;
             if (!map_int(vm, m, "status", &status, 200)) goto fail;
             if (!map_str(vm, m, "type", &explicit_type, NULL)) goto fail;
+            /* Optional response header. The DSL envelope can only express
+             * status/type/body today, but agent-httpd's HttpResponse already
+             * carries a cache_control field (httpd.h) that http_resp.c emits
+             * verbatim -- the static-file handler and the built-in /login page
+             * both use it. Only route responses never copied a DSL value into
+             * it, so "no-store" was unreachable from a script. Allow the
+             * envelope to name one; it is the honest fix for responses that
+             * embed a per-user identity (username in HTML, /api/account/info)
+             * and must never be served from a cache. */
+            if (!map_str(vm, m, "cache_control", &explicit_cc, NULL)) goto fail;
             if (IS_OBJ(bv) && AS_OBJ(bv)->type == OBJ_STRING) {
                 body = obj_string(AS_OBJ(bv));
                 body_len = obj_string_len(AS_OBJ(bv));
@@ -272,6 +283,14 @@ static void result_to_response(VM *vm, Value result, HttpResponse *res,
         mime = "application/json";
     }
 
+    /* Copy the header value before touching owned_body/VM-owned strings:
+     * both `body` and `explicit_cc` may point into VM heap that is freed just
+     * below, so res must own a private copy by the time we get there.
+     * cache_control is char[64] -- snprintf truncates at sizeof, which is
+     * exactly the right failure mode for a cache policy we cannot verify. */
+    if (explicit_cc) {
+        snprintf(res->cache_control, sizeof(res->cache_control), "%s", explicit_cc);
+    }
     if (body) {
         res->body = malloc(body_len + 1);
         memcpy(res->body, body, body_len);

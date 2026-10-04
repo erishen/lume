@@ -8,6 +8,14 @@ All notable changes to Lume are documented here. The format follows
 
 ### Added
 
+- Response envelopes can now carry `cache_control`: a map returned by a route
+  handler (or by `respond`-style helpers) may set the `cache_control` key, and
+  it is forwarded verbatim as the `Cache-Control` response header. The field is
+  absent by default (each request memsets the response, so no header is
+  emitted unless set) — pair it with `PURGE_CLIENT_CACHE` on the HTTP engine
+  when a route serves staleable content. Daoye-signal's dashboard uses
+  `cache_control: "no-store"` on every JSON endpoint.
+
 - Route handlers now see `req.query` (raw query string without the `?`;
   null when absent) and `req.query_params` (URL-decoded map; a segment
   without `=` gets an empty value, repeated keys last-wins, `+` decodes
