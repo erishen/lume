@@ -1,7 +1,7 @@
 // Lume 内置函数声明 —— 由 C 运行时提供，非 .lume 源码定义。
 // 本文件仅供编辑器“跳转到定义 / 大纲”参考（Ctrl+Click 内置函数跳到这里），
 // 不会被编译或 import。每个函数附行为说明与实现位置。
-// 生成来源：interp.c bridge_seed_builtins() 注册表（39 个）。
+// 生成来源：interp.c bridge_seed_builtins() 注册表（51 个）。
 // 生成脚本：editor/lume-vscode/scripts/gen-builtins.py（lume 加内置后重跑即可）。
 
 // ── 模块 ──
@@ -33,6 +33,19 @@ func string(value) {}  // 实现: lang/builtins.c
 
 // 值的可读序列化（调试用）。参数：value → string。实现：lang/builtins.c
 func stringify(value) {}  // 实现: lang/builtins.c
+
+// ── 字符串变换 ──
+// 字面量全局替换：replace(s, from, to) 把 s 中所有 from 替换为 to。
+//   from 为空或无匹配 → 返回原串；UTF-8 按字节序列匹配（中文可用）。
+//   实现：lang/builtins_str.c
+func replace(s, from, to) {}  // 实现: lang/builtins_str.c
+
+// ── 密码哈希 ──
+// SHA-512 crypt($6$) 口令哈希，salt 由 pid + 秒级时间拼成（$6$xxxxxxxxxxxx$ 格式）。
+//   参数：password → string。平台差异：glibc/Linux 的 crypt(3) 支持 $6$ 正常生成；
+//   macOS 的 crypt(3) 只有 legacy DES，拿不到 $6$ 时置 error（不静默降级）；无 crypt() 的
+//   平台同样置 error。实现：lang/builtins_crypt.c
+func crypt_sha512(password) {}  // 实现: lang/builtins_crypt.c
 
 // ── 集合操作 ──
 // 长度（列表/映射/字符串）。参数：value → number。实现：lang/builtins.c
@@ -113,6 +126,46 @@ func sql_write(sql, params) {}  // 实现: lang/builtins_sql.c
 //   参数：fn（函数引用）。实现：lang/builtins.c
 func try(fn) {}  // 实现: lang/builtins.c
 
+// ── 数值计算 ──
+// 绝对值。参数：x → number。非数值参数 / 缺参置 VM error。实现：lang/builtins_math.c
+func abs(x) {}  // 实现: lang/builtins_math.c
+
+// 平方根。参数：x → number。x < 0 置 error（sqrt(): negative argument）。实现：lang/builtins_math.c
+func sqrt(x) {}  // 实现: lang/builtins_math.c
+
+// e 的 x 次幂。参数：x → number，精度为 C double。实现：lang/builtins_math.c
+func exp(x) {}  // 实现: lang/builtins_math.c
+
+// 自然对数，与 ln 同一实现。参数：x → number；x <= 0 置 error（log(): argument must be positive）。
+//   注意是 ln 而非 log10。实现：lang/builtins_math.c
+func log(x) {}  // 实现: lang/builtins_math.c
+
+// 自然对数，log() 的别名。参数：x → number；x <= 0 置 error（报错文案仍写作 log()）。
+//   实现：lang/builtins_math.c
+func ln(x) {}  // 实现: lang/builtins_math.c
+
+// 幂运算。参数：x, y → number；结果为非有限值（如 0 的负次幂）时置 error（pow(): result not finite）。
+//   实现：lang/builtins_math.c
+func pow(x, y) {}  // 实现: lang/builtins_math.c
+
+// 向下取整（朝 -∞）。参数：x → number。实现：lang/builtins_math.c
+func floor(x) {}  // 实现: lang/builtins_math.c
+
+// 向上取整（朝 +∞）。参数：x → number。实现：lang/builtins_math.c
+func ceil(x) {}  // 实现: lang/builtins_math.c
+
+// 四舍五入，半值远离零（round(0.5)=1、round(-0.5)=-1，与 floor(x+0.5) 不同）。
+//   参数：x → number。实现：lang/builtins_math.c
+func round(x) {}  // 实现: lang/builtins_math.c
+
+// 最小值，可变参数（≥1 个数值，逐个比较）。参数：nums... → number；缺参或非数值置 error。
+//   实现：lang/builtins_math.c
+func min(...) {}  // 实现: lang/builtins_math.c
+
+// 最大值，可变参数（≥1 个数值，逐个比较）。参数：nums... → number；缺参或非数值置 error。
+//   实现：lang/builtins_math.c
+func max(...) {}  // 实现: lang/builtins_math.c
+
 // ── Agent 运行时（工具/技能/MCP） ──
 // 已注册工具名列表（含 DSL tool / MCP，排序）。参数：无 → list[string]。实现：lang/builtins_catalog.c
 func tools() {}  // 实现: lang/builtins_catalog.c
@@ -139,9 +192,3 @@ func render(vdom) {}  // 实现: lang/vdom.c
 
 // HTML 文本（自动 XSS 转义）。参数：text → string。实现：lang/vdom.c
 func html(text) {}  // 实现: lang/vdom.c
-
-// ── 字符串变换 ──
-// 字面量全局替换：replace(s, from, to) 把 s 中所有 from 替换为 to。
-//   from 为空或无匹配 → 返回原串；UTF-8 按字节序列匹配（中文可用）。
-//   实现：lang/builtins_str.c
-func replace(s, from, to) {}  // 实现: lang/builtins_str.c
