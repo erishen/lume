@@ -1,6 +1,6 @@
 {
-  "name": "Lume",
-  "scopeName": "source.lume",
+  "name": "Lume Core",
+  "scopeName": "source.lume.core",
   "patterns": [
     {
       "include": "#comments"
@@ -114,7 +114,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.lume",
-          "match": "\\b(?:abs|bool|catalog|ceil|crypt_sha512|discovery_endpoints|el|env|exp|files|filter|float|floor|get|html|int|json|keys|len|ln|lock_file|log|map|max|mcps|min|mkdir|now|pow|print|push|put|range|read_file|reduce|render|replace|round|run|skills|sql_query|sql_write|sqrt|str|strftime|string|stringify|tools|try|unlock_file|write_file)\\b"
+          "match": "\\b(?:abs|bool|catalog|ceil|crypt_sha512|discovery_endpoints|el|env|exp|files|filter|float|floor|get|html|http_get|int|json|keys|len|ln|lock_file|log|map|max|mcps|min|mkdir|now|pow|print|push|put|range|read_file|reduce|render|replace|round|run|skills|sqrt|str|strftime|string|stringify|tools|try|unlock_file|write_file)\\b"
         }
       ]
     },
