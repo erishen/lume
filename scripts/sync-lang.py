@@ -163,6 +163,56 @@ def read_pin_sha():
     return ""
 
 
+def pin_status(core, sha):
+    """What lang/PIN's sha means right now, next to the core tree.
+
+    The pin records the core commit lang/ was copied from, so it only has
+    to stop meaning something once that commit is no longer reachable from
+    what the tree is built from.  The naive test - pin != core HEAD - is
+    wrong in the direction that matters: a commit after the pin that
+    touched no synced file (a `backups:` commit carrying a binary, a
+    CHANGELOG edit) leaves lang/ exactly as current as it ever was, yet
+    the tree reads as broken until somebody runs a `sync` that copies
+    nothing.  Older-than-HEAD and newer-than-HEAD are different failures
+    and get different words.
+
+    Returns (state, note, suffix) - the suffix is what the closing "ok"
+    line appends.  Only the failure states carry one.
+    """
+    pin = read_pin_sha()
+    if not pin:
+        return "none", "lang/PIN records no sha", " (lang/PIN has no SHA)"
+    p = subprocess.run(["git", "-C", core, "rev-parse", "--verify", "--quiet",
+                        pin + "^{commit}"], capture_output=True, text=True)
+    if p.returncode != 0 or not p.stdout.strip():
+        return ("missing", "lang/PIN records %s, which %s does not have"
+                % (pin[:12], os.path.basename(core)), " (lang/PIN SHA STALE)")
+    resolved = p.stdout.strip()
+    if resolved == sha:
+        return "current", "", ""
+    after = subprocess.run(["git", "-C", core, "merge-base", "--is-ancestor",
+                            resolved, sha])
+    if after.returncode == 0:
+        n = subprocess.run(["git", "-C", core, "rev-list", "--count",
+                            "%s..%s" % (resolved, sha)],
+                           capture_output=True, text=True)
+        note = ("lang/PIN is at %s, %s has %s more commit(s) since - none of "
+                "them touched a synced file, so lang/ is still exactly "
+                "upstream's" % (pin[:12], os.path.basename(core),
+                                n.stdout.strip()))
+        return "folded", note, ""
+    before = subprocess.run(["git", "-C", core, "merge-base", "--is-ancestor",
+                             sha, resolved])
+    if before.returncode == 0:
+        return ("ahead", "lang/PIN is at %s but %s has moved back to %s - "
+                "lang/ is newer than the tree it came from"
+                % (pin[:12], os.path.basename(core), sha[:12]),
+                " (lang/PIN SHA STALE)")
+    return ("diverged", "lang/PIN is at %s, unrelated to %s at %s"
+            % (pin[:12], os.path.basename(core), sha[:12]),
+            " (lang/PIN SHA STALE)")
+
+
 def upstream_files(files, core):
     """What `sync` would actually copy: synced files upstream has.
 
@@ -240,6 +290,49 @@ def upstream_delta(name):
     return up, ours
 
 
+LAG = os.path.join(LANG, "PIN.lag")
+
+
+def read_lag():
+    """{filename: accepted upstream line count} from lang/PIN.lag.
+
+    A host-owned file is behind upstream because the two trees genuinely
+    fork: lume links agent-httpd and seeds its own registry, lume-core
+    links neither.  Counting those lines every time is a report that is
+    always wrong in the same direction, so what is accepted gets written
+    down once with `sync-lang.py accept-lag` and only *growth* past that
+    number reads as news.  Without it check ends every run with "a
+    hand-merge is owed" and the line is worth nothing.
+    """
+    out = {}
+    if not os.path.isfile(LAG):
+        return out
+    with open(LAG, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            name, _, n = line.partition(" ")
+            if name:
+                try:
+                    out[name] = int(n)
+                except ValueError:
+                    pass
+    return out
+
+
+def write_lag():
+    """Record today's upstream line count for every host-owned file."""
+    with open(LAG, "w", encoding="utf-8") as fh:
+        fh.write("# upstream line count accepted for each host-owned file,\n")
+        fh.write("# written by `sync-lang.py accept-lag`.  check reports growth\n")
+        fh.write("# past this number, not the number itself.\n")
+        for f in sorted(HOST_PINNED):
+            d = upstream_delta(f)
+            if d:
+                fh.write("%s %d\n" % (f, d[0]))
+
+
 def write_pin(sha, version):
     body = (
         "# lang/ is a pinned copy of the lume-core language tree.\n"
@@ -268,8 +361,8 @@ def write_pin(sha, version):
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "check"
-    if mode not in ("sync", "check"):
-        sys.exit("usage: sync-lang.py {sync|check}")
+    if mode not in ("sync", "check", "accept-lag"):
+        sys.exit("usage: sync-lang.py {sync|check|accept-lag}")
 
     files = lang_sources()
 
@@ -333,6 +426,7 @@ def main():
         # up anywhere.  Report it instead of failing: a pinned file that is
         # behind upstream is a decision, not a broken tree.
         lagging = []
+        accepted = read_lag()
         for f in sorted(HOST_PINNED):
             d = upstream_delta(f)
             if not d or d[0] == 0:
@@ -341,11 +435,24 @@ def main():
             note = "upstream +%d" % up
             if ours:
                 note += " / local +%d" % ours
-            if up >= LAG_WARN:
+            base = accepted.get(f)
+            if base is None:
+                # Nothing accepted yet: fall back to the raw count, and say
+                # the baseline is what would make this line mean something.
+                if up >= LAG_WARN:
+                    lagging.append(f)
+                    print("%sBEHIND%s     %-18s %s - no lang/PIN.lag yet, "
+                          "run `sync-lang.py accept-lag`" % (YELLOW, OFF, f, note))
+                else:
+                    print("host-owned  %-18s %s" % (f, note))
+                continue
+            grew = up - base
+            if grew > 0:
                 lagging.append(f)
-                print("%sBEHIND%s     %-18s %s" % (YELLOW, OFF, f, note))
+                print("%sBEHIND%s     %-18s %s, +%d since the last acceptance"
+                      % (YELLOW, OFF, f, note, grew))
             else:
-                print("host-owned  %-18s %s" % (f, note))
+                print("host-owned  %-18s %s (accepted)" % (f, note))
 
         for f in drift:
             print("%sDRIFT%s   %s" % (RED, OFF, f))
@@ -358,15 +465,16 @@ def main():
         # own sha field against the core tree, so a pin left behind by a
         # `sync` that never ran still read as green. Say so on the same line
         # that reports green - a warning nobody reads is the same as the
-        # silence this used to have.
-        pinned_sha = read_pin_sha()
-        stale_pin = bool(pinned_sha) and pinned_sha != sha
-        suffix = ""
-        if stale_pin:
-            print("%sSTALEPIN%s lang/PIN records %s but %s is at %s - "
-                  "the pin was never bumped; run `make sync-lang`"
-                  % (YELLOW, OFF, pinned_sha[:12], os.path.basename(core), sha[:12]))
-            suffix = " (lang/PIN SHA STALE)"
+        # silence this used to have.  Compare by ancestry, not equality: a
+        # later commit that left the synced files alone does not make the
+        # pin stale.
+        state, pin_note, suffix = pin_status(core, sha)
+        if state in ("ahead", "missing", "diverged", "none"):
+            print("%sSTALEPIN%s %s - run `make sync-lang`"
+                  % (YELLOW, OFF, pin_note))
+        elif pin_note:
+            # Green, but say why the pin is not HEAD anyway.
+            print("pin         %s" % pin_note)
         print("%sok%s lang/ matches %s @ %s - %d synced, %d host-owned, %d host-only%s"
               % (GREEN, OFF, os.path.basename(core), sha[:12],
                  len(files) - len(HOST_PINNED), len(HOST_PINNED), len(host_only),
@@ -374,6 +482,14 @@ def main():
         if lagging:
             print("%d host-owned file(s) are %d+ lines behind upstream; "
                   "a hand-merge is owed" % (len(lagging), LAG_WARN))
+        return 0
+
+    if mode == "accept-lag":
+        core_dir()          # upstream_delta reads through the core tree
+        write_lag()
+        print("%sok%s recorded the current upstream line count for %d "
+              "host-owned file(s) in lang/PIN.lag; check now reports only "
+              "growth past it" % (GREEN, OFF, len(HOST_PINNED)))
         return 0
 
     core = core_dir()
