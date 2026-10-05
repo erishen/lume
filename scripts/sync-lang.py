@@ -148,6 +148,21 @@ def read_manifest():
     return out
 
 
+def read_pin_sha():
+    """The sha lang/PIN claims to be pinned at, or "" if it has none."""
+    if not os.path.isfile(PIN):
+        return ""
+    with open(PIN, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, _, value = line.partition(":")
+            if key.strip() == "sha":
+                return value.strip()
+    return ""
+
+
 def upstream_files(files, core):
     """What `sync` would actually copy: synced files upstream has.
 
@@ -338,9 +353,24 @@ def main():
             print("%d of %d synced file(s) differ from core; run `make sync-lang`"
                   % (len(drift), len(files) - len(HOST_PINNED)))
             return 1
-        print("%sok%s lang/ matches %s @ %s - %d synced, %d host-owned, %d host-only"
+
+        # The pin is documentation: nothing in `check` ever compared lang/PIN's
+        # own sha field against the core tree, so a pin left behind by a
+        # `sync` that never ran still read as green. Say so on the same line
+        # that reports green - a warning nobody reads is the same as the
+        # silence this used to have.
+        pinned_sha = read_pin_sha()
+        stale_pin = bool(pinned_sha) and pinned_sha != sha
+        suffix = ""
+        if stale_pin:
+            print("%sSTALEPIN%s lang/PIN records %s but %s is at %s - "
+                  "the pin was never bumped; run `make sync-lang`"
+                  % (YELLOW, OFF, pinned_sha[:12], os.path.basename(core), sha[:12]))
+            suffix = " (lang/PIN SHA STALE)"
+        print("%sok%s lang/ matches %s @ %s - %d synced, %d host-owned, %d host-only%s"
               % (GREEN, OFF, os.path.basename(core), sha[:12],
-                 len(files) - len(HOST_PINNED), len(HOST_PINNED), len(host_only)))
+                 len(files) - len(HOST_PINNED), len(HOST_PINNED), len(host_only),
+                 suffix))
         if lagging:
             print("%d host-owned file(s) are %d+ lines behind upstream; "
                   "a hand-merge is owed" % (len(lagging), LAG_WARN))
