@@ -5,8 +5,8 @@ builtins_hof.c 6eaac3ed7eb2d23806ed1ac7f15b8c0e
 builtins_math.c a45b287acec804f92b8aa1f374016025
 builtins_str.c d6df34ae512988e37fc3897f06df53f0
 lexer.c ddc2abfbbee5f76f58f2d38e23e95b8f
-loader.c cbac8b95b897589919a1f3c68d6fb21a
-parser.c 2f8b3d54f16c26ed3e138bf167376045
+loader.c df2af57de642d0818966672a38084a63
+parser.c 34670d69ef80cdf8dfa1c67afbe1da2a
 parser_expr.c 228c03d840024c420a1c4d66afce8289
 parser_internal.h a92031c5ae20ffaf15abb42aa8147a2f
 parser_stmt.c ca1eed437a32a460c75bc9115cc5ef92
