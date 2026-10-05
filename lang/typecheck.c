@@ -29,9 +29,21 @@ static Type ANY_TYPE = {.kind = TY_ANY};
 
 Type *any_type(void) { return &ANY_TYPE; }
 
+/* Every Type this file allocates lands on one reclaim list (see
+ * type_release_all). The parser builds them too, through the same
+ * constructors, which is why the list is file-wide rather than per-Checker:
+ * a Type produced while parsing is still a Type nobody owns in turn. */
+static Type *ty_allocs;
+
+static void ty_keep(Type *t) {
+    t->tnext = ty_allocs;
+    ty_allocs = t;
+}
+
 Type *type_prim(TypeKind kind) {
     Type *t = calloc(1, sizeof(Type));
     t->kind = kind;
+    ty_keep(t);
     return t;
 }
 
@@ -39,6 +51,7 @@ Type *type_list(Type *elem) {
     Type *t = calloc(1, sizeof(Type));
     t->kind = TY_LIST;
     t->elem = elem;
+    ty_keep(t);
     return t;
 }
 
@@ -46,6 +59,7 @@ Type *type_struct(const char *name) {
     Type *t = calloc(1, sizeof(Type));
     t->kind = TY_STRUCT;
     t->name = strdup(name);
+    ty_keep(t);
     return t;
 }
 
@@ -53,6 +67,7 @@ Type *type_anon_struct(void) {
     Type *t = calloc(1, sizeof(Type));
     t->kind = TY_STRUCT;
     t->name = NULL;
+    ty_keep(t);
     return t;
 }
 
@@ -62,13 +77,34 @@ Type *type_func(int arity, Type **params, Type *ret) {
     t->types = params;
     t->count = arity;
     t->ret = ret;
+    ty_keep(t);
     return t;
 }
 
 Type *type_result(void) {
     Type *t = calloc(1, sizeof(Type));
     t->kind = TY_RESULT;
+    ty_keep(t);
     return t;
+}
+
+void type_release_all(void) {
+    Type *t = ty_allocs;
+    ty_allocs = NULL; /* so a second call is a no-op, not a double free */
+    while (t) {
+        Type *next = t->tnext;
+        free(t->name);
+        if (t->names) {
+            for (int i = 0; i < t->count; i++) free(t->names[i]);
+            free(t->names);
+        }
+        /* types[] holds Type* (members or params) that are part of this same
+         * graph -- including the param vector calloc'd by the checker's Pass
+         * C -- so the whole shell goes here, not block by block. */
+        free(t->types);
+        free(t);
+        t = next;
+    }
 }
 
 void type_add_member(Type *t, const char *name, Type *ty) {
@@ -215,6 +251,7 @@ bool is_builtin_name(const char *name) {
         "push", "try", /* collection / error handling (2026-09-27) */
         "replace", /* string builtins (2026-09-27) */
         "crypt_sha512", /* sha512 crypt hash (2026-09-29) */
+        "http_get", "http_post", "http_put", "http_patch", "http_delete", /* outbound HTTP (2026-10-05, from lume-core) */
         /* math builtins (2026-09-28, builtins_math.c) */
         "abs", "sqrt", "exp", "log", "ln", "pow", "floor", "ceil", "round",
         "min", "max", "pi", "e",
@@ -397,6 +434,7 @@ bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
             "push", "try", /* 列表追加 / 错误捕获 (2026-09-27) */
             "replace", /* 字符串内建 (2026-09-27) */
             "crypt_sha512", /* sha512 crypt hash (2026-09-29) */
+            "http_get", "http_post", "http_put", "http_patch", "http_delete", /* 出站 HTTP (2026-10-05) */
             /* math builtins (2026-09-28) */
             "abs", "sqrt", "exp", "log", "ln", "pow", "floor", "ceil", "round",
             "min", "max", "pi", "e",

@@ -21,6 +21,8 @@ static void usage(const char *prog) {
             "  --watch   dev hot reload: validate + restart the server child on\n"
             "            every edit of <script.lume> (SIGUSR1 = force reload);\n"
             "            invalid edits keep the old server running\n"
+            "  --no-net  runtime network lock: http_get() fails instead of\n"
+            "            opening a socket (also settable as LUME_NO_NET=1)\n"
             "\n"
             "The script is Lume source: type/struct declarations, server {},\n"
             "route/tool declarations plus expressions with static type\n"
@@ -294,18 +296,29 @@ int main(int argc, char **argv) {
     bool do_check = false;
     bool do_dump = false;
     bool do_watch = false;
+    bool no_net = false;
     const char *script = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--check") == 0) do_check = true;
         else if (strcmp(argv[i], "--dump") == 0) do_dump = true;
         else if (strcmp(argv[i], "--watch") == 0) do_watch = true;
+        else if (strcmp(argv[i], "--no-net") == 0) no_net = true;
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(argv[0]);
             return 0;
         }
         else if (argv[i][0] != '-') script = argv[i];
         else { usage(argv[0]); return 2; }
+    }
+    /* LUME_NO_NET is the same switch as --no-net, so a supervisor can lock the
+     * outbound side without editing argv (empty value counts as unset). */
+    {
+        const char *nn = getenv("LUME_NO_NET");
+        if (nn && nn[0] && strcmp(nn, "0") != 0 &&
+            strcmp(nn, "off") != 0 && strcmp(nn, "false") != 0) {
+            no_net = true;
+        }
     }
     if (!script) { usage(argv[0]); return 2; }
 
@@ -329,11 +342,13 @@ int main(int argc, char **argv) {
         }
         node_print(prog, 0);
         free(source);
+        type_release_all();     /* the parser builds Type nodes of its own */
         return 0;
     }
 
     VM vm;
     vm_init(&vm);
+    vm.no_net = no_net;
     bridge_init(&vm);
 
     /* Multi-file import/export: the loader parses + type-checks the entry
@@ -341,25 +356,37 @@ int main(int argc, char **argv) {
      * module top levels in dependency order, the entry's last (entry env ==
      * vm->globals, so builtins and route/tool registrations keep working). */
     char err[512] = {0};
+    /* Every exit below abandons the VM, so each one sweeps the Type graph the
+     * loader/checker built - type_release_all() is idempotent and nothing can
+     * walk a Type once the VM is gone. The run() exit is deliberately absent
+     * from that list: see the note on it. */
     if (loader_run(&vm, script, do_check, err, sizeof(err)) != 0) {
         fprintf(stderr, "lume: %s\n", err[0] ? err : "load error");
+        type_release_all();
         return 1;
     }
 
     if (do_check) {
         printf("parse OK (%s)\n", script);
+        type_release_all();
         return 0;
     }
 
     if (vm.error) {
         fprintf(stderr, "lume: %s\n", vm.error_msg);
+        type_release_all();
         return 1;
     }
 
     /* run() hands the process to agent-httpd. A script that never calls it
      * is a pure language program (compute + print) — that is fine, just not
-     * a server. */
-    if (!vm.run_called)
+     * a server. That branch is also the only exit allowed to sweep: once
+     * run() is up the server is still serving routes that point into the
+     * AST, and the Type graph has to stay reachable for as long as it is. */
+    if (!vm.run_called) {
         fprintf(stderr, "lume: note: script completed without run()\n");
+        type_release_all();
+        return 0;
+    }
     return 0;
 }
