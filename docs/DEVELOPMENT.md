@@ -18,6 +18,7 @@ lume/
 ├── lang/                    # lume-core 语言树的钉住副本，8.6k 行 C11（见 lang/PIN）
 │   ├── PIN                  # 上游 sha/版本 + host_owned 名单
 │   ├── PIN.manifest         # synced 文件的 md5 基线，CI 比对用
+│   ├── PIN.lag              # host-owned 已接受的落后行数，check-sync 只看增量
 │   ├── lume.h               # 全部公共头：token/Type/Node/Value/Obj/GC/VM/桥接原型
 │   ├── token.c              # 枚举 -> 名字表（错误信息用）
 │   ├── lexer.c              # 源码 -> Token 数组
@@ -118,7 +119,8 @@ make hub-watch        # --watch 热更新（invest-watch 同理）
 make test             # 全部测试
 make clean            # 清理 build/ 和 bin/
 make sync-lang        # 从兄弟 lume-core 树重写 lang/ 的 synced 文件 + 刷新 PIN/PIN.manifest
-make check-sync       # 看 lang/ 漂移：synced 是否变了、host-owned 落后上游多少行
+make check-sync       # 看 lang/ 漂移：synced 是否变了、host-owned 比已接受基线多落后多少行
+python3 scripts/sync-lang.py accept-lag   # 认下当前 host-owned 落后量（写 lang/PIN.lag）
 ```
 
 > 每个启动目标的第 1 步(`KILL_SERVER` 宏)都会先清场:杀掉当前监听着目标端口的
@@ -147,12 +149,16 @@ make check-sync       # 看 lang/ 漂移：synced 是否变了、host-owned 落�
 
 ```bash
 make sync-lang        # 旁边有 lume-core 目录才拷得上；顺带写 PIN 与 PIN.manifest
-make check-sync       # 三桶报告 + host-owned 落后上游的行数
+make check-sync       # 三桶报告 + host-owned 相对 PIN.lag 基线的增量
 make test             # 合并完记得跑
 ```
 
-`check-sync` 对「host-owned 落后 >40 行」只提提示、**不 exit 1**——那 12 个文件本来就该
-持续领先上游。真正会让它失败的是 synced 文件漂移。core 的原生后端专属文件
+`check-sync` 对 host-owned 落后上游只提提示、**不 exit 1**——那 12 个文件是两棵树
+真实分叉（Lume 链 agenthttpd 并自带注册表，lume-core 两个都不链），落后本身是常态。
+判据不是「落后多少行」，而是比 `lang/PIN.lag` 记录的基线**又多了几行**：没有新东西就是
+`host-owned ... (accepted)`，只有上游真长出新东西才报 `BEHIND ... +N since the last
+acceptance`。认下当前落后量：`python3 scripts/sync-lang.py accept-lag`（写 `lang/PIN.lag`）。
+会让它真正 exit 1 的只有 synced 文件漂移。core 的原生后端专属文件
 （`codegen*.c` / `backend*.c` / `llvm_codegen*.c` / `rt.c`）根本不拷：Lume 没有原生后端。
 
 > lume-core 目前还没推到 GitHub（远端是空仓），所以 CI 里的 `check-sync` 走
