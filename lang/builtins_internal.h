@@ -50,4 +50,11 @@ void native_map(VM *vm, int argc, Value *args, Value *out);
 void native_filter(VM *vm, int argc, Value *args, Value *out);
 void native_reduce(VM *vm, int argc, Value *args, Value *out);
 
+/* ---- 出站 HTTP(builtins_http.c, 源自 lume-core) ---- */
+void native_http_get(VM *vm, int argc, Value *args, Value *out);
+void native_http_post(VM *vm, int argc, Value *args, Value *out);
+void native_http_put(VM *vm, int argc, Value *args, Value *out);
+void native_http_patch(VM *vm, int argc, Value *args, Value *out);
+void native_http_delete(VM *vm, int argc, Value *args, Value *out);
+
 #endif /* LUME_BUILTINS_INTERNAL_H */

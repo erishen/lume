@@ -51,6 +51,12 @@ Value b_mcps(VM *vm, int argc, Value *args);
 Value b_discovery_endpoints(VM *vm, int argc, Value *args);
 Value b_catalog(VM *vm, int argc, Value *args);
 Value b_default_route(VM *vm, int argc, Value *args);
+/* 出站 HTTP (builtins_http.c) */
+Value b_http_get(VM *vm, int argc, Value *args);
+Value b_http_post(VM *vm, int argc, Value *args);
+Value b_http_put(VM *vm, int argc, Value *args);
+Value b_http_patch(VM *vm, int argc, Value *args);
+Value b_http_delete(VM *vm, int argc, Value *args);
 Value b_abs(VM *vm, int argc, Value *args);
 Value b_sqrt(VM *vm, int argc, Value *args);
 Value b_exp(VM *vm, int argc, Value *args);

@@ -842,6 +842,16 @@ void bridge_seed_builtins(VM *vm) {
         {"put", b_put},
         {"push", b_push}, /* DSL 层列表追加 (2026-09-27) */
         {"try", b_try}, /* 捕获 VM error -> {ok}/{err} (2026-09-27) */
+        /* 出站 HTTP (builtins_http.c, 源自 lume-core): raw socket, no libcurl.
+         * 私有地址默认拒绝;--no-net / LUME_NO_NET=1 整体关掉。注册挂在
+         * LUME_HAS_HTTP 开关上,缺 builtins_http.c 的下游可置 0。 */
+#if LUME_HAS_HTTP
+        {"http_get", b_http_get},
+        {"http_post", b_http_post},
+        {"http_put", b_http_put},
+        {"http_patch", b_http_patch},
+        {"http_delete", b_http_delete},
+#endif
         /* 数值内建 (2026-09-28, builtins_math.c) */
         {"abs", b_abs},
         {"sqrt", b_sqrt},
