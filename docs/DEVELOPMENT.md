@@ -72,7 +72,7 @@ lume/
 │   ├── invest/          # chat 的聊天 bundle 也住这（app.js），hub 的 /chat 复用
 │   ├── hub/  hello/    # 每示例自己的壳 <html> 和 bundle <js>
 ├── tests/
-│   ├── smoke.c        # 解释器 + 类型检查单测（53 check + 11 reject = 64）
+│   ├── smoke.c        # 解释器 + 类型检查单测（条数以 ./tests/smoke-bin 输出尾部为准）
 │   ├── tools_driver.c # 工具注册 + tools_dispatch JSON 往返
 │   └── run_all.sh     # 端到端：构建、单测、live HTTP、300 请求 GC 压测
 ├── Makefile          # make / check / dump / dev / invest / hub / test / ui
@@ -358,7 +358,8 @@ struct（`tool_param_struct`，把 `int`/`float`/`string`/`bool` 关键字或字
 
 - `make test` 起一个真服务器（默认 :8999，`tests/run_all.sh` 里 PORT），依次：
   1. `make` + `./bin/lume --check examples/demo.lume`
-  2. `tests/smoke-bin`（64 项：解析+类型检查+执行，stdout 逐字节比对）
+  2. `tests/smoke-bin`（解析+类型检查+执行，stdout 逐字节比对；条数见该二进制
+     输出尾部，不在这里写死——之前写死过 64，早就不对了）
   3. `tests/tools-bin`（工具表 + `tools_dispatch` JSON 往返 + `session` 透传）
   4. live HTTP：GET /hello、GET /sum、POST /echo、
      `POST /react/api/chat`（agent demo SSE）+ 300 次请求 GC 压测
@@ -366,6 +367,14 @@ struct（`tool_param_struct`，把 `int`/`float`/`string`/`bool` 关键字或字
     永远走**离线 demo 引擎**，不会真的调用外部模型。
 - smoke 的 `capture_begin/End` 会用 `dup` 暂存原 stdout 再恢复；新增测试直接
   复用 `check(name, src, expect)` / `reject(name, src, 含的错误子串)`。
+  `expect` 要写**整个 stdout**：`print()` 自带一个 `\n`，漏掉就只是看着一样却
+  比对失败（`check` 是 strcmp，不是子串匹配）。
+- 出站 HTTP（`lang/builtins_http.c`）只在「不需要网络」的地方测：畸形 URL、
+  SSRF 闸门（私有段/回环地址）、以及闸门在配了代理时依然先拦。它跟 lume-core
+  的口径不同——失败不抛 runtime error，而是回 `{"ok":false,"err":...}`，所以
+  断言的是 `print(r.err)` 的完整输出；想验证某个动词真的接上了，expect 里要带
+  它自己的名字（`http_patch(): ...`），否则「没注册」和「被拒了」长得一模一样。
+  真连远端归 `run_all.sh` 的集成段。
 
 ---
 
