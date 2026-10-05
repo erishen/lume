@@ -12,12 +12,11 @@ AH_INC      := $(AH)/src $(AH)/src/core $(AH)/src/agent
 CC       ?= cc
 CFLAGS   ?= -std=c11 -Wall -Wextra -O2 -g
 CFLAGS   += -I lang $(addprefix -I, $(AH_INC))
-# LUME_HAS_HTTP=0: 关掉出站 HTTP 内建。语言本体(lume-core,见 lang/PIN)把
-# http_get 的注册做成这个开关, 因为实现在 builtins_http.c 而本树不编译它 ——
-# 不带这个开关的话, 哪天 lang/interp.c 同步成本体的那份, 链接会留下一个
-# 未定义的 b_http_get。显式关掉, 本体那份文件将来就能直接从 host_owned 里
-# 放出来。
-LUME_HAS_HTTP ?= 0
+# LUME_HAS_HTTP: 出站 HTTP 内建(http_get/post/put/patch/delete)的开关。
+# 实现已在 lang/builtins_http.c(2026-10-05 从 lume-core 移植, 裸 socket +
+# 可选 libssl, 私有地址默认拒绝, --no-net / LUME_NO_NET=1 整体关掉)。
+# 缺 libssl 时 https:// 报 "needs libssl", 不静默降明文; 置 0 可整体摘除。
+LUME_HAS_HTTP ?= 1
 CFLAGS   += -DLUME_HAS_HTTP=$(LUME_HAS_HTTP)
 # 原生 SQLite 工具在 libagenthttpd.a 里(sqlite_tool.o), 链接 bin/lume 也要
 # 带 -lsqlite3; 容器构建的 -static 则拉 libsqlite3.a(Dockerfile 已装 dev 包)。
@@ -58,6 +57,43 @@ endif
 CFLAGS  += $(CFLAGS_EXTRA)
 LDFLAGS += $(LDFLAGS_EXTRA)
 
+# --- 出站 TLS(可选): http_get() 的 https:// (builtins_http.c, 源自 lume-core) ---
+# 与 libLLVM 同款「有就用、没有只是缺」的口径: 探测到 openssl 就把 builtins_http.c
+# 里 TLS 那段编进去(-DHAVE_OPENSSL=1 + -lssl -lcrypto); 探测不到时照样能编,
+# https:// 直接报 "needs libssl", 不静默降明文。裸 socket 传输层, libssl 只管 TLS。
+# macOS 上 pkg-config 常缺, 退 brew openssl 前缀; 再不行按常见安装前缀
+# (Apple/Intel Homebrew、/usr) 落盘查头文件; 都查不到则 HAVE_OPENSSL=0。
+OPENSSL_PKG := $(shell command -v pkg-config 2>/dev/null)
+ifneq ($(strip $(OPENSSL_PKG)),)
+    OPENSSL_PREFIX := $(shell pkg-config --variable=prefix openssl 2>/dev/null)
+endif
+ifeq ($(strip $(OPENSSL_PREFIX)),)
+    OPENSSL_PREFIX := $(shell brew --prefix openssl 2>/dev/null)
+endif
+ifeq ($(strip $(OPENSSL_PREFIX)),)
+    OPENSSL_PREFIX := $(shell brew --prefix openssl@3 2>/dev/null)
+endif
+# 常见安装前缀落盘兜底(brew/pkg-config 都可能不在 PATH): Apple Silicon 与
+# Intel Homebrew、系统 /usr。
+ifneq ($(wildcard /opt/homebrew/opt/openssl@3/include/openssl/ssl.h),)
+    OPENSSL_PREFIX := /opt/homebrew/opt/openssl@3
+else ifneq ($(wildcard /opt/homebrew/include/openssl/ssl.h),)
+    OPENSSL_PREFIX := /opt/homebrew
+else ifneq ($(wildcard /usr/local/opt/openssl@3/include/openssl/ssl.h),)
+    OPENSSL_PREFIX := /usr/local/opt/openssl@3
+else ifneq ($(wildcard /usr/local/include/openssl/ssl.h),)
+    OPENSSL_PREFIX := /usr/local
+else ifneq ($(wildcard /usr/include/openssl/ssl.h),)
+    OPENSSL_PREFIX := /usr
+endif
+HAVE_OPENSSL := $(if $(and $(strip $(OPENSSL_PREFIX)),\
+    $(wildcard $(OPENSSL_PREFIX)/include/openssl/ssl.h)),1,0)
+ifeq ($(HAVE_OPENSSL),1)
+    CFLAGS  += -I$(OPENSSL_PREFIX)/include -DHAVE_OPENSSL=1
+    LDFLAGS += -L$(OPENSSL_PREFIX)/lib -lssl -lcrypto
+    LDFLAGS += -Wl,-rpath,$(OPENSSL_PREFIX)/lib
+endif
+
 TARGET   := bin/lume
 DEMO     := examples/demo.lume
 HELLO    := examples/hello.lume
@@ -85,7 +121,7 @@ SRCS     := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parse
             lang/value.c lang/typecheck.c lang/typecheck_expr.c lang/typecheck_stmt.c \
             lang/interp.c lang/builtins.c lang/builtins_sql.c lang/builtins_fs.c \
             lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/loader.c lang/vdom.c \
-            lang/bridge.c lang/token.c lang/iquest.c
+            lang/builtins_http.c lang/bridge.c lang/token.c lang/iquest.c
 OBJS     := $(SRCS:lang/%.c=build/%.o)
 
 # 内部头:任一 * 片的共享声明变化,所有依赖它的 .o 都要重建

@@ -1,0 +1,4 @@
+// 验证 host 树内建的出站 http_get (HTTPS, libssl) 能直接访问 GitHub。
+let r = http_get("https://api.github.com/zen", { timeout: 15 });
+print("status = " + str(get(r, "status", "n/a")));
+print("zen    = " + str(get(r, "body", "")));
