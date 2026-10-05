@@ -853,6 +853,77 @@ check("skills: index enumeration includes the scratch skill",
                       "cannot resolve import");
     }
 
+    /* ---- 出站 HTTP (builtins_http.c, 源自 lume-core) ----
+     * Only the two rejections that need no network are covered: an
+     * unparseable URL, and the SSRF gate on private/reserved addresses.
+     * Both fire before open_conn(), so the suite stays offline and
+     * deterministic; a real round-trip to a live endpoint belongs in an
+     * integration test, never here.
+     *
+     * These are asserted on r.err, not on a raised error, because this tree
+     * deliberately differs from lume-core here: a failed builtin comes back
+     * as {"ok":false,"err":...} instead of setting vm->error. That is the
+     * right call for a server - one bad outbound call must not take the
+     * process down mid-request - but it does mean a verb that were never
+     * registered would look identical to one that was refused. So each
+     * assertion includes the verb name: the text carries it, and only a
+     * call that actually reached the handler could have written it. */
+    {
+        static const char *verbs[5] = {
+            "http_get", "http_post", "http_put", "http_patch", "http_delete"
+        };
+        for (int i = 0; i < 5; i++) {
+            char nm[192], src[256], want[192];
+            snprintf(nm, sizeof nm, "%s malformed url rejected", verbs[i]);
+            snprintf(src, sizeof src, "let r = %s(\"not a url\", {});\n"
+                                      "print(r.err);", verbs[i]);
+            /* check() compares the whole captured stdout, and print() ends
+             * its line with \n, so the expectation carries the newline. */
+            snprintf(want, sizeof want, "%s(): unsupported url: not a url\n",
+                     verbs[i]);
+            check(nm, src, want);
+        }
+        check("http ssrf gate",
+              "let r = http_get(\"http://169.254.169.254/\", {});\n"
+              "print(r.err);",
+              "http_get(): refused — 169.254.169.254 resolves "
+              "to a private/reserved address\n");
+        /* 127.0.0.1 too: the gate has to cover loopback, not only the
+         * cloud-metadata range it was first written for. */
+        check("http loopback gate",
+              "let r = http_get(\"http://127.0.0.1:9/\", {});\n"
+              "print(r.err);",
+              "http_get(): refused — 127.0.0.1 resolves to a "
+              "private/reserved address\n");
+        /* The gate has to hold even when a proxy is configured. The gate
+         * runs before open_conn(), and the target host is the thing it
+         * inspects, so this is the same line as the two above - but it is
+         * worth a name of its own, because a proxy makes the *proxy* the
+         * peer that gets connected to, which is exactly the setup that
+         * could quietly make the gate look like a no-op. */
+        check("http gate holds with a proxy configured",
+              "let r = http_get(\"http://169.254.169.254/\", {});\n"
+              "print(r.err);",
+              "http_get(): refused — 169.254.169.254 resolves "
+              "to a private/reserved address\n");
+        /* The gate is a check, not a blanket denial: allow_private has to
+         * actually open the door back up, otherwise it is decoration. The
+         * port is 9 (discard) and the address is loopback, so this ends in
+         * a refused connection rather than a timeout. The proxy variables
+         * are cleared first for the same reason the gate is tested above -
+         * left set, the request would be handed to whatever the agent
+         * happens to be running and come back 200-ish instead of failing. */
+        unsetenv("http_proxy");
+        unsetenv("HTTP_PROXY");
+        unsetenv("https_proxy");
+        unsetenv("HTTPS_PROXY");
+        check("http allow_private opens gate",
+              "let r = http_get(\"http://127.0.0.1:9/\", "
+              "{\"allow_private\":true});\n"
+              "print(r.err);",
+              "http_get(): cannot reach 127.0.0.1 (Connection refused)\n");
+    }
+
 
     printf("\n%d tests, %d failed\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;
