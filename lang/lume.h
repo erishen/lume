@@ -185,6 +185,12 @@ struct Obj {
             Env *parent;   /* lexical scope */
         } env;             /* OBJ_ENV */
     } as;
+    /* Static struct name for a map that is really a value of a named type
+     * (`let p: P = {...}` stamps it), NULL for an anonymous map. The host has
+     * no native backend, so this exists only so `.len` can read the declared
+     * field instead of the key count — the same rule lume-core's two native
+     * backends follow. Not a GC root: it points into the type table. */
+    const char *sname;
 };
 
 struct Value {
