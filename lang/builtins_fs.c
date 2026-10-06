@@ -6,11 +6,29 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
-#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef _WIN32
+/* Windows/mingw: no <sys/file.h>; LOCK_* live here and the flock()/mkdir()
+ * shims are implemented in os_win32.c (kept in its own TU because <windows.h>
+ * exports a `TokenType` enumerator that collides with lume.h's TokenType type). */
+#include <fcntl.h>
+#include <io.h>
+#ifndef LOCK_SH
+#define LOCK_SH 1
+#define LOCK_EX 2
+#define LOCK_UN 8
+#define LOCK_NB 4
+#endif
+int lume_mkdir(const char *p);
+int lume_flock(int fd, int op);
+#else
+#include <sys/file.h>
+static int lume_mkdir(const char *p) { return mkdir(p, 0700); }
+static int lume_flock(int fd, int op) { return flock(fd, op); }
+#endif
 
 /* Append v to a list, rooting it while the backing array may grow. */
 void list_push(VM *vm, Obj *list, Value v) {
@@ -194,7 +212,10 @@ void native_write_file(VM *vm, int argc, Value *args, Value *out) {
     if (!f) { *out = val_bool(false); return; }
     /* 数据文件默认 0600(账本/周报/设置 .env 都经此写;即使用户把
      * IQUEST_REPORTS_DIR 指到 .data 之外,报告也不会随 umask 落成 0644) */
+    #ifndef _WIN32
+    /* Windows/mingw 无 fchmod；那里的默认 ACL 由 _open 的模式位给出。 */
     fchmod(fileno(f), 0600);
+#endif
     size_t wrote = data && len ? fwrite(data, 1, len, f) : 0;
     int ok = (fclose(f) == 0) && (wrote == len);
     if (ok) ok = rename(tmp, p) == 0;
@@ -219,11 +240,11 @@ void native_mkdir(VM *vm, int argc, Value *args, Value *out) {
     for (char *c = tmp + 1; *c; c++) {
         if (*c == '/') {
             *c = '\0';
-            if (mkdir(tmp, 0700) != 0 && errno != EEXIST) { *out = val_bool(false); return; }
+            if (lume_mkdir(tmp) != 0 && errno != EEXIST) { *out = val_bool(false); return; }
             *c = '/';
         }
     }
-    if (mkdir(tmp, 0700) != 0 && errno != EEXIST) { *out = val_bool(false); return; }
+    if (lume_mkdir(tmp) != 0 && errno != EEXIST) { *out = val_bool(false); return; }
     struct stat st;
     *out = val_bool(stat(tmp, &st) == 0 && S_ISDIR(st.st_mode));
 }
@@ -249,16 +270,21 @@ void native_lock_file(VM *vm, int argc, Value *args, Value *out) {
         if (wait_ms > 30000) wait_ms = 30000;
     }
     if (g_lock_fd >= 0) {
-        flock(g_lock_fd, LOCK_UN);
+        lume_flock(g_lock_fd, LOCK_UN);
         close(g_lock_fd);
         g_lock_fd = -1;
     }
+#ifdef _WIN32
+    /* mingw 把 O_CREAT/O_RDWR 放在 <fcntl.h> 的下划线命名空间里。 */
+    int fd = open(p, _O_CREAT | _O_RDWR, _S_IREAD | _S_IWRITE);
+#else
     int fd = open(p, O_CREAT | O_RDWR, 0600);
+#endif
     if (fd < 0) { *out = val_bool(false); return; }
     struct timeval t0;
     gettimeofday(&t0, NULL);
     for (;;) {
-        if (flock(fd, LOCK_EX | LOCK_NB) == 0) break;
+        if (lume_flock(fd, LOCK_EX | LOCK_NB) == 0) break;
         if (errno == EINTR) continue;
         if (errno != EWOULDBLOCK && errno != EAGAIN) {
             close(fd);
@@ -283,7 +309,7 @@ void native_lock_file(VM *vm, int argc, Value *args, Value *out) {
 void native_unlock_file(VM *vm, int argc, Value *args, Value *out) {
     (void)vm; (void)argc; (void)args;
     if (g_lock_fd >= 0) {
-        flock(g_lock_fd, LOCK_UN);
+        lume_flock(g_lock_fd, LOCK_UN);
         close(g_lock_fd);
         g_lock_fd = -1;
     }
@@ -306,7 +332,12 @@ void native_strftime(VM *vm, int argc, Value *args, Value *out) {
     time_t t = (time_t)AS_NUM(args[1]);
     struct tm tm;
     char buf[160];
+    #ifdef _WIN32
+    /* mingw 是 localtime_s(struct tm*, const time_t*)——参数顺序与 POSIX 相反。 */
+    if (localtime_s(&tm, &t) == 0 && strftime(buf, sizeof buf, fmt, &tm) > 0)
+#else
     if (localtime_r(&t, &tm) && strftime(buf, sizeof buf, fmt, &tm) > 0)
+#endif
         *out = make_string_cstr(vm, buf);
     else
         *out = make_string_cstr(vm, "");

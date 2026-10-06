@@ -3,9 +3,16 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <time.h>
+#ifndef _WIN32
+/* --watch (dev hot reload) is a POSIX-only feature: it relies on fork(2),
+ * pipe(2), waitpid(2) and sigaction(2), none of which Windows provides with
+ * the same semantics (there is no fork at all; a port would need
+ * CreateProcess + threads, which is out of scope). Windows therefore builds
+ * this section out and --watch reports a clear "unsupported" error instead. */
+#include <sys/wait.h>
 #include <unistd.h>
+#endif
 #if defined(__APPLE__)
 #include <sys/event.h>
 #endif
@@ -46,7 +53,12 @@ static char *read_file(const char *path, size_t *len_out) {
     return buf;
 }
 
+#ifndef _WIN32
 /* ---------- --watch: dev hot reload ------------------------------------
+ *
+ * POSIX-only (see the _WIN32 note at the top of this file): built against
+ * fork(2)/pipe(2)/waitpid(2)/sigaction(2). On Windows the whole block is
+ * compiled out and run_watch() below degrades to a clear error.
  *
  * The serving process cannot swap its VM in place: routes/tools are
  * registered into two pre-fork tables (agent-httpd g_routes + VM routes[])
@@ -291,6 +303,18 @@ static int run_watch(const char *argv0, const char *script) {
     close(g_watch_pipe[1]);
     return 0;
 }
+#else /* _WIN32 */
+/* --watch needs fork/pipe/waitpid, which Windows does not provide. Fail with
+ * an actionable message rather than a mysterious "unknown flag". */
+static int run_watch(const char *argv0, const char *script) {
+    (void)argv0; (void)script;
+    fprintf(stderr,
+            "lume: --watch is not supported on Windows (no fork/pipe).\n"
+            "      Run the script directly instead: lume %s\n",
+            script ? script : "<script.lume>");
+    return 2;
+}
+#endif /* !_WIN32 */
 
 int main(int argc, char **argv) {
     bool do_check = false;

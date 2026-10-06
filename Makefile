@@ -9,6 +9,17 @@ AH          := agent-httpd
 AH_LIB      := $(AH)/bin/libagenthttpd.a
 AH_INC      := $(AH)/src $(AH)/src/core $(AH)/src/agent
 
+# --- Windows(MSYS2/mingw-w64)分支 ---------------------------------------
+# agent-httpd 自身没有 Windows 支持(30 个 .c 全是 POSIX socket 零 _WIN32 守卫),
+# 而 bin/lume 硬链 libagenthttpd.a。Windows 构建因此:
+#   1) 不构建也不链接 libagenthttpd.a;
+#   2) 用 lang/bridge_stub.c 替掉 lang/bridge.c(route/tool 记进 VM 自己的表,
+#      run() 明确报错退出, 不假装起服务);
+#   3) 排除依赖 AH 库的 iquest.c / builtins_sql.c / builtins_http.c;
+#   4) --watch 与出站 http_get/post/... 在 Windows 关闭(前者要 fork/pipe,
+#      后者要裸 socket + TLS),由 main.c / builtins_internal.h 的守卫兜住。
+# 参照已在 lume-core CI 验证过的同一模式(sbuf.h + bridge_stub.c)。
+# UNAME_S 复用下面 platform feature-test 段的那次赋值, 故把检测放在其之后。
 CC       ?= cc
 CFLAGS   ?= -std=c11 -Wall -Wextra -O2 -g
 CFLAGS   += -I lang $(addprefix -I, $(AH_INC))
@@ -57,6 +68,34 @@ endif
 CFLAGS  += $(CFLAGS_EXTRA)
 LDFLAGS += $(LDFLAGS_EXTRA)
 
+# --- Windows(MSYS2/mingw-w64)检测 ----------------------------------------
+# agent-httpd 自身没有 Windows 支持(30 个 .c 全是 POSIX socket、零 _WIN32 守卫),
+# 而 bin/lume 硬链 libagenthttpd.a。Windows 构建因此:
+#   1) 不构建也不链接 libagenthttpd.a;
+#   2) 用 lang/bridge_stub.c 替掉 lang/bridge.c(route/tool 记进 VM 自己的表,
+#      run() 明确报错退出, 不假装起服务);
+#   3) 排除依赖 AH 库的 iquest.c / builtins_sql.c / builtins_http.c, 出站 http_* 关掉;
+#   4) --watch 关掉(要 fork/pipe/waitpid), 由 lang/main.c 的守卫兜住。
+# 与 lume-core 已验证的同一模式(sbuf.h + bridge_stub.c), 见文件头 Windows 段。
+ifeq ($(OS),Windows_NT)
+    IS_WINDOWS := 1
+else ifneq (,$(findstring MINGW,$(UNAME_S))$(findstring MSYS,$(UNAME_S))$(findstring CYGWIN,$(UNAME_S)))
+    IS_WINDOWS := 1
+endif
+ifneq ($(strip $(IS_WINDOWS)),)
+    TARGET_SUFFIX := .exe
+    # Windows 下没有 agent-httpd 可探测, 也没有出站 HTTP 实现。
+    LUME_HAS_HTTP := 0
+    AH_LIB :=
+    # 原生 SQLite 工具在 libagenthttpd.a 里(sqlite_tool.o), 这个库 Windows 下
+    # 根本不链接, 相应地也不能要 -lsqlite3(mingw 的 sysroot 没有它)。
+    LDFLAGS := $(filter-out -lsqlite3,$(LDFLAGS))
+    # -lcrypt 只由上面 Linux 分支带入。真实 MSYS2 的 uname -s 是
+    # MINGW64_NT-<ver>(不匹配 Linux), 但不把正确性押在这个假设上: mingw 的
+    # sysroot 也没有 libcrypt, 一旦命中就链接失败。
+    LDFLAGS := $(filter-out -lcrypt,$(LDFLAGS))
+endif
+
 # --- 出站 TLS(可选): http_get() 的 https:// (builtins_http.c, 源自 lume-core) ---
 # 与 libLLVM 同款「有就用、没有只是缺」的口径: 探测到 openssl 就把 builtins_http.c
 # 里 TLS 那段编进去(-DHAVE_OPENSSL=1 + -lssl -lcrypto); 探测不到时照样能编,
@@ -86,15 +125,17 @@ else ifneq ($(wildcard /usr/local/include/openssl/ssl.h),)
 else ifneq ($(wildcard /usr/include/openssl/ssl.h),)
     OPENSSL_PREFIX := /usr
 endif
-HAVE_OPENSSL := $(if $(and $(strip $(OPENSSL_PREFIX)),\
-    $(wildcard $(OPENSSL_PREFIX)/include/openssl/ssl.h)),1,0)
+# Windows 下 openssl 强制 0: 出站 http_* 整体不编(lume_has_http=0), 且 mingw
+# 的 pkg-config/brew 探测无意义 —— 留着它会把 -DHAVE_OPENSSL=1 挂到编译行上。
+HAVE_OPENSSL := $(if $(IS_WINDOWS),0,$(if $(and $(strip $(OPENSSL_PREFIX)),\
+    $(wildcard $(OPENSSL_PREFIX)/include/openssl/ssl.h)),1,0))
 ifeq ($(HAVE_OPENSSL),1)
     CFLAGS  += -I$(OPENSSL_PREFIX)/include -DHAVE_OPENSSL=1
     LDFLAGS += -L$(OPENSSL_PREFIX)/lib -lssl -lcrypto
     LDFLAGS += -Wl,-rpath,$(OPENSSL_PREFIX)/lib
 endif
 
-TARGET   := bin/lume
+TARGET   := bin/lume$(TARGET_SUFFIX)
 DEMO     := examples/demo.lume
 HELLO    := examples/hello.lume
 INVEST   := examples/invest.lume
@@ -122,6 +163,19 @@ SRCS     := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parse
             lang/interp.c lang/builtins.c lang/builtins_sql.c lang/builtins_fs.c \
             lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/loader.c lang/vdom.c \
             lang/builtins_http.c lang/bridge.c lang/token.c lang/iquest.c
+# Windows: 去掉吃 agent-httpd 的三片(iquest 走 minijson 读取半 + agenthttpd_route,
+# builtins_sql 走 AH 里的 db_query_json/db_write_exec, builtins_http 是裸 socket +
+# 可选 TLS), 换入 bridge_stub.c; 另加 os_win32.c 供 builtins_fs.c 的
+# lume_mkdir / lume_flock 垫片(必须独立 TU: <windows.h> 的 TokenType 枚举与
+# lume.h 的 TokenType 类型撞名)。
+ifneq ($(strip $(IS_WINDOWS)),)
+    SRCS := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parser_expr.c \
+            lang/value.c lang/typecheck.c lang/typecheck_expr.c lang/typecheck_stmt.c \
+            lang/interp.c lang/builtins.c lang/builtins_fs.c \
+            lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/loader.c lang/vdom.c \
+            lang/bridge_stub.c lang/token.c lang/os_win32.c \
+            lang/builtins_stub.c lang/catalog_stub.c
+endif
 OBJS     := $(SRCS:lang/%.c=build/%.o)
 
 # 内部头:任一 * 片的共享声明变化,所有依赖它的 .o 都要重建
@@ -131,9 +185,16 @@ all: bin $(TARGET)
 
 # Build the embedding library first if it is missing.
 # 子模块源文件变化即触发 lib 重建（否则 llm.c 等改动不会带进 bin/lume）。
-AH_DEPS := $(shell find $(AH)/src -name '*.c' -o -name '*.h')
+# Windows:AH_LIB 已置空(见 IS_WINDOWS 段), 整条规则连同它的 order-only 前置
+# 一起退化为空目标 —— 否则 make 会去 agent-httpd 里编 POSIX 代码。
+AH_DEPS := $(shell find $(AH)/src -name '*.c' -o -name '*.h' 2>/dev/null)
+ifeq ($(strip $(IS_WINDOWS)),)
 $(AH_LIB): $(AH_DEPS)
 	$(MAKE) -C $(AH) lib WITH_PG=$(WITH_PG) WITH_MYSQL=$(WITH_MYSQL)
+else
+$(AH_LIB):
+	@:
+endif
 
 build:
 	mkdir -p build
