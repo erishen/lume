@@ -941,6 +941,16 @@ check("skills: index enumeration includes the scratch skill",
            "let s: string = m.len;",
            "not assignable");
 
+    /* The other side of the same rule: a map bound to a *named* struct reads
+     * the declared field, not the key count — the rule both native backends
+     * in lume-core follow, and the answer must not be counted here. The field
+     * value (7) deliberately differs from the member count (2), so an
+     * interpreter that counts keys cannot pass this by accident. */
+    check("named struct .len reads the declared field",
+          "type P = { len: int, w: int };\n"
+          "let p: P = { len: 7, w: 2 };\n"
+          "print(str(p.len)); print(str(p.w));",
+          "7\n2\n");
 
     printf("\n%d tests, %d failed\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;
