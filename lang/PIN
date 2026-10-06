@@ -12,5 +12,5 @@
 core_dir: ../lume-core
 sha: a8ec3b96638ef38fd555f77053876b388a754aef
 version: v0.1.0-12-ga8ec3b9
-synced_at: 2026-10-06 14:50:14
-host_owned: builtins.c builtins.h builtins_catalog.c builtins_fs.c builtins_internal.h interp.c lume.h main.c typecheck.c typecheck_expr.c typecheck_stmt.c vdom.c
+synced_at: 2026-10-06 15:10:33
+host_owned: builtins.c builtins.h builtins_catalog.c builtins_fs.c builtins_http.c builtins_internal.h interp.c lume.h main.c typecheck.c typecheck_expr.c typecheck_stmt.c vdom.c

@@ -71,9 +71,16 @@ DEFAULT_CORE = os.path.join(os.path.dirname(ROOT), "lume-core")
 # builtins.h declares the seeded sql_query / sql_write on top of core's.
 # typecheck.c / typecheck_expr.c / typecheck_stmt.c resolve names against
 #         the seeded registry; the upstream checker rejects sql_*.
+# builtins_http.c is synced upstream like the rest, but it also carries
+#         HTTP_DBG, the three debug points that compile to nothing unless
+#         -DLUME_HTTP_DEBUG is passed.  Upstream prints them
+#         unconditionally, which is fine for a CLI and not for lume, where
+#         http_get backs a long-running server and one failed call used to
+#         be one permanent line of stderr.  Pinned so `sync` cannot quietly
+#         make the host log noisy again.
 HOST_PINNED = {"lume.h", "main.c", "builtins_internal.h", "builtins.c",
                "builtins_catalog.c", "builtins_fs.c", "vdom.c",
-               "interp.c", "builtins.h",
+               "interp.c", "builtins.h", "builtins_http.c",
                "typecheck.c", "typecheck_expr.c", "typecheck_stmt.c"}
 
 # Upstream lines behind in a pinned file stop being news at about this many;
@@ -130,6 +137,21 @@ def lang_sources():
 def synced_files(files):
     """The files sync actually copies, i.e. everything but host_owned."""
     return [f for f in files if f not in HOST_PINNED]
+
+
+def dirty_synced(files):
+    """Synced files that currently carry uncommitted edits.
+
+    A synced file is the host's copy of an upstream file, so `sync` is
+    allowed to replace it wholesale - which is exactly why it must never do
+    so while someone has unstaged work in it.  Uncommitted edits are not
+    recoverable from the index, so overwriting them loses the work with no
+    trail except this script's report.
+    """
+    out = subprocess.run(["git", "-C", ROOT, "diff", "--name-only", "--"] +
+                         ["lang/" + f for f in files],
+                         capture_output=True, text=True)
+    return {os.path.basename(x) for x in out.stdout.split()}
 
 
 def read_manifest():
@@ -360,9 +382,11 @@ def write_pin(sha, version):
 
 
 def main():
-    mode = sys.argv[1] if len(sys.argv) > 1 else "check"
+    argv = sys.argv[1:]
+    force = "--force" in argv
+    mode = next((a for a in argv if not a.startswith("-")), "check")
     if mode not in ("sync", "check", "accept-lag"):
-        sys.exit("usage: sync-lang.py {sync|check|accept-lag}")
+        sys.exit("usage: sync-lang.py {sync|check|accept-lag} [--force]")
 
     files = lang_sources()
 
@@ -494,7 +518,24 @@ def main():
 
     core = core_dir()
     sha = core_sha(core)
+    # Replacing a synced file wholesale is the point of `sync`, so it must
+    # not do it while someone has unstaged work in the file: uncommitted
+    # edits live only in the worktree, and overwriting them loses them with
+    # nothing left behind but this report.  lang/builtins_http.c lost its
+    # HTTP_DBG macro this way, which is the reason for the guard.
+    # Only files sync would actually replace count: a host-owned file is
+    # never overwritten, so edits in it are none of sync's business.
+    dirty = set() if force else dirty_synced(synced_files(files))
     changed = []
+    for f in sorted(dirty):
+        print("%sSKIP%s      %-18s has uncommitted edits; `--force` overwrites"
+              % (YELLOW, OFF, f))
+    if dirty:
+        print("%sREFUSED%s updating lang/PIN: %d synced file(s) still carry "
+              "uncommitted edits." % (RED, OFF, len(dirty)))
+        print("         Commit them, hand-merge, or run `sync-lang.py sync "
+              "--force` to drop them.")
+        return 1
     for f in files:
         src = os.path.join(core, "src", f)
         dst = os.path.join(LANG, f)

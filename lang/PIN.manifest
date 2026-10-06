@@ -2,7 +2,6 @@
 # check compares lang/ against this when lume-core is not reachable.
 builtins_crypt.c 14b4e2c53fe935a48995064c8ee8d752
 builtins_hof.c 6eaac3ed7eb2d23806ed1ac7f15b8c0e
-builtins_http.c cc0239a495c523d2b5292d2696ec57e9
 builtins_math.c a45b287acec804f92b8aa1f374016025
 builtins_str.c d6df34ae512988e37fc3897f06df53f0
 lexer.c ddc2abfbbee5f76f58f2d38e23e95b8f
