@@ -277,6 +277,16 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
             if (IS_OBJ(objv)) {
                 Obj *o = AS_OBJ(objv);
                 if (o->type == OBJ_MAP) {
+                    /* A map answers `.len` / `.length` with its key count.
+                     * The list and the string below do the same; the checker
+                     * already types a map's `.len` as int, so refusing it
+                     * here would reject a program that type-checked clean. */
+                    if (strcmp(n->as.member.name, "len") == 0 ||
+                        strcmp(n->as.member.name, "length") == 0) {
+                        vm_pop(vm);
+                        vm_push(vm, val_int((long long)o->as.map.count));
+                        return;
+                    }
                     int found = 0;
                     Value v = map_get(vm, o, n->as.member.name, &found);
                     if (!found) {

@@ -923,6 +923,23 @@ check("skills: index enumeration includes the scratch skill",
               "print(r.err);",
               "http_get(): cannot reach 127.0.0.1 (Connection refused)\n");
     }
+    /* `.len` on a runtime map is answered by both the checker and the
+     * interpreter: the checker types it as int, the interpreter pushes the
+     * key count. Either leg alone leaves a program that type-checks but
+     * refuses at run time, or one that runs while the type is really any. */
+    check("map .len counts keys",
+          "let m = {\"a\": 1, \"b\": 2, \"c\": 3};\n"
+          "print(str(m.len)); print(str(m.length));",
+          "3\n3\n");
+    check("map .len types as int",
+          "let m = {\"a\": 1, \"b\": 2, \"c\": 3};\n"
+          "let n: int = m.len;\n"
+          "print(str(n));",
+          "3\n");
+    reject("map .len is not a string",
+           "let m = {\"a\": 1};\n"
+           "let s: string = m.len;",
+           "not assignable");
 
 
     printf("\n%d tests, %d failed\n", tests_run, tests_failed);
