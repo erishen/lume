@@ -5,6 +5,7 @@ builtins.c 11
 builtins.h 2
 builtins_catalog.c 46
 builtins_fs.c 23
+builtins_http.c 3
 builtins_internal.h 59
 interp.c 497
 lume.h 71

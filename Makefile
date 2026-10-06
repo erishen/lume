@@ -493,7 +493,7 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 	@ASAN_OPTIONS=detect_leaks=0 ./tests/tools-bin-asan || exit 1
 	@echo "ok   ASan/UBSan all passed"
 
-.PHONY: all check dump dev dev-minimal invest hub demo-sqlite demo-sqlite-watch invest-watch hub-watch run ui ui-items vsix image image-push test clean asan sync-lang check-sync
+.PHONY: all check dump dev dev-minimal invest hub demo-sqlite demo-sqlite-watch invest-watch hub-watch run ui ui-items vsix image image-push test clean asan sync-lang sync-lang-force check-sync
 # lang/ is a pinned copy of the lume-core language tree (see lang/PIN).
 # Bump the pin with `make sync-lang`; watch for drift with `make check-sync`.
 # Files listed as host_owned in lang/PIN are never overwritten.
@@ -505,6 +505,13 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 # hand edit to a synced file still fails there instead of passing silently.
 sync-lang:
 	@python3 scripts/sync-lang.py sync
+
+# Refuses by default: a synced lang/ file with uncommitted edits is left
+# alone instead of being replaced by the upstream copy, because those edits
+# live only in the worktree.  --force is the way past that, and it does drop
+# them, so reach for it only when they are known to be disposable.
+sync-lang-force:
+	@python3 scripts/sync-lang.py sync --force
 
 check-sync:
 	@python3 scripts/sync-lang.py check
