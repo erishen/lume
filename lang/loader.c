@@ -23,6 +23,13 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifdef _WIN32
+/* mingw-w64 has no POSIX realpath(3); os_win32.c's lume_realpath wraps the CRT
+ * _fullpath. On POSIX the macro below is a plain realpath(3) call. */
+char *lume_realpath(const char *path, char *out);
+#define realpath(p, out) lume_realpath((p), (out))
+#endif
+
 /* ---------- file io ---------- */
 
 static char *read_file(const char *path, size_t *len_out) {
@@ -109,6 +116,13 @@ static bool on_stack(VM *vm, const char *path) {
 /* dirname of a canonical absolute path (malloc'd). */
 static char *path_dirname(const char *path) {
     char *slash = strrchr(path, '/');
+#ifdef _WIN32
+    /* mingw's _fullpath returns backslash-separated paths, so the separator
+     * we want may be a backslash. Take whichever comes last, comparing only
+     * when both are non-NULL. */
+    char *bslash = strrchr(path, '\\');
+    if (bslash && (!slash || bslash > slash)) slash = bslash;
+#endif
     if (!slash) return strdup(".");
     if (slash == path) return strdup("/");
     size_t n = (size_t)(slash - path);
@@ -123,11 +137,23 @@ static char *path_dirname(const char *path) {
 static char *resolve_import(const char *from_dir, const char *rel,
                             char *errbuf, size_t errbuf_size) {
     char joined[PATH_MAX];
+#ifdef _WIN32
+    /* On Windows an absolute import is either a POSIX-style '/foo' or a
+     * drive letter 'X:\foo' / UNC root '\\foo'. */
+    if (rel[0] == '/' || rel[0] == '\\' ||
+        ((rel[0] >= 'a' && rel[0] <= 'z') || (rel[0] >= 'A' && rel[0] <= 'Z')) &&
+            rel[1] == ':' && (rel[2] == '\\' || rel[2] == '/')) {
+        snprintf(joined, sizeof(joined), "%s", rel);
+    } else {
+        snprintf(joined, sizeof(joined), "%s/%s", from_dir, rel);
+    }
+#else
     if (rel[0] == '/') {
         snprintf(joined, sizeof(joined), "%s", rel);
     } else {
         snprintf(joined, sizeof(joined), "%s/%s", from_dir, rel);
     }
+#endif
     char canon[PATH_MAX];
     if (!realpath(joined, canon)) {
         if (errbuf && errbuf_size)

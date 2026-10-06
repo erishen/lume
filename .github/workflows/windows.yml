@@ -1,0 +1,59 @@
+name: Windows (MSYS2)
+
+# Native Windows build of the host tree via mingw-w64.
+#
+# The host links libagenthttpd.a, and agent-httpd has no Windows support (its
+# 30 .c files are POSIX socket code with zero _WIN32 guards). The Windows build
+# therefore leaves the library out and swaps in stubs — see the $(IS_WINDOWS)
+# branch in the Makefile and the header comments in lang/bridge_stub.c:
+#
+#   - bridge.c        -> bridge_stub.c   (route/tool registered, run() errors out)
+#   - iquest.c        -> excluded        (agenthttpd_route + minijson reader)
+#   - builtins_sql.c  -> builtins_stub.c (SQLite lives in libagenthttpd.a)
+#   - builtins_http.c -> builtins_stub.c (bare sockets; LUME_HAS_HTTP=0)
+#   - --watch         -> off             (no fork/pipe; lang/main.c guards it)
+#
+# What this workflow verifies is therefore exactly what the port promises: the
+# interpreter, the type checker, and module loading run on Windows and produce
+# bin/lume.exe. Serving HTTP is out of scope by design.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-x86_64-toolchain
+
+      - name: Build
+        run: make
+
+      - name: Check (parse + type check every example)
+        # `make check` = crypt-test + a --check pass over every example.
+        # Checking never executes run(), so the server-side demos type-check
+        # fine even though serving is compiled out — which is the point: it
+        # proves the whole language surface (route/tool/run declarations
+        # included) still type-checks on Windows.
+        run: make check
+
+      - name: Run hello
+        run: ./bin/lume.exe examples/hello.lume
+
+      # `make test` is POSIX-only (it drives a live HTTP server through
+      # libagenthttpd, and its harness uses POSIX mkdir(2)/rm shell calls).
+      # It runs on the Linux `ci` job instead.

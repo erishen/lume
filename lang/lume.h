@@ -32,8 +32,27 @@
 #include <string.h>
 #include <setjmp.h>
 
-/* libagenthttpd embedding API (from the sibling project). */
+/* libagenthttpd embedding API (from the sibling project).
+ * Windows builds do not link libagenthttpd.a — agent-httpd's sources are POSIX
+ * socket code with no Windows support — and this header pulls in netinet/in.h
+ * and sys/socket.h. Nothing below needs any agent-httpd *type*: the DSL keeps
+ * its own RouteRec / ToolRec, and lang/bridge.c is the only consumer of
+ * HttpRequest / HttpResponse / agenthttpd_config, and it is excluded from the
+ * Windows build in favour of lang/bridge_stub.c.
+ *
+ * What the rest of the tree *did* ride in on this header was the `sbuf` string
+ * buffer (it came in through agenthttpd.h -> tools.h -> minijson.h): lang/
+ * value.c includes only this header yet builds sbuf values for JSON encoding.
+ * So Windows includes lang/sbuf.h instead — the same struct with the same
+ * always-NUL-terminated + sticky-oom contract, just inlined. Both spellings
+ * define the identical type, so a translation unit sees one definition either
+ * way (minijson.h and sbuf.h share an include guard name check by name only —
+ * they are mutually exclusive here by construction). */
+#ifdef _WIN32
+#include "sbuf.h"
+#else
 #include "agenthttpd.h"
+#endif
 
 /* ===================== tokens ===================== */
 

@@ -1,6 +1,8 @@
 #include "lume.h"
 #include "builtins.h"
+#ifndef _WIN32
 #include "minijson.h"
+#endif
 #include <math.h>
 #include <stdarg.h>
 

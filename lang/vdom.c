@@ -4,7 +4,13 @@
  * (see the block comment in native_html for slot rules). */
 
 #include "builtins.h"
+#ifndef _WIN32
+/* The SSR serializer below uses only the sbuf buffer half (sb_mem/sb_str/
+ * sb_chr), which lang/lume.h already pulls in as sbuf.h on Windows — this
+ * direct minijson.h include would drag agent-httpd's header set into a build
+ * that links no agent-httpd. */
 #include "minijson.h"
+#endif
 
 /* ---------- Virtual DOM: el(tag, props, ...children) / render(vnode)
  * (reconstructed) ----------
