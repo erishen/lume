@@ -45,10 +45,25 @@ static void vm_after_request(VM *vm) {
  * request may instead be riding a session cookie, so fall through to
  * auth_session_verify for that identity. Decoding from the per-request
  * HttpRequest (not a process global) keeps this correct under the prefork
- * worker pool. g_auth_file (set once at startup) gates it. */
+ * worker pool. g_auth_file (set once at startup) gates it.
+ *
+ * 优先级：**session cookie 在前，Basic 只作兜底**。浏览器按 (origin, realm) 缓存
+ * Basic 凭据，并在之后每个请求上自动重发，用户自己无从察觉也清不掉。实测踩过：
+ * 同一 origin 先登 admin、再用 /login 表单登 viewer，浏览器仍在发
+ * Authorization: Basic admin:...，这里的 Basic 分支先命中，viewer 的会话被判成
+ * admin —— 界面永远显示 admin、Tab 永远 4 个，怎么登都切不过来；而服务端日志里
+ * /login 明明签发了 viewer 的 token。显式 Set-Cookie 刚签发的 session 才是当下
+ * 最新的意图，ambient 的 Basic 凭据不该压过它。 */
 static int auth_username(const HttpRequest *req, char *buf, size_t buf_size) {
     /* g_auth_file via agenthttpd.h/httpd.h (included by lumi.h) */
     if (!g_auth_file[0]) return 0;
+    /* 1) session cookie 优先。cookie 无效/过期时返回 0，继续走 Basic 兜底，
+     *    所以 Basic-only 部署与「死 cookie + 有效 Basic」的组合都不受影响。 */
+    if (req->cookie[0] && auth_session_verify(req->cookie, buf, buf_size)) {
+        return 1;
+    }
+    /* 2) Basic 兜底：没有 cookie，或 cookie 已失效。门（event.c/http.c）已经
+     *    校验过 Basic 载荷能对上 htpasswd，所以解出来的用户名可直接采信。 */
     const char *ah = req->authorization;
     if (ah && strncasecmp(ah, "Basic ", 6) == 0) {
         char creds[512];
@@ -60,13 +75,7 @@ static int auth_username(const HttpRequest *req, char *buf, size_t buf_size) {
         snprintf(buf, buf_size, "%s", creds);
         return 1;
     }
-    /* No Basic header: the gate may have admitted this request on a session
-     * cookie. The gate verified the token but never propagated the identity,
-     * so req.user stayed null and the whole role layer (is_admin,
-     * set_own_password) rejected form-login users with 401/403. Re-verify to
-     * recover the username; an absent/expired cookie returns 0 and the request
-     * stays anonymous rather than guessing a principal. */
-    return auth_session_verify(req->cookie, buf, buf_size);
+    return 0;
 }
 
 static Value request_to_value(VM *vm, const HttpRequest *req, const char *label) {
