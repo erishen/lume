@@ -81,10 +81,16 @@ typedef enum {
 
 typedef struct {
     TokenType type;
-    const char *start;   /* into the source buffer (never freed) */
+    const char *start;/* into the source buffer (never freed) */
     int length;
     size_t line;
-    double num;          /* TOK_NUMBER */
+    double num;          /* TOK_NUMBER, valid when is_int == 0 */
+    long long inum;      /* TOK_NUMBER, valid when is_int == 1 (see docs/SPEC.md) */
+    int is_int;/* TOK_NUMBER: literal had no '.', 'e' or 'E' */
+    int neg_min;         /* TOK_NUMBER: magnitude was 2^63, so it only becomes a
+                          * value as the operand of a unary minus
+                          * (`-9223372036854775808` == LLONG_MIN). inum holds
+                          * the clamped LLONG_MAX until the parser negates it. */
 } Token;
 
 const char *token_type_name(TokenType t);
@@ -115,6 +121,12 @@ typedef struct Type {
     int count;
     int cap;
     Type *ret;              /* TY_FUNC return type */
+    struct Node *func;      /* TY_FUNC only: the node (N_FUNC_LIT or
+                             * N_FUNC_DECL) this function type was spelled from.
+                             * The native backends thread a closure's lambda
+                             * node through here so a closure-variable call can
+                             * recover the lambda's own param/ret types. NULL
+                             * for a plain `func` name reference. */
     /* lume-core增量: type_release_all() 的回收链(core src/lume.h)。
      * host 自持这份 lume.h, 升级 core 时要手工合 —— 见 lang/PIN `host_owned`。 */
     struct Type *tnext;
@@ -138,8 +150,14 @@ bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
 
 /* ===================== values / objects / GC ===================== */
 
+/* VAL_INT vs VAL_FLOAT mirror TY_INT / TY_FLOAT: `int` is a 64-bit two's
+ * complement integer and `float` is an IEEE double (docs/SPEC.md). They used to
+ * share one VAL_NUM double, which quietly rounded every int past 2^53 and made
+ * the interpreter disagree with both native backends. IS_NUM/AS_NUM still
+ * accept either kind so the ~70 numeric call sites do not all have to care;
+ * new code that needs to tell them apart should use IS_INT/IS_FLOAT. */
 typedef enum {
-    VAL_NULL, VAL_BOOL, VAL_NUM, VAL_OBJ
+    VAL_NULL, VAL_BOOL, VAL_INT, VAL_FLOAT, VAL_OBJ
 } ValType;
 
 typedef struct Value Value;
@@ -216,27 +234,38 @@ struct Value {
     ValType type;
     union {
         bool b;
-        double n;
+        long long i;/* VAL_INT */
+        double n;      /* VAL_FLOAT */
         Obj *o;
     } as;
 };
 
+/* AS_NUM widens an int to double. It is lossy past 2^53 by construction, so
+ * anything that must stay exact (integer arithmetic, printing, int keys) has
+ * to use AS_INT instead. */
 #define AS_BOOL(v) ((v).as.b)
-#define AS_NUM(v)  ((v).as.n)
+#define AS_INT(v)  ((v).as.i)
+#define AS_NUM(v)  ((v).type == VAL_INT ? (double)(v).as.i : (v).as.n)
 #define AS_OBJ(v)  ((v).as.o)
 
 #define IS_NULL(v)  ((v).type == VAL_NULL)
 #define IS_BOOL(v)  ((v).type == VAL_BOOL)
-#define IS_NUM(v)   ((v).type == VAL_NUM)
+#define IS_INT(v)   ((v).type == VAL_INT)
+#define IS_FLOAT(v) ((v).type == VAL_FLOAT)
+/* "Is a number of either kind" — the test the ~70 numeric call sites want. */
+#define IS_NUM(v)   ((v).type == VAL_INT || (v).type == VAL_FLOAT)
 #define IS_OBJ(v)   ((v).type == VAL_OBJ)
 
 static inline Value val_bool(bool b)  { Value v = {VAL_BOOL, {.b = b}}; return v; }
-static inline Value val_null(void)    { Value v = {VAL_NULL, {.n = 0}}; return v; }
-static inline Value val_num(double n) { Value v = {VAL_NUM, {.n = n}};  return v; }
+static inline Value val_null(void)    { Value v = {VAL_NULL, {.i = 0}}; return v; }
+static inline Value val_float(double n) { Value v = {VAL_FLOAT, {.n = n}}; return v; }
+static inline Value val_int(long long i) { Value v = {VAL_INT, {.i = i}};  return v; }
 static inline Value val_obj(Obj *o)   { Value v = {VAL_OBJ, {.o = o}};  return v; }
 
-/* Marshal an integer without FP rounding surprises (transfer doubles). */
-static inline Value val_int(long long i) { return val_num((double)i); }
+/* Kept as the widening constructor for the many call sites that genuinely
+ * mean "a number, precision already decided" (math builtins, str() of a
+ * float, ...). Code that means int must call val_int. */
+static inline Value val_num(double n) { return val_float(n); }
 
 enum ObjKind { OBJK_STRING, OBJK_MAP, OBJK_LIST, OBJK_FUNC, OBJK_NATIVE };
 
@@ -404,7 +433,7 @@ typedef enum {
     N_SERVER, N_ROUTE, N_TOOL, N_VERBS, N_FUNC_DECL, N_TYPE_DECL,
     N_VAR, N_ASSIGN, N_ASSIGN_MEMBER,
     N_LITERAL, N_MAP_LIT, N_LIST_LIT, N_FUNC_LIT,
-    N_CALL, N_MEMBER,
+    N_CALL, N_MEMBER, N_INDEX,
     N_UNARY, N_BINARY,
     N_IMPORT   /* `import "path" as ns;` — top-level only */
 } NodeType;
@@ -460,15 +489,34 @@ typedef struct Node {
          * claim from when it borrowed into the source buffer, and it forced
          * that free() site to lie with a cast. The other kinds leave it
          * unset; every reader is gated on `kind`. */
-        struct { LitKind kind; double num; char *text; int len;
-                 bool is_float; } lit; /* is_float: LIT_NUM came from `1.5` */
+        /* LIT_NUM: `inum` is the value when is_float == 0 (int is i64 — see
+         * docs/SPEC.md); `num` is the value when is_float == 1. Both are kept
+         * because the float-widening paths and --dump still want a double, and
+         * casting a >2^53 int through `num` is the precision loss this
+         * i64 field exists to avoid. */
+        struct { LitKind kind; double num; long long inum; char *text; int len;
+                 bool is_float;
+                 bool neg_min; /* magnitude was 2^63; only a unary minus may
+                                 * consume it, and parse_unary clears this
+                                 * when it does. Still set at type-check time
+                                 * means the source had no such minus. */
+               } lit; /* is_float: LIT_NUM came from `1.5` */
         struct { char **keys; struct Node **vals; int count; } map;
         struct { struct Node **items; int count; } list;
         struct { char **names; Type **param_types; Type *ret; int arity;
-                 struct Node *body; } funclit;
+                 struct Node *body;
+                 char *cname; /* synthetic mangled name for the closure's
+                               * emitted `define`, assigned by the signature
+                               * pass; NULL until then */
+               } funclit;
         struct { struct Node *callee; struct Node **args; int argc;
                  bool propagate; } call; /* propagate: trailing `?` */
         struct { struct Node *obj; char *name; struct Type *type; } member;
+        /* `m["k"]` / `l[0]`: `obj[index]`. Kept apart from `member` rather
+         * than folded into it because the key is an arbitrary expression, not
+         * an identifier -- a runtime value that has to be evaluated, and whose
+         * type decides which accessor reads it. */
+        struct { struct Node *obj; struct Node *index; } index;
         struct { Op op; struct Node *operand; } unary;
         struct { Op op; struct Node *left, *right; } binary;
         /* import: path is the raw string literal from the source (resolved

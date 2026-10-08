@@ -14,6 +14,7 @@
 
 static void exec_statement(VM *vm, Node *n, Env *env);
 static void exec_block_walk(VM *vm, Node *block, Env *env);
+static void eval_expr_index(VM *vm, Node *n, Env *env);
 
 /* ---------- VM plumbing ---------- */
 
@@ -189,7 +190,13 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
     switch (n->type) {
         case N_LITERAL: {
             switch (n->as.lit.kind) {
-                case LIT_NUM:  vm_push(vm, val_num(n->as.lit.num)); return;
+                case LIT_NUM:
+                    /* Integers keep their i64 (docs/SPEC.md); only float literals take
+                     * the double slot. Pushing both through val_num() is what used to
+                     * round every int past 2^53. */
+                    if (n->as.lit.is_float) vm_push(vm, val_float(n->as.lit.num));
+                    else                   vm_push(vm, val_int(n->as.lit.inum));
+                    return;
                 case LIT_TRUE: vm_push(vm, val_bool(true)); return;
                 case LIT_FALSE: vm_push(vm, val_bool(false)); return;
                 case LIT_NULL: vm_push(vm, val_null()); return;
@@ -272,6 +279,9 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
             vm_push(vm, f);
             return;
         }
+        case N_INDEX:
+            eval_expr_index(vm, n, env);
+            return;
         case N_MEMBER: {
             eval_expr(vm, n->as.member.obj, env);
             if (vm->error) return;
@@ -355,7 +365,12 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
                 vm_push(vm, val_bool(!value_truthy(v)));
             } else { /* OP_NEG */
                 if (!IS_NUM(v)) { vm_set_error(vm, "cannot negate a non-number"); return; }
-                vm_push(vm, val_num(-AS_NUM(v)));
+                /* Keep int an int. val_num(-AS_NUM(v)) widened every negation
+                 * to float, so `let a = -7; a % 3` was rejected with "'%' does
+                 * not apply to floats" — the type checker calls `-7` an int, so
+                 * the runtime disagreed with it. Negate in i64 for int. */
+                if (IS_INT(v)) vm_push(vm, val_int(-AS_INT(v)));
+                else          vm_push(vm, val_float(-AS_NUM(v)));
             }
             return;
         }
@@ -413,18 +428,56 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
                 vm_set_error(vm, "line %zu: operator needs numbers", n->line);
                 return;
             }
+            /* int op int is i64 arithmetic, wrapping like the native backends'
+             * unadorned `add i64` (docs/SPEC.md §integers). Everything else promotes
+             * to double. This must not be reordered into a single double path: doing
+             * so is what made `m + 1` saturate in the interpreter while the native
+             * backends wrapped, i.e. the same program meant two different numbers.
+             * `/` and `%` promote even for two ints, because `/` is documented as
+             * floating-point division (7 / 2 == 3.5) and codegen widens to match. */
+            if (IS_INT(l) && IS_INT(r) &&
+                n->as.binary.op != OP_DIV && n->as.binary.op != OP_MOD) {
+                long long a = AS_INT(l), b = AS_INT(r);
+                switch (n->as.binary.op) {
+                    case OP_ADD: vm_push(vm, val_int((long long)((unsigned long long)a + (unsigned long long)b))); return;
+                    case OP_SUB: vm_push(vm, val_int((long long)((unsigned long long)a - (unsigned long long)b))); return;
+                    case OP_MUL: vm_push(vm, val_int((long long)((unsigned long long)a * (unsigned long long)b))); return;
+                    case OP_LT:  vm_push(vm, val_bool(a <  b)); return;
+                    case OP_LE:  vm_push(vm, val_bool(a <= b)); return;
+                    case OP_GT:  vm_push(vm, val_bool(a >  b)); return;
+                    case OP_GE:  vm_push(vm, val_bool(a >= b)); return;
+                    default: vm_push(vm, val_null()); return;
+                }
+            }
             double a = AS_NUM(l), b = AS_NUM(r);
             switch (n->as.binary.op) {
-                case OP_ADD: vm_push(vm, val_num(a + b)); return;
-                case OP_SUB: vm_push(vm, val_num(a - b)); return;
-                case OP_MUL: vm_push(vm, val_num(a * b)); return;
+                case OP_ADD: vm_push(vm, val_float(a + b)); return;
+                case OP_SUB: vm_push(vm, val_float(a - b)); return;
+                case OP_MUL: vm_push(vm, val_float(a * b)); return;
                 case OP_DIV:
                     if (b == 0) { vm_set_error(vm, "division by zero"); return; }
-                    vm_push(vm, val_num(a / b));
+                    vm_push(vm, val_float(a / b));
                     return;
                 case OP_MOD:
                     if (b == 0) { vm_set_error(vm, "modulo by zero"); return; }
-                    vm_push(vm, val_num(fmod(a, b)));
+                    /* Integer modulo stays integer (and keeps C's sign convention:
+                     * the result takes the dividend's sign) so that `n % 2` on a large
+                     * int is not routed through fmod's double. Computed from AS_INT,
+                     * not the widened a/b — a % b on doubles would be UB for values
+                     * that are not exactly representable.
+                     *
+                     * Both emitters reject `%` on floats outright
+                     * ("'%' does not apply to floats", codegen_expr.c / llvm_codegen.c),
+                     * so the interpreter must refuse it too rather than answer with
+                     * fmod: the three have to agree byte-for-byte (docs/SPEC.md §6). */
+                    if (IS_INT(l) && IS_INT(r)) {
+                        long long ia = AS_INT(l), ib = AS_INT(r);
+                        vm_push(vm, val_int(ia % ib));
+                    } else {
+                        vm_set_error(vm, "line %zu: '%%' does not apply to floats",
+                                     n->line);
+                        return;
+                    }
                     return;
                 case OP_LT: vm_push(vm, val_bool(a < b)); return;
                 case OP_LE: vm_push(vm, val_bool(a <= b)); return;
@@ -481,6 +534,64 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
             vm_set_error(vm, "line %zu: internal error (expr node %d)", n->line, (int)n->type);
             return;
     }
+}
+
+/* `m["k"]` / `l[0]`. The index expression is evaluated first and left on the
+ * stack, then the container, so this reads like the two-argument `get()` it
+ * replaces -- but strictly: a missing key or an out-of-range index is an
+ * error, where `get()` returns null and `el()` takes a default. The strictness
+ * is the point of having the syntax (SPEC 6.2).
+ *
+ * A negative index counts from the end, so `l[-1]` is the last element. That
+ * is resolved here, once, rather than in every accessor the two native backends
+ * end up calling -- they normalise the same way. */
+static void eval_expr_index(VM *vm, Node *n, Env *env) {
+    eval_expr(vm, n->as.index.index, env);
+    if (vm->error) return;
+    eval_expr(vm, n->as.index.obj, env);
+    if (vm->error) return;
+
+    Value objv = vm_pop(vm);      /* container */
+    Value ixv  = vm_pop(vm);      /* index */
+    Value out  = val_null();
+
+    if (!IS_OBJ(objv)) {
+        vm_set_error(vm, "cannot index into a non-container value");
+        return;
+    }
+    Obj *o = AS_OBJ(objv);
+
+    if (o->type == OBJ_MAP) {
+        if (!IS_OBJ(ixv) || AS_OBJ(ixv)->type != OBJ_STRING) {
+            vm_set_error(vm, "a map key must be a string");
+            return;
+        }
+        const char *key = obj_string(AS_OBJ(ixv));
+        int found = 0;
+        Value v = map_get(vm, o, key, &found);
+        if (!found) {
+            vm_set_error(vm, "map has no key '%s'", key);
+            return;
+        }
+        out = v;
+    } else if (o->type == OBJ_LIST) {
+        if (!IS_NUM(ixv)) {
+            vm_set_error(vm, "a list index must be an int");
+            return;
+        }
+        long i = (long)AS_NUM(ixv);
+        if (i < 0) i += o->as.list.count;   /* -1 is the last element */
+        if (i < 0 || i >= o->as.list.count) {
+            vm_set_error(vm, "list index %ld out of range (length %d)",
+                         (long)AS_NUM(ixv), o->as.list.count);
+            return;
+        }
+        out = o->as.list.items[i];
+    } else {
+        vm_set_error(vm, "cannot index into this value");
+        return;
+    }
+    vm_push(vm, out);
 }
 
 /* ---------- statements ---------- */

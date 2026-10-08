@@ -1,25 +1,18 @@
-/* Windows stand-in for the host tree's lang/bridge.c.
+/* Fork-local stand-in for the host tree's src/bridge.c.
  *
- * bridge.c is the host's agent-httpd embedding layer: it translates the DSL's
- * `route {}` / `tool {}` / `server {}` constructs into agenthttpd_route() /
- * agenthttpd_tool() / agenthttpd_run() and wires HttpRequest into DSL values.
- * agent-httpd has no Windows support (its 30 .c files are POSIX socket code
- * with zero _WIN32 guards), and lume's bin/lume links libagenthttpd.a
- * directly, so on Windows this file replaces bridge.c and the static library
- * is left out of the link entirely. See the Makefile's $(IS_WINDOWS) branch.
+ * In work/research/lume, bridge_define_route()/bridge_define_tool() push the
+ * DSL's `route {}` / `tool {}` registrations into agenthttpd's routing and
+ * tool tables, and bridge_run() starts the agent-httpd server. This tree has
+ * no agent-httpd, so:
  *
- * What still works, and is deliberately not faked:
- *
- *   - bridge_define_route() / bridge_define_tool() record into the VM's own
- *     tables (RouteRec routes[] / ToolRec tool_records[] already exist and
- *     hold the handler as a GC root). `route {}` / `tool {}` keep meaning
- *     "register" — they just no longer mean "reachable from an HTTP request",
- *     because this build has no server to serve them.
- *   - bridge_run() refuses loudly. The `run` builtin calls it; a binary that
- *     silently "succeeds" at starting a server it does not have is worse than
- *     one that says no, so this exits non-zero.
- *
- * Signatures must match lang/lume.h's bridge_* declarations exactly.
+ *   - route/tool registration is recorded into the VM's own tables (they
+ *     already exist in VM: RouteRec routes[] / ToolRec tool_records[] hold
+ *     the handler as a GC root, exactly as they do in the host). Recording is
+ *     the honest thing — `route {}` / `tool {}` keep meaning "register", they
+ *     no longer mean "reachable from an HTTP request", because there is no
+ *     server in this build to serve them.
+ *   - bridge_run() serves routes with the in-tree minimal HTTP server in
+ *     bridge_serve.c (POSIX + winsock via net_compat).
  */
 
 #include "lume.h"
@@ -29,10 +22,10 @@
 
 void bridge_init(VM *vm)
 {
-    /* The host bound a file-static VM pointer here because agenthttpd's C
-     * callbacks had no per-call VM. Everything below takes vm explicitly and
-     * there is no callback table to keep in sync, so there is nothing to do. */
     (void)vm;
+    /* The host bound a file-static VM pointer here because agenthttpd's C
+     * callbacks had no per-call VM. The recording functions below are called
+     * with vm explicitly, and there is no callback table to keep in sync. */
 }
 
 int bridge_define_route(VM *vm, const char *method, const char *path,
@@ -72,12 +65,4 @@ int bridge_define_tool(VM *vm, const char *name, const char *desc,
     return 0;
 }
 
-void bridge_run(VM *vm)
-{
-    (void)vm;
-    fprintf(stderr,
-            "lume: run() needs the agent-httpd host build, which is POSIX-only.\n"
-            "      This Windows build registers routes and tools but serves\n"
-            "      nothing. Use --check / --dump, or run the script directly.\n");
-    exit(2);
-}
+/* bridge_run() is implemented in bridge_serve.c (in-tree HTTP server). */

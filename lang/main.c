@@ -28,6 +28,9 @@ static void usage(const char *prog) {
             "  --watch   dev hot reload: validate + restart the server child on\n"
             "            every edit of <script.lume> (SIGUSR1 = force reload);\n"
             "            invalid edits keep the old server running\n"
+            "  --no-fs   runtime filesystem lock: read_file/write_file/files/\n"
+            "            mkdir/lock_file fail at runtime instead of touching\n"
+            "            the disk (also settable as LUME_NO_FS=1)\n"
             "  --no-net  runtime network lock: http_get() fails instead of\n"
             "            opening a socket (also settable as LUME_NO_NET=1)\n"
             "\n"
@@ -321,6 +324,7 @@ int main(int argc, char **argv) {
     bool do_dump = false;
     bool do_watch = false;
     bool no_net = false;
+    bool no_fs = false;
     const char *script = NULL;
 
     for (int i = 1; i < argc; i++) {
@@ -328,12 +332,23 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--dump") == 0) do_dump = true;
         else if (strcmp(argv[i], "--watch") == 0) do_watch = true;
         else if (strcmp(argv[i], "--no-net") == 0) no_net = true;
+        else if (strcmp(argv[i], "--no-fs") == 0) no_fs = true;
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(argv[0]);
             return 0;
         }
         else if (argv[i][0] != '-') script = argv[i];
         else { usage(argv[0]); return 2; }
+    }
+    /* LUME_NO_FS is the same switch as --no-fs, so a supervisor can lock the
+     * language down without rewriting the argv it execs. Anything but the
+     * documented "off" spellings counts as on, which errs towards locking. */
+    {
+        const char *no_fs_env = getenv("LUME_NO_FS");
+        if (no_fs_env && no_fs_env[0] && strcmp(no_fs_env, "0") != 0 &&
+            strcmp(no_fs_env, "off") != 0 && strcmp(no_fs_env, "false") != 0) {
+            no_fs = true;
+        }
     }
     /* LUME_NO_NET is the same switch as --no-net, so a supervisor can lock the
      * outbound side without editing argv (empty value counts as unset). */
@@ -373,6 +388,7 @@ int main(int argc, char **argv) {
     VM vm;
     vm_init(&vm);
     vm.no_net = no_net;
+    vm.no_fs = no_fs;
     bridge_init(&vm);
 
     /* Multi-file import/export: the loader parses + type-checks the entry

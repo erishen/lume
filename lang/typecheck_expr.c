@@ -41,6 +41,15 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
         case N_LITERAL:
             switch (n->as.lit.kind) {
                 case LIT_NUM:
+                    /* neg_min still set here means the 2^63 magnitude reached
+                     * the checker without a unary minus in front of it, so
+                     * nothing ever supplied the negation and no i64 can hold
+                     * the value. parse_unary clears the flag when the minus
+                     * is there. */
+                    if (n->as.lit.neg_min)
+                        ck_fail(c, n->line,
+                                "integer literal 9223372036854775808 does not fit in int "
+                                "(i64); write -9223372036854775808 for the minimum");
                     return n->as.lit.is_float ? type_prim(TY_FLOAT)
                                               : type_prim(TY_INT);
                 case LIT_STR:  return type_prim(TY_STRING);
@@ -64,8 +73,15 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
             if (n->as.map.count == 1 &&
                 (strcmp(n->as.map.keys[0], "ok") == 0 ||
                  strcmp(n->as.map.keys[0], "err") == 0)) {
-                ck_expr(c, n->as.map.vals[0], NULL);
-                return type_result();
+                Type *payload = ck_expr(c, n->as.map.vals[0], NULL);
+                Type *rt = type_result();
+                /* Only the `ok` half is the payload `?` unwraps. An `err`
+                 * literal says nothing about it, and a function that only ever
+                 * fails leaves it unknown -- which the emitters report rather
+                 * than guess. */
+                if (strcmp(n->as.map.keys[0], "ok") == 0)
+                    record_ok_payload(c, rt, payload, n->line);
+                return rt;
             }
             /* duplicate keys are almost certainly a bug */
             for (int i = 0; i < n->as.map.count; i++)
@@ -187,6 +203,47 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
             return any_type();
         }
 
+        case N_INDEX: {
+            /* `m["k"]` / `l[0]`. The container decides which accessor reads
+             * it, so the index type is checked against the container and the
+             * result type comes back from the element. Both cases are strict:
+             * a missing key or an out-of-range index is a runtime error, not a
+             * silent null -- see SPEC 6.2. */
+            Type *ot = resolve(c, ck_expr(c, n->as.index.obj, NULL), n->line);
+            if (ot->kind == TY_ANY) { ck_expr(c, n->as.index.index, NULL); return any_type(); }
+
+            if (ot->kind == TY_LIST) {
+                /* The index has to be an int: `l["x"]` is a type error, not a
+                 * runtime one, so it cannot reach the accessor. */
+                Type *it = ck_expr(c, n->as.index.index, NULL);
+                it = resolve(c, it, n->line);
+                if (it->kind != TY_ANY && it->kind != TY_INT)
+                    ck_fail(c, n->line, "a list index must be an int, got '%s'",
+                            ty_str(it));
+                /* A negative literal is allowed (it counts from the end), so
+                 * the sign is not checked here -- rt.c normalises it. Any int
+                 * expression is accepted; whether the value is in range is a
+                 * runtime question, exactly as for `el`. */
+                return ot->elem && ot->elem->kind != TY_ANY ? ot->elem : any_type();
+            }
+            if (ot->kind == TY_STRUCT && !ot->name) {
+                /* A runtime map: the key must be a string, since that is what
+                 * `get` takes. */
+                Type *kt = ck_expr(c, n->as.index.index, NULL);
+                kt = resolve(c, kt, n->line);
+                if (kt->kind != TY_ANY && kt->kind != TY_STRING)
+                    ck_fail(c, n->line, "a map key must be a string, got '%s'",
+                            ty_str(kt));
+                /* The value type is not knowable from the literal -- a map's
+                 * values are whatever was put in -- so any() it is. */
+                return any_type();
+            }
+            ck_expr(c, n->as.index.index, NULL);
+            ck_fail(c, n->line, "cannot index into a value of type '%s'",
+                    ty_str(ot));
+            return any_type();
+        }
+
         case N_UNARY:
             if (n->as.unary.op == OP_NOT) {
                 Type *ot = ck_expr(c, n->as.unary.operand, NULL);
@@ -292,7 +349,16 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
                     c->cur_ret->kind != TY_ANY)
                     ck_fail(c, n->line,
                             "'?' needs the enclosing function to return Result");
-                return any_type(); /* payload type is unknown without generics */
+                /* The payload is whatever the callee's own `return { ok: X }`
+                 * statements said, recorded onto its declared Result type by
+                 * record_ok_payload(). Two passes over the function bodies run
+                 * before this one, so a `?` on a function defined further down
+                 * reads the same payload. `elem` is NULL when the callee only
+                 * ever returns `err` -- nothing to unwrap, so there is no type
+                 * to hand the emitters and they refuse to compile the call.
+                 * That used to be every `?`, which is why the emitters could
+                 * not support the operator at all. */
+                return (src && src->elem) ? src->elem : any_type();
             }
             return ret;
         }

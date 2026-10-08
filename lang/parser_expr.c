@@ -4,6 +4,7 @@
  * and/or)仅本文件内部使用。 */
 
 #include "parser_internal.h"
+#include <limits.h>
 
 static Node *parse_primary(Parser *p) {
     Token t = peek(p);
@@ -12,12 +13,14 @@ static Node *parse_primary(Parser *p) {
         advance(p);
         Node *n = nalloc(N_LITERAL, t.line);
         n->as.lit.kind = LIT_NUM;
+        /* The lexer already classified the literal (it had to, to pick
+         * strtoll over strtod) and carries the i64 value intact, so this no
+         * longer re-derives floatness from the text nor squeezes the integer
+         * through a double. */
+        n->as.lit.is_float = t.is_int == 0;
+        n->as.lit.inum = t.inum;
         n->as.lit.num = t.num;
-        bool is_float = false;
-        for (int i = 0; i < t.length && !is_float; i++)
-            if (t.start[i] == '.' || t.start[i] == 'e' || t.start[i] == 'E')
-                is_float = true;
-        n->as.lit.is_float = is_float;
+        n->as.lit.neg_min = t.neg_min;
         return n;
     }
     if (t.type == TOK_STRING) {
@@ -211,6 +214,20 @@ static Node *parse_postfix(Parser *p) {
             member->as.member.obj = n;
             member->as.member.name = ident_name(p, f);
             n = member;
+        } else if (check(p, TOK_LBRACKET)) {
+            /* `m["k"]` / `l[0]`. A postfix loop rather than part of parse_primary
+             * so it chains: `m["a"][0]`, `rows[i]["name"]`. The index is a full
+             * expression, not a literal, because the key is usually a variable
+             * and `m[k]` is the case worth having. */
+            Token br = peek(p);
+            advance(p);
+            Node *ix = parse_expression(p);
+            if (!ix) return NULL;
+            if (!expect(p, TOK_RBRACKET)) return NULL;
+            Node *index = nalloc(N_INDEX, br.line);
+            index->as.index.obj = n;
+            index->as.index.index = ix;
+            n = index;
         } else {
             break;
         }
@@ -227,6 +244,31 @@ static Node *parse_unary(Parser *p) {
         Node *n = nalloc(N_UNARY, t.line);
         n->as.unary.op = (t.type == TOK_NOT) ? OP_NOT : OP_NEG;
         n->as.unary.operand = operand;
+        /* `-9223372036854775808` is the one literal whose magnitude overflows
+         * i64: the lexer kept the clamped 2^63 and flagged it, and this is the
+         * only place that can supply the missing negation. Fold it here so the
+         * AST holds LLONG_MIN exactly, and drop the OP_NEG wrapper since the
+         * value is already correct — leaving it in would negate twice.
+         *
+         * The shell has to be freed before returning: it came from nalloc, so
+         * it is on the orphan journal, and it never becomes part of the tree
+         * (nothing holds a pointer to it) — returning it without releasing
+         * stranded exactly one node per run, which is what LeakSanitizer
+         * reported on Linux CI (80 bytes, one object, constant regardless of
+         * how many statements the script had). Released the way this file
+         * releases every other discarded shell: unjournal, then free. A plain
+         * free rather than node_free_own() because an N_UNARY carries no
+         * owned arrays — only `operand`, which stays untouched and is the node
+         * being returned. */
+        if (n->as.unary.op == OP_NEG && operand->type == N_LITERAL &&
+            operand->as.lit.kind == LIT_NUM && operand->as.lit.neg_min) {
+            node_unjournal(n);
+            free(n);
+            operand->as.lit.inum = LLONG_MIN;
+            operand->as.lit.num = (double)LLONG_MIN;
+            operand->as.lit.neg_min = 0;
+            return operand;
+        }
         return n;
     }
     return parse_postfix(p);
