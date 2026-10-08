@@ -471,7 +471,7 @@ static const char *proxy_for(int https) {
 }
 
 /* 连上(必要时先开 CONNECT 隧道)。返回 0 成功,1 = 需要 libssl,-1 = 连不上。 */
-static int open_conn(Url *u, const char *proxy, Conn *c, long deadline) {
+static int open_conn_impl(Url *u, const char *proxy, Conn *c, long deadline) {
     c->fd = -1;
     c->ssl = NULL;
 
@@ -585,6 +585,22 @@ static int open_conn(Url *u, const char *proxy, Conn *c, long deadline) {
         }
     }
     return 0;
+}
+
+/* 代理失败时自动回退直连。代理进程挂了、节点失效、CONNECT 被 RST 等
+ * 场景下,http_get/put/delete 不再干等满超时才报错——先直连重试一次。
+ * 直连本身不稳时保留直连的错误(比代理原因更贴近实际)。 */
+static int open_conn(Url *u, const char *proxy, Conn *c, long deadline) {
+    if (!proxy || !proxy[0]) return open_conn_impl(u, NULL, c, deadline);
+    int r = open_conn_impl(u, proxy, c, deadline);
+    if (r == 0 || r == 1) return r; /* 成功;1 = 缺 libssl,直连也无意义 */
+    char why_bak[256];
+    snprintf(why_bak, sizeof why_bak, "%s", c->why[0] ? c->why : "proxy connect failed");
+    conn_close(c);
+    HTTP_DBG("http: proxy failed (%s), retrying direct\n", why_bak);
+    if (open_conn_impl(u, NULL, c, deadline) == 0) return 0;
+    snprintf(c->why, sizeof c->why, "proxy (%s) then direct failed", why_bak);
+    return -1;
 }
 
 /* ---- 请求报文 ---- */
