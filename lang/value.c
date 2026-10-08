@@ -86,6 +86,8 @@ void gc_collect(VM *vm) {
     if (vm->globals) mark_obj((Obj *)vm->globals);
     for (Env *e = vm->active_envs; e; e = e->next_active) mark_obj((Obj *)e);
     if (vm->server_config) mark_obj(vm->server_config);
+    if (vm->argv) mark_obj(vm->argv);       /* CLI script args (see VM.argv) */
+    if (vm->session_table) mark_obj(vm->session_table); /* serve() sessions */
     mark_value(vm->default_handler);
     for (int i = 0; i < vm->route_count; i++)
         mark_value(vm->routes[i].handler);
@@ -581,11 +583,27 @@ static void json_value(VM *vm, JsonState *st) {
     }
 
     if (c == '-' || (c >= '0' && c <= '9')) {
+        /* JSON integers (no '.', 'e', 'E') decode as VAL_INT: the `int`
+         * MCP schema matches, and 64-bit precision survives. Anything with
+         * a fraction or exponent is a float (strtod). */
+        const char *q = st->p;
+        int is_int = 1;
+        if (*q == '-') q++;
+        if (*q == '-') is_int = 0;   /* "--" is malformed, not a number */
+        while (*q >= '0' && *q <= '9') q++;
+        if (*q == '.' || *q == 'e' || *q == 'E') is_int = 0;
         char *end = NULL;
-        double d = strtod(st->p, &end);
-        if (end == st->p) { snprintf(st->err, sizeof(st->err), "bad number"); return; }
-        st->p = end;
-        vm_push(vm, val_num(d));
+        if (is_int) {
+            long long iv = strtoll(st->p, &end, 10);
+            if (end == st->p) { snprintf(st->err, sizeof(st->err), "bad number"); return; }
+            st->p = end;
+            vm_push(vm, val_int(iv));
+        } else {
+            double d = strtod(st->p, &end);
+            if (end == st->p) { snprintf(st->err, sizeof(st->err), "bad number"); return; }
+            st->p = end;
+            vm_push(vm, val_num(d));
+        }
         return;
     }
 
