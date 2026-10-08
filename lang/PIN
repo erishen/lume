@@ -10,7 +10,7 @@
 # The core-specific files (codegen*/backend*/llvm_codegen*/rt.c) are
 # not copied at all - lume has no native backend, agent-httpd owns it.
 core_dir: ../lume-core
-sha: a8ec3b96638ef38fd555f77053876b388a754aef
-version: v0.1.0-12-ga8ec3b9
-synced_at: 2026-10-06 17:29:25
+sha: 9d961bac73cafece877a4929921a60b6e15ad11e
+version: v0.3.0-24-g9d961ba
+synced_at: 2026-10-08 14:59:52
 host_owned: builtins.c builtins.h builtins_catalog.c builtins_fs.c builtins_http.c builtins_internal.h interp.c lume.h main.c typecheck.c typecheck_expr.c typecheck_stmt.c vdom.c

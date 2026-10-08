@@ -1,5 +1,4 @@
-/* Windows (mingw-w64) implementations of the lume_mkdir / lume_flock /
- * lume_realpath shims.
+/* Windows (mingw-w64) implementations of the lume_mkdir / lume_flock shims.
  *
  * Kept in a separate translation unit on purpose: this file #includes
  * <windows.h>, which (via winnt.h) also defines a TokenType enumerator. The
@@ -19,8 +18,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <io.h>
-#include <limits.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <windows.h>
@@ -48,20 +45,6 @@ int lume_flock(int fd, int op) {
     if ((op & LOCK_NB) && GetLastError() == ERROR_LOCK_VIOLATION)
         errno = EAGAIN;
     return -1;
-}
-
-/* mingw-w64 does not ship POSIX realpath(3). _fullpath is the CRT equivalent:
- * it resolves to an absolute path and collapses "a/../b", which is all the
- * loader uses it for (it also verifies the path exists). It returns NULL on a
- * missing path or a buffer too small, and callers only test for NULL. Note it
- * yields backslash separators — loader.c's path_dirname / resolve_import were
- * taught about '\\' for exactly this reason. */
-char *lume_realpath(const char *path, char *out) {
-    if (!_fullpath(out, path, PATH_MAX)) {
-        errno = ENOENT;
-        return NULL;
-    }
-    return out;
 }
 
 #endif /* _WIN32 */

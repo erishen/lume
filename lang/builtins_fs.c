@@ -103,17 +103,34 @@ void native_env(VM *vm, int argc, Value *args, Value *out) {
     *out = (v && !env_is_sensitive(k)) ? make_string_cstr(vm, v) : val_null();
 }
 
+/* Runtime guard for the opt-in --no-fs switch (see VM.no_fs). env() already
+ * masks credentials, but without this a script could still exfiltrate them by
+ * read_file(".env"), so a "masked env" story is only as strong as this lock.
+ * Call it first in every path-taking builtin; on refusal the builtin raises a
+ * runtime error, which is the loudest possible answer (a silently null return
+ * would make an untrusted script indistinguishable from a missing file). */
+static bool fs_permitted(VM *vm, const char *what) {
+    if (!vm->no_fs) return true;
+    vm_set_error(vm, "%s(): filesystem access is disabled in this run (--no-fs / LUME_NO_FS=1)", what);
+    return false;
+}
+
 /* Sorted directory listing; directories carry a trailing "/". Missing or
  * unreadable dirs yield an empty list (a discovery page should degrade). */
 void native_files(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "files() needs a directory path"); return; }
+    if (!fs_permitted(vm, "files")) return;
     const char *dir = NULL;
     if (!arg_string(vm, args[0], &dir)) return;
     Obj *list = AS_OBJ(make_list(vm));
     vm_push(vm, val_obj((Obj *)list)); /* root while filling */
     DIR *d = opendir(dir);
     if (d) {
-        const char *names[1024];
+        /* 必须是 char * 而不是 const char *:这些是 strdup 出来的、本函数
+         * 负责 free 的指针。写成 const 就逼出下面 free((void *)names[i])
+         * 那记丢 const 的转换 —— 而把一个「待释放的指针」标成 const 是在说
+         * 「这东西不属于我」,自相矛盾。 */
+        char *names[1024];
         int n = 0;
         struct dirent *e;
         while ((e = readdir(d)) && n < 1024) {
@@ -143,7 +160,7 @@ void native_files(VM *vm, int argc, Value *args, Value *out) {
             } else {
                 list_push(vm, list, make_string_cstr(vm, names[i]));
             }
-            free((void *)names[i]);
+            free(names[i]);
         }
     }
     *out = vm_pop(vm);
@@ -153,6 +170,7 @@ void native_files(VM *vm, int argc, Value *args, Value *out) {
  * 16 MiB cap: this exists for catalog/skill inspection, not memory dumps. */
 void native_read_file(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "read_file() needs a path"); return; }
+    if (!fs_permitted(vm, "read_file")) return;
     const char *p = NULL;
     if (!arg_string(vm, args[0], &p)) return;
     FILE *f = fopen(p, "rb");
@@ -192,6 +210,7 @@ void native_read_file(VM *vm, int argc, Value *args, Value *out) {
  * and a torn write would otherwise destroy the only copy of the data. */
 void native_write_file(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 2) { vm_set_error(vm, "write_file() needs a path and content"); return; }
+    if (!fs_permitted(vm, "write_file")) return;
     const char *p = NULL;
     if (!arg_string(vm, args[0], &p)) return;
     if (!IS_OBJ(args[1]) || AS_OBJ(args[1])->type != OBJ_STRING) {
@@ -231,6 +250,7 @@ void native_write_file(VM *vm, int argc, Value *args, Value *out) {
  * other local users read them (matches the 0600 session files). */
 void native_mkdir(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "mkdir() needs a directory path"); return; }
+    if (!fs_permitted(vm, "mkdir")) return;
     const char *p = NULL;
     if (!arg_string(vm, args[0], &p)) return;
     if (!p[0]) { *out = val_bool(false); return; }
@@ -261,6 +281,7 @@ static int g_lock_fd = -1;
 
 void native_lock_file(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "lock_file() needs a path"); return; }
+    if (!fs_permitted(vm, "lock_file")) return;
     const char *p = NULL;
     if (!arg_string(vm, args[0], &p)) return;
     long wait_ms = 2000;

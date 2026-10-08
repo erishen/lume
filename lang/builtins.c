@@ -27,17 +27,20 @@ static void native_print(VM *vm, int argc, Value *args, Value *out) {
         if (IS_OBJ(args[i]) && AS_OBJ(args[i])->type == OBJ_STRING) {
             fwrite(obj_string(AS_OBJ(args[i])), 1, obj_string_len(AS_OBJ(args[i])), stdout);
         } else if (IS_NUM(args[i])) {
-            double d = AS_NUM(args[i]);
-            if (d == (long long)d)
-                printf("%lld", (long long)d);
+            /* Ints print from their i64. Widening to double first and casting
+             * back (as this used to) loses every low bit past 2^53, so a
+             * wrapped i64 printed as a different number than it holds. */
+            if (IS_INT(args[i]))
+                printf("%lld", AS_INT(args[i]));
             else
-                printf("%g", d);
+                printf("%g", AS_NUM(args[i]));
         } else if (IS_BOOL(args[i]) || IS_NULL(args[i])) {
             printf(IS_BOOL(args[i]) ? (AS_BOOL(args[i]) ? "true" : "false") : "null");
         } else {
             sbuf b = {0};
             json_append_value(vm, &b, args[i]);
             printf("%s", b.p ? b.p : "");
+            free(b.p); /* print() only reads it */
         }
     }
     printf("\n");
@@ -48,12 +51,14 @@ static void native_print(VM *vm, int argc, Value *args, Value *out) {
 void str_of_value(VM *vm, Value v, Value *out) {
     sbuf b = {0};
     if (IS_NUM(v)) {
-        double d = AS_NUM(v);
         char buf[64];
-        if (d == (long long)d)
-            snprintf(buf, sizeof(buf), "%lld", (long long)d);
+        /* Same rule as print(): an int keeps its exact i64 spelling, a float
+         * goes through %g. Testing "is it integral" on the widened double
+         * instead would corrupt large ints. */
+        if (IS_INT(v))
+            snprintf(buf, sizeof(buf), "%lld", AS_INT(v));
         else
-            snprintf(buf, sizeof(buf), "%g", d);
+            snprintf(buf, sizeof(buf), "%g", AS_NUM(v));
         sb_str(&b, buf);
     } else if (IS_BOOL(v)) {
         sb_str(&b, AS_BOOL(v) ? "true" : "false");
@@ -63,6 +68,12 @@ void str_of_value(VM *vm, Value v, Value *out) {
         json_append_value(vm, &b, v);
     }
     *out = make_string(vm, b.p ? b.p : "", b.len);
+    /* sbuf hands its buffer to nobody: make_string copies out of b.p, so the
+     * builder's own block has to go back here. Skipping this leaked 256 bytes
+     * per str() call -- 5.1 MB across the smoke suite, i.e. 84% of everything
+     * LeakSanitizer saw before this was fixed. b.len stays valid (it feeds
+     * make_string above), only the pointer dies. */
+    free(b.p);
 }
 
 /* When args = (map, string-key [, default]), resolve the field (default when
@@ -304,6 +315,7 @@ static void native_stringify(VM *vm, int argc, Value *args, Value *out) {
     sbuf b = {0};
     json_append_value(vm, &b, args[0]);
     *out = make_string(vm, b.p ? b.p : "", b.len);
+    free(b.p); /* copied out above; the builder owns nothing downstream */
 }
 static void native_now(VM *vm, int argc, Value *args, Value *out) {
     (void)vm; (void)argc; (void)args;
