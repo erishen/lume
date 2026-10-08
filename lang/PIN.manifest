@@ -1,4 +1,4 @@
-﻿# md5 of every synced lang/ file, written by `make sync-lang`.
+# md5 of every synced lang/ file, written by `make sync-lang`.
 # check compares lang/ against this when lume-core is not reachable.
 builtins_crypt.c df8e6ab934021cd90031a390745e9065
 builtins_hof.c 1344ecb4d051c0cf0fea8ef9ad3813b9
@@ -6,10 +6,12 @@ builtins_math.c e8ae9ab6c861c017fef76c5d6926631b
 builtins_str.c 58496a152d8cef203927d8b6c0ebb9ec
 lexer.c 582be5ececbdbe207b230dddc85844be
 loader.c 77087d3a28ea24ee7670706b3fe658ce
+os_win32.c d4a879ea6048144771ead79ef3bb4c4c
 parser.c 87d84985e3296118b019e11223aa7611
 parser_expr.c ad709f9fb2b89b8328cff7dec8396cb8
 parser_internal.h 4ecfb31d8c5faef194813b8e39ecee2b
 parser_stmt.c 53f71a84be3a3f5415c86507f372fec7
+sbuf.h 4dc4dad9c909e4ae1f8e3a3e8cd5d463
 token.c 863f395616d4fa7237f72e0e2a8a0915
 typecheck_internal.h 28989363f6043b07816ca3443c5ff4aa
 value.c 2cb45ce38730646a94708b940c421d21
