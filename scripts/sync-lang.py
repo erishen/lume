@@ -82,7 +82,13 @@ DEFAULT_CORE = os.path.join(os.path.dirname(ROOT), "lume-core")
 HOST_PINNED = {"lume.h", "main.c", "builtins_internal.h", "builtins.c",
                "builtins_catalog.c", "builtins_fs.c", "vdom.c",
                "interp.c", "builtins.h", "builtins_http.c",
-               "typecheck.c", "typecheck_expr.c", "typecheck_stmt.c"}
+               "typecheck.c", "typecheck_expr.c", "typecheck_stmt.c",
+               # Windows (MSYS2/mingw) build replaces bridge.c with this stub;
+               # lume's copy adds a bridge_run() that errors out because this
+               # build links no HTTP server. Pinned so `sync` cannot silently
+               # swap in lume-core's bridge_stub.c (which defers to
+               # bridge_serve.c) and break the Windows link.
+               "bridge_stub.c"}
 
 # Upstream lines behind in a pinned file stop being news at about this many;
 # below it the file is just locally edited.
