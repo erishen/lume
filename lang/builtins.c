@@ -352,6 +352,7 @@ Value b_stringify(VM *vm, int argc, Value *args) { return vm_native(vm, argc, ar
 Value b_now(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_now); }
 Value b_env(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_env); }
 Value b_files(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_files); }
+Value b_argv(VM *vm, int argc, Value *args)       { return vm_native(vm, argc, args, native_argv); }
 Value b_read_file(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_read_file); }
 Value b_write_file(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_write_file); }
 Value b_mkdir(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_mkdir); }

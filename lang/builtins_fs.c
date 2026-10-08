@@ -116,53 +116,72 @@ static bool fs_permitted(VM *vm, const char *what) {
 }
 
 /* Sorted directory listing; directories carry a trailing "/". Missing or
- * unreadable dirs yield an empty list (a discovery page should degrade). */
+ * unreadable dirs yield an empty list (a discovery page should degrade).
+ * One argument: single-level listing of `dir` (names only, as before). A
+ * second truthy argument (`files(dir, 1)`) walks the tree depth-first; entries
+ * are then relative paths ("sub/file.txt", "sub/dir/") so read_file() can use
+ * them directly. Depth is capped at 64 and each directory's own entry count at
+ * 1024 (the single-level listing's cap), so a hostile deep tree cannot blow
+ * the stack or the list. */
+static void files_walk(VM *vm, Obj *list, const char *dir, const char *prefix,
+                       int depth, int recurse) {
+    DIR *d = opendir(dir);
+    if (!d) return;
+    char *names[1024];
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) && n < 1024) {
+        if (e->d_name[0] == '.') continue;
+        names[n++] = strdup(e->d_name);
+    }
+    closedir(d);
+    qsort(names, n, sizeof names[0], str_entry_cmp);
+    char full[4096];
+    for (int i = 0; i < n; i++) {
+        struct stat st;
+        int is_dir = 0;
+        if (snprintf(full, sizeof full, "%s/%s", dir, names[i]) <
+            (int)sizeof full) {
+            is_dir = stat(full, &st) == 0 && S_ISDIR(st.st_mode);
+        }
+        /* entry = prefix + name, plus "/" when it is a directory (the marker
+         * single-level files() already uses). malloc'd, not a stack buffer:
+         * prefix grows with nesting depth. */
+        size_t pl = strlen(prefix);
+        size_t nl = strlen(names[i]);
+        char *entry = malloc(pl + nl + 2);
+        if (!entry) { free(names[i]); continue; }
+        memcpy(entry, prefix, pl);
+        memcpy(entry + pl, names[i], nl + 1);
+        if (is_dir) { entry[pl + nl] = '/'; entry[pl + nl + 1] = '\0'; }
+        list_push(vm, list, make_string_cstr(vm, entry));
+        if (recurse && is_dir && depth < 64)
+            files_walk(vm, list, full, entry, depth + 1, recurse);
+        free(entry);
+        free(names[i]);
+    }
+}
+
 void native_files(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "files() needs a directory path"); return; }
     if (!fs_permitted(vm, "files")) return;
     const char *dir = NULL;
     if (!arg_string(vm, args[0], &dir)) return;
+    int recurse = argc >= 2 && value_truthy(args[1]);
     Obj *list = AS_OBJ(make_list(vm));
     vm_push(vm, val_obj((Obj *)list)); /* root while filling */
-    DIR *d = opendir(dir);
-    if (d) {
-        /* 必须是 char * 而不是 const char *:这些是 strdup 出来的、本函数
-         * 负责 free 的指针。写成 const 就逼出下面 free((void *)names[i])
-         * 那记丢 const 的转换 —— 而把一个「待释放的指针」标成 const 是在说
-         * 「这东西不属于我」,自相矛盾。 */
-        char *names[1024];
-        int n = 0;
-        struct dirent *e;
-        while ((e = readdir(d)) && n < 1024) {
-            if (e->d_name[0] == '.') continue;
-            names[n++] = strdup(e->d_name);
-        }
-        closedir(d);
-        qsort(names, n, sizeof names[0], str_entry_cmp);
-        char full[4096];
-        for (int i = 0; i < n; i++) {
-            struct stat st;
-            int is_dir = 0;
-            if (snprintf(full, sizeof full, "%s/%s", dir, names[i]) <
-                (int)sizeof full) {
-                is_dir = stat(full, &st) == 0 && S_ISDIR(st.st_mode);
-            }
-            if (is_dir) {
-                size_t l = strlen(names[i]);
-                char *with_slash = malloc(l + 2);
-                if (with_slash) {
-                    memcpy(with_slash, names[i], l);
-                    with_slash[l] = '/';
-                    with_slash[l + 1] = '\0';
-                    list_push(vm, list, make_string_cstr(vm, with_slash));
-                    free(with_slash);
-                }
-            } else {
-                list_push(vm, list, make_string_cstr(vm, names[i]));
-            }
-            free(names[i]);
-        }
-    }
+    files_walk(vm, list, dir, "", 0, recurse);
+    *out = vm_pop(vm);
+}
+
+/* CLI script arguments after the script name (`lume script.lume a b`
+ * → ["a", "b"]); empty list when the run carried none. main() seeds them into
+ * vm.argv (a GC root); this getter also covers embedded/other entry paths. */
+void native_argv(VM *vm, int argc, Value *args, Value *out) {
+    (void)argc; (void)args;
+    if (vm->argv) { *out = val_obj(vm->argv); return; }
+    Obj *list = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj((Obj *)list));
     *out = vm_pop(vm);
 }
 
@@ -231,13 +250,23 @@ void native_write_file(VM *vm, int argc, Value *args, Value *out) {
     if (!f) { *out = val_bool(false); return; }
     /* 数据文件默认 0600(账本/周报/设置 .env 都经此写;即使用户把
      * IQUEST_REPORTS_DIR 指到 .data 之外,报告也不会随 umask 落成 0644) */
-    #ifndef _WIN32
+#ifndef _WIN32
     /* Windows/mingw 无 fchmod；那里的默认 ACL 由 _open 的模式位给出。 */
     fchmod(fileno(f), 0600);
 #endif
     size_t wrote = data && len ? fwrite(data, 1, len, f) : 0;
     int ok = (fclose(f) == 0) && (wrote == len);
-    if (ok) ok = rename(tmp, p) == 0;
+    if (ok) {
+#ifdef _WIN32
+        /* MSVCRT rename() refuses to replace an existing file: drop the old
+         * one first (best-effort - it may not exist) so write_file() keeps
+         * its "atomically replace" contract on Windows too. */
+        remove(p);
+        ok = rename(tmp, p) == 0;
+#else
+        ok = rename(tmp, p) == 0;
+#endif
+    }
     if (!ok) remove(tmp);
     *out = val_bool(ok);
 }

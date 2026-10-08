@@ -378,6 +378,12 @@ struct VM {
     int tool_count;
     Obj *server_config;       /* `server { ... }` results (GC root) */
     bool run_called;
+    /* serve() sessions: id -> session map, shared across requests (GC root).
+     * Per request, session_new is set when a fresh session was created and
+     * session_id holds the id for the Set-Cookie response. */
+    Obj *session_table;
+    bool session_new;
+    char session_id[64];
 
     /* module system (loader.c). The registry is populated once, before
      * agenthttpd_run forks workers; modules and their top-level envs are
@@ -389,6 +395,11 @@ struct VM {
     const char **load_stack;  /* paths currently being loaded (cycle check) */
     int load_depth;
     Env *export_env;          /* export table of the module being executed */
+
+    /* CLI script arguments after the script name (`lume-core script.lume a b`
+     * → ["a", "b"]), exposed to scripts as argv(). GC root — the list is
+     * reachable only through this field once seeded by main(). */
+    Obj *argv;
 };
 
 /* ===================== modules / loader ===================== */

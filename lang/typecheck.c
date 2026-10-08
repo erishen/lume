@@ -298,7 +298,7 @@ bool is_builtin_name(const char *name) {
         "json", "stringify", "now", "el", "render", "html",
         "float", "bool", "string", "type", "Result", /* type words usable as idents */
         "write", "read", /* built-in verb groups (see seed_verb_groups) */
-        "env", "files", "read_file", "write_file", "mkdir", "strftime", "put",
+        "env", "argv", "files", "read_file", "write_file", "mkdir", "strftime", "put",
         "range", "map", "filter", "reduce", /* collection tools */
         "sql_query", "sql_write", /* sqlite builtins (DSL-level) */
         "lock_file", "unlock_file", /* flock advisory lock (invest ledger) */
@@ -483,7 +483,7 @@ bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
             "json", "stringify", "now", "el", "render", "html",
             "float", "bool", "string", "type", "Result", /* type words usable as idents */
             "write", "read", /* built-in verb groups (see seed_verb_groups) */
-            "env", "files", "read_file", "write_file", "mkdir", "strftime", "put",
+            "env", "argv", "files", "read_file", "write_file", "mkdir", "strftime", "put",
             "range", "map", "filter", "reduce", /* collection tools */
             "sql_query", "sql_write", /* sqlite builtins (DSL-level) */
             "lock_file", "unlock_file", /* flock advisory lock (invest ledger) */
