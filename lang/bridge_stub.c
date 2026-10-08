@@ -65,4 +65,9 @@ int bridge_define_tool(VM *vm, const char *name, const char *desc,
     return 0;
 }
 
-/* bridge_run() is implemented in bridge_serve.c (in-tree HTTP server). */
+/* bridge_run() is implemented in bridge_serve.c (in-tree HTTP server). The
+ * MSYS2/mingw build does not link bridge_serve.c, so run() must fail loudly
+ * here instead of pretending to serve. */
+void bridge_run(VM *vm) {
+    vm_set_error(vm, "run() is not supported in this build (no HTTP server bridge)");
+}
