@@ -1,4 +1,4 @@
-# lang/ is a pinned copy of the lume-core language tree.
+﻿# lang/ is a pinned copy of the lume-core language tree.
 # Bump it with:  make sync-lang && make check-sync
 # Detect drift without touching anything:  make check-sync
 #
@@ -10,7 +10,7 @@
 # The core-specific files (codegen*/backend*/llvm_codegen*/rt.c) are
 # not copied at all - lume has no native backend, agent-httpd owns it.
 core_dir: ../lume-core
-sha: 9d961bac73cafece877a4929921a60b6e15ad11e
-version: v0.3.0-24-g9d961ba
-synced_at: 2026-10-08 14:59:52
+sha: f5294a6a5ae4b9d3577f2613dc7db370f5d12300
+version: v0.4.0-7-gf5294a6
+synced_at: 2026-10-08 20:00:25
 host_owned: builtins.c builtins.h builtins_catalog.c builtins_fs.c builtins_http.c builtins_internal.h interp.c lume.h main.c typecheck.c typecheck_expr.c typecheck_stmt.c vdom.c

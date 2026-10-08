@@ -32,6 +32,7 @@ the signal CI can act on today - erishen/lume-core exists but is empty,
 so `git clone` cannot be made to resolve the pinned sha yet.
 """
 import hashlib
+import datetime
 import difflib
 import io
 import os
@@ -374,8 +375,7 @@ def write_pin(sha, version):
         "synced_at: %s\n"
         "host_owned: %s\n"
     ) % (sha, version,
-         subprocess.run(["date", "+%Y-%m-%d %H:%M:%S"],
-                        capture_output=True, text=True).stdout.strip(),
+         datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
          " ".join(sorted(HOST_PINNED)) or "-")
     with open(PIN, "w", encoding="utf-8") as fh:
         fh.write(body)
