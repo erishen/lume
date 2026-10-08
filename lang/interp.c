@@ -968,6 +968,7 @@ void bridge_seed_builtins(VM *vm) {
         {"now", b_now},
         {"env", b_env},
         {"files", b_files},
+        {"argv", b_argv},
         {"read_file", b_read_file},
         {"write_file", b_write_file},
         {"mkdir", b_mkdir},
