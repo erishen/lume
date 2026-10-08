@@ -52,7 +52,11 @@ endif
 # 默认全量 BSD 声明 (宿主 make 从不需要)。行为两侧必须一致 —— 宿主 make
 # 编出的 bin/lume 与容器内重编的 bin/lume 都要能编, 所以两家都带, 而不是
 # 只在镜像侧补 (镜像侧补 = macOS 宿主永远测不到这条平台差异)。
+ifeq ($(OS),Windows_NT)
+UNAME_S := Windows_NT
+else
 UNAME_S := $(shell uname -s)
+endif
 ifeq ($(UNAME_S),Linux)
     CFLAGS_EXTRA += -D_GNU_SOURCE
     # glibc fortify 与 agent-httpd 同开: Ubuntu 默认注入, 显式开启使本地
@@ -102,6 +106,7 @@ endif
 # https:// 直接报 "needs libssl", 不静默降明文。裸 socket 传输层, libssl 只管 TLS。
 # macOS 上 pkg-config 常缺, 退 brew openssl 前缀; 再不行按常见安装前缀
 # (Apple/Intel Homebrew、/usr) 落盘查头文件; 都查不到则 HAVE_OPENSSL=0。
+ifeq ($(strip $(IS_WINDOWS)),)
 OPENSSL_PKG := $(shell command -v pkg-config 2>/dev/null)
 ifneq ($(strip $(OPENSSL_PKG)),)
     OPENSSL_PREFIX := $(shell pkg-config --variable=prefix openssl 2>/dev/null)
@@ -111,6 +116,7 @@ ifeq ($(strip $(OPENSSL_PREFIX)),)
 endif
 ifeq ($(strip $(OPENSSL_PREFIX)),)
     OPENSSL_PREFIX := $(shell brew --prefix openssl@3 2>/dev/null)
+endif
 endif
 # 常见安装前缀落盘兜底(brew/pkg-config 都可能不在 PATH): Apple Silicon 与
 # Intel Homebrew、系统 /usr。
@@ -187,8 +193,8 @@ all: bin $(TARGET)
 # 子模块源文件变化即触发 lib 重建（否则 llm.c 等改动不会带进 bin/lume）。
 # Windows:AH_LIB 已置空(见 IS_WINDOWS 段), 整条规则连同它的 order-only 前置
 # 一起退化为空目标 —— 否则 make 会去 agent-httpd 里编 POSIX 代码。
-AH_DEPS := $(shell find $(AH)/src -name '*.c' -o -name '*.h' 2>/dev/null)
 ifeq ($(strip $(IS_WINDOWS)),)
+AH_DEPS := $(shell find $(AH)/src -name '*.c' -o -name '*.h' 2>/dev/null)
 $(AH_LIB): $(AH_DEPS)
 	$(MAKE) -C $(AH) lib WITH_PG=$(WITH_PG) WITH_MYSQL=$(WITH_MYSQL)
 else
@@ -196,11 +202,23 @@ $(AH_LIB):
 	@:
 endif
 
+# Directory targets: on non-Windows (sh) `mkdir -p` is idempotent and stays
+# in the recipe. On Windows, mingw32-make may run recipes under cmd.exe where
+# mkdir has no -p and errors on existing directories (and the SHELL env var
+# is unreliable - Git Bash injects sh paths even when cmd runs the recipe),
+# so create the dirs once at parse time through `cmd /c` (idempotent, no -p
+# side-effect) and give the targets an empty recipe so `make -B` cannot fail
+# on a directory that already exists.
+ifeq ($(strip $(IS_WINDOWS)),)
 build:
 	mkdir -p build
-
 bin:
 	mkdir -p bin
+else
+$(shell cmd /c "if not exist build mkdir build & if not exist bin mkdir bin")
+build: ;
+bin: ;
+endif
 
 build/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build $(AH_LIB)
 	$(CC) $(CFLAGS) -c $< -o $@
