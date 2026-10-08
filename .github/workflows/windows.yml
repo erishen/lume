@@ -51,8 +51,14 @@ jobs:
         # included) still type-checks on Windows.
         run: make check
 
-      - name: Run hello
-        run: ./bin/lume.exe examples/hello.lume
+      - name: Run lang-basics
+        # hello.lume grew into the full HTTP-server demo and ends in run(),
+        # which the Windows build deliberately rejects (no libagenthttpd —
+        # the stub bridge errors out). lang-basics.lume is a pure script
+        # (compute + print, no server, no http_/sql_ builtins), so it proves
+        # the interpreter actually executes on Windows without pretending
+        # the server story exists there.
+        run: ./bin/lume.exe examples/lang-basics.lume
 
       # `make test` is POSIX-only (it drives a live HTTP server through
       # libagenthttpd, and its harness uses POSIX mkdir(2)/rm shell calls).
