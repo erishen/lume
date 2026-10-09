@@ -4,10 +4,14 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.6.2] - 2026-10-09
 
 ### Added
 
+- `lume --version` / `-V` now prints the build version (`LUME_VERSION`,
+  injected by the Makefile as a single source of truth) so an installed
+  binary self-reports the same version as the GitHub Release tag it shipped
+  from; the flag is listed in `--help`.
 - Response envelopes can now carry `cache_control`: a map returned by a route
   handler (or by `respond`-style helpers) may set the `cache_control` key, and
   it is forwarded verbatim as the `Cache-Control` response header. The field is
