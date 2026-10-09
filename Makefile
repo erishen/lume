@@ -23,6 +23,11 @@ AH_INC      := $(AH)/src $(AH)/src/core $(AH)/src/agent
 CC       ?= cc
 CFLAGS   ?= -std=c11 -Wall -Wextra -O2 -g
 CFLAGS   += -I lang $(addprefix -I, $(AH_INC))
+
+# 版本号: lume --version 读这个宏(单一来源)。默认值取最近一次发布 tag;
+# 打 release 前在此递增值, 保证二进制自报与 GitHub Release tag 一致。
+LUME_VERSION ?= 0.6.1
+CFLAGS   += -DLUME_VERSION=\"$(LUME_VERSION)\"
 # LUME_HAS_HTTP: 出站 HTTP 内建(http_get/post/put/patch/delete)的开关。
 # 实现已在 lang/builtins_http.c(2026-10-05 从 lume-core 移植, 裸 socket +
 # 可选 libssl, 私有地址默认拒绝, --no-net / LUME_NO_NET=1 整体关掉)。

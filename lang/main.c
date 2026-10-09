@@ -32,8 +32,9 @@ static void usage(const char *prog) {
             "  --no-fs   runtime filesystem lock: read_file/write_file/files/\n"
             "            mkdir/lock_file fail at runtime instead of touching\n"
             "            the disk (also settable as LUME_NO_FS=1)\n"
-            "  --no-net  runtime network lock: http_get() fails instead of\n"
-            "            opening a socket (also settable as LUME_NO_NET=1)\n"
+"  --no-net  runtime network lock: http_get() fails instead of\n"
+"            opening a socket (also settable as LUME_NO_NET=1)\n"
+"  --version print version and exit\n"
             "\n"
             "The script is Lume source: type/struct declarations, server {},\n"
             "route/tool declarations plus expressions with static type\n"
@@ -340,6 +341,10 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--no-fs") == 0) no_fs = true;
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(argv[0]);
+            return 0;
+        }
+        else if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-V") == 0) {
+            printf("lume %s\n", LUME_VERSION);
             return 0;
         }
         else if (argv[i][0] != '-') {
