@@ -1,17 +1,17 @@
 # md5 of every synced lang/ file, written by `make sync-lang`.
 # check compares lang/ against this when lume-core is not reachable.
-builtins_crypt.c df8e6ab934021cd90031a390745e9065
-builtins_hof.c 1344ecb4d051c0cf0fea8ef9ad3813b9
-builtins_math.c e8ae9ab6c861c017fef76c5d6926631b
-builtins_str.c fecaaff324e2c2254cd9e087030cabdd
-lexer.c 582be5ececbdbe207b230dddc85844be
-loader.c 77087d3a28ea24ee7670706b3fe658ce
-os_win32.c d4a879ea6048144771ead79ef3bb4c4c
-parser.c b0d8f9756314d082afb1e8c392ed00eb
-parser_expr.c ad709f9fb2b89b8328cff7dec8396cb8
-parser_internal.h 4ecfb31d8c5faef194813b8e39ecee2b
-parser_stmt.c 53f71a84be3a3f5415c86507f372fec7
-sbuf.h 4dc4dad9c909e4ae1f8e3a3e8cd5d463
-token.c 863f395616d4fa7237f72e0e2a8a0915
-typecheck_internal.h 28989363f6043b07816ca3443c5ff4aa
-value.c 2cb45ce38730646a94708b940c421d21
+builtins_crypt.c 14b4e2c53fe935a48995064c8ee8d752
+builtins_hof.c 6eaac3ed7eb2d23806ed1ac7f15b8c0e
+builtins_math.c a45b287acec804f92b8aa1f374016025
+builtins_str.c 88558d16601907be194c0dc2ff3298a9
+lexer.c 6e19584c62f90c656c1751c1d1bae158
+loader.c 990d39350e34b1644c5beb2e15a51c18
+os_win32.c be70b1a072cca491a96899bcecc155e8
+parser.c e01947d12df151c4d168e639664cd497
+parser_expr.c f980feaf8972ce47c1db390e27f11ee9
+parser_internal.h a92031c5ae20ffaf15abb42aa8147a2f
+parser_stmt.c ca1eed437a32a460c75bc9115cc5ef92
+sbuf.h a88370a85fe1236163292a7692f1e18c
+token.c 86d9b2d36e183bde7e9ea08a1642559e
+typecheck_internal.h 6b8cf2ea6bdc7347be3887ce0fffd1a8
+value.c a8191edc303a6aebb38fc3bf8e3df906
