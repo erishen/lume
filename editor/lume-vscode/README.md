@@ -39,7 +39,7 @@ In VS Code, open the Extensions view (`Cmd/Ctrl+Shift+X`), search
 
 ```bash
 VSCODE_EXT=~/.vscode/extensions
-ln -s ../lume/editor/lume-vscode "$VSCODE_EXT/cnb.lume-0.3.4"
+ln -s "$(pwd)/editor/lume-vscode" "$VSCODE_EXT/cnb.lume-0.3.4"
 ```
 
 Then reload VS Code (`Cmd+Shift+P` → "Developer: Reload Window"). After

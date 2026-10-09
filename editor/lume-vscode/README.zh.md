@@ -39,7 +39,7 @@ VS Code 里打开扩展视图(`Cmd/Ctrl+Shift+X`),搜 **「Lume DSL」**
 
 ```bash
 VSCODE_EXT=~/.vscode/extensions
-ln -s ../lume/editor/lume-vscode "$VSCODE_EXT/cnb.lume-0.3.4"
+ln -s "$(pwd)/editor/lume-vscode" "$VSCODE_EXT/cnb.lume-0.3.4"
 ```
 
 然后重启 VS Code(或 `Cmd+Shift+P` → "Developer: Reload Window")。
