@@ -126,7 +126,7 @@ Quick start and Containers sections.
 
 | Path | Contents |
 |---|---|
-| `lang/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, 8.6k lines of C11 across 29 files. A **pinned copy** of the sibling lume-core language tree - see `lang/PIN`. Three buckets: 13 *synced* (byte-identical to upstream), 12 *host-owned* (never overwritten, deliberately kept here - the host's own bridge/build layer), 4 *host-only* (never existed upstream). `make sync-lang` bumps the pin, `make check-sync` fails on a synced-file drift; host-owned files that fall behind upstream are only *reported*, not failed (CI runs `check-sync`, so it always has a baseline to compare against via `lang/PIN.manifest`) |
+| `lang/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, ~11.3k lines of C11 across 36 files. A **pinned copy** of the sibling lume-core language tree - see `lang/PIN`. Three buckets: 21 *synced* (byte-identical to upstream), 14 *host-owned* (never overwritten, deliberately kept here - the host's own bridge/build layer), 6 *host-only* (never existed upstream). `make sync-lang` bumps the pin, `make check-sync` fails on a synced-file drift; host-owned files that fall behind upstream are only *reported*, not failed (CI runs `check-sync`, so it always has a baseline to compare against via `lang/PIN.manifest`) |
 | `examples/` | 10 `.lume` entry files (the rest of the 15 are reusable libs they `import`): `hello` / `lang-basics` / `demo` / `react-ssr` / `invest` / `abac` / `modules-server` / `query-demo` / `hub` / `sqlite-write`, plus libs `invest/ledger.lume` (portfolio tools), `abac/policy.lume` (ABAC policy engine), `demo/ui.lume` (SSR page components), `modules/app.lume`, `modules/tax.lume` |
 | `frontend/` | React 18 + TS + Tailwind 4 client (`src/`, esbuild `--splitting`) + React SSR page sources (`react-ssr/`, built by `scripts/build-react-ssr.sh`) |
 | `www/` | docroot: hand-written HTML shells + build artifacts (mixed; don't delete wholesale) |
@@ -226,8 +226,12 @@ stays git-ignored.
 - **Scripts are trusted code**: `.lume` files can read any file and any env
   var, so only run scripts you authored or audited. Credential-named env vars
   (`*API_KEY`, `*TOKEN`, `*SECRET`, `*PASSWORD`, ...) are masked (null) from
-  the script surface; the runtime still reads them itself. The DSL has no
-  outbound HTTP builtin, so a script cannot exfiltrate what it reads.
+  the script surface; the runtime still reads them itself. **The DSL does
+  have outbound HTTP builtins** (`http_get` / `http_post` / `http_put` /
+  `http_patch` / `http_delete`), so an untrusted script can exfiltrate what
+  it reads to a public endpoint (private/reserved addresses are refused by
+  default) — audit scripts before running them; `--no-net` (or
+  `LUME_NO_NET=1`) refuses every outbound socket for a network-off run.
 - **Startup guard**: binding a non-loopback address with Basic Auth off prints
   a one-time WARNING (stderr) that /chat, /dsl and the SQL data behind them
   are reachable by any host that can reach the port.
