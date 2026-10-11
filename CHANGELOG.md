@@ -4,6 +4,20 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- READMEs (en/zh) no longer claim the DSL has no outbound HTTP builtin —
+  `http_get`/`http_post`/`http_put`/`http_patch`/`http_delete` are compiled
+  in (via the pinned lume-core `lang/builtins_http.c`), so an untrusted
+  script can exfiltrate data to a public endpoint. The security notes now
+  state the real surface: private/reserved addresses are refused by
+  default, scripts must be audited, and `--no-net` / `LUME_NO_NET=1` kills
+  all outbound sockets. `lang/` layout stats refreshed (36 files /
+  ~11.3k lines; 21 synced / 14 host-owned / 6 host-only per
+  `make check-sync`).
+
 ## [0.6.2] - 2026-10-09
 
 ### Added

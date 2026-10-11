@@ -94,7 +94,7 @@ cd ~/.local/share/lume && ~/.local/bin/lume examples/sqlite-write.lume
 
 | 路径 | 内容 |
 |---|---|
-| `lang/` | 词法/语法/类型检查/树遍历解释器 + agent-httpd 桥接,29 个文件共 8.6k 行 C11。**钉住**自兄弟项目 lume-core 的语言树(见 `lang/PIN`),分三桶:13 个 *synced* 与上游逐字节同、12 个 *host_owned* 宿主自持永不覆盖(桥接与构建层的自有代码)、4 个 *host-only* 上游从未有。升级 pin 用 `make sync-lang`;漂移检查 `make check-sync`,synced 文件一改就失败;host_owned 落后上游**只报告不失败**(CI 跑的就是这条,上游不可达时退到 `lang/PIN.manifest` 基线比对) |
+| `lang/` | 词法/语法/类型检查/树遍历解释器 + agent-httpd 桥接,36 个文件共 ~11.3k 行 C11。**钉住**自兄弟项目 lume-core 的语言树(见 `lang/PIN`),分三桶:21 个 *synced* 与上游逐字节同、14 个 *host_owned* 宿主自持永不覆盖(桥接与构建层的自有代码)、6 个 *host-only* 上游从未有。升级 pin 用 `make sync-lang`;漂移检查 `make check-sync`,synced 文件一改就失败;host_owned 落后上游**只报告不失败**(CI 跑的就是这条,上游不可达时退到 `lang/PIN.manifest` 基线比对) |
 | `examples/` | 10 个 `.lume` 入口文件(全部 15 个里其余 5 个是它们 `import` 的复用库):hello / lang-basics / demo / react-ssr / invest / abac / modules-server / query-demo / hub / sqlite-write,另有库文件 invest/ledger.lume(组合工具)、abac/policy.lume(ABAC 策略引擎)、demo/ui.lume(SSR 页面组件)、modules/app.lume、modules/tax.lume |
 | `frontend/` | React 18 + TS + Tailwind 4 客户端,esbuild `--splitting` 打包 |
 | `www/` | docroot:手写 HTML 壳 + 构建产物(混合,勿整体删) |
@@ -169,8 +169,11 @@ Mach-O,必须在 Linux 容器内重编。
   "向第三方提供个人信息",需告知并最小化)。
 - **脚本是可信代码**:`.lume` 可读任意文件与任意环境变量,只运行你亲自编写
   或审计过的脚本。凭据命名的环境变量(`*API_KEY`/`*TOKEN`/`*SECRET`/
-  `*PASSWORD` 等)对脚本层脱敏(返回 null),运行时自身仍可读取;DSL 无出站
-  HTTP 内建,脚本无法把读到的内容外泄。
+  `*PASSWORD` 等)对脚本层脱敏(返回 null),运行时自身仍可读取;DSL **有出站
+  HTTP 内建**(`http_get`/`http_post`/`http_put`/`http_patch`/`http_delete`),
+  不可信脚本可以把读到的内容外传到公网端点(私网/保留地址默认拒绝)——
+  运行前务必审计;需要断网运行时加 `--no-net`(或 `LUME_NO_NET=1`),它拒绝
+  一切出站 socket。
 - **启动守护**:绑定非回环地址且未开 Basic Auth 时,启动会在 stderr 打印一次
   WARNING,提示 /chat、/dsl 及其背后 SQL 数据对可达该端口的任意主机开放。
 - `examples/invest.lume` 需要 `make invest` 起——白名单 env 只在那里注入,
