@@ -32,22 +32,21 @@
 #include <string.h>
 #include <setjmp.h>
 
-/* libagenthttpd embedding API (from the sibling project).
- * Windows builds do not link libagenthttpd.a — agent-httpd's sources are POSIX
- * socket code with no Windows support — and this header pulls in netinet/in.h
- * and sys/socket.h. Nothing below needs any agent-httpd *type*: the DSL keeps
- * its own RouteRec / ToolRec, and lang/bridge.c is the only consumer of
- * HttpRequest / HttpResponse / agenthttpd_config, and it is excluded from the
+/* Host build (lume): agent-httpd integration. Windows builds do not link
+ * libagenthttpd.a — agent-httpd's sources are POSIX socket code with no
+ * Windows support — and this header would pull in netinet/in.h and
+ * sys/socket.h. Nothing below needs any agent-httpd *type*: the DSL keeps
+ * its own RouteRec / ToolRec, and lang/bridge.c (the only consumer of
+ * HttpRequest / HttpResponse / agenthttpd_config) is excluded from the
  * Windows build in favour of lang/bridge_stub.c.
  *
- * What the rest of the tree *did* ride in on this header was the `sbuf` string
- * buffer (it came in through agenthttpd.h -> tools.h -> minijson.h): lang/
- * value.c includes only this header yet builds sbuf values for JSON encoding.
- * So Windows includes lang/sbuf.h instead — the same struct with the same
- * always-NUL-terminated + sticky-oom contract, just inlined. Both spellings
- * define the identical type, so a translation unit sees one definition either
- * way (minijson.h and sbuf.h share an include guard name check by name only —
- * they are mutually exclusive here by construction). */
+ * What the rest of the tree *did* ride in on this header was the `sbuf`
+ * string buffer (json_append_value and friends take a `void *sbuf`): it came
+ * via agenthttpd.h -> tools.h -> minijson.h, and lang/value.c includes only
+ * this header yet builds sbuf values for JSON encoding. So Windows includes
+ * lang/sbuf.h instead — the same struct with the same always-NUL-terminated +
+ * sticky-oom contract, just inlined. Both spellings define the identical
+ * type, so a translation unit sees one definition either way. */
 #ifdef _WIN32
 #include "sbuf.h"
 #else
@@ -127,10 +126,10 @@ typedef struct Type {
                              * node through here so a closure-variable call can
                              * recover the lambda's own param/ret types. NULL
                              * for a plain `func` name reference. */
-    /* lume-core增量: type_release_all() 的回收链(core src/lume.h)。
-     * host 自持这份 lume.h, 升级 core 时要手工合 —— 见 lang/PIN `host_owned`。 */
-    struct Type *tnext;
+    struct Type *tnext;     /* type_release_all()'s reclaim list — internal,
+                             * not part of any type's meaning */
 } Type;
+
 Type *type_prim(TypeKind kind);
 Type *type_list(Type *elem);
 Type *type_struct(const char *name);   /* named reference, resolved by checker */
@@ -139,10 +138,22 @@ Type *type_func(int arity, Type **params, Type *ret);
 Type *type_result(void);
 void type_add_member(Type *t, const char *name, Type *ty);
 void type_print(Type *t);              /* type text into stdout (debug) */
+/* Reclaim every Type the checker allocated, in one pass.
+ *
+ * Types form a shared graph: the AST fields, the checker's scope entries and
+ * the module export table all point at the same Type blocks, and resolve()
+ * hands out definitions that outlive the check that built them. So there is
+ * no ownership to walk here — every Type ever allocated since the last call
+ * is dead the moment the loader finishes. calloc'd *Type objects, their
+ * strdup'd names and their Type** shells all go in this one sweep. The
+ * static ANY_TYPE singleton returned by any_type() is never on the list.
+ * Must run after the interpreter is done with annotated/ret fields. */
+void type_release_all(void);
 
 /* Static type checking pass (compile-time). Returns false + errbuf on the
  * first error. Runs after parsing, before execution. */
 bool type_check_program(Node *prog, char *errbuf, size_t errbuf_size);
+bool is_builtin_name(const char *name);
 /* Module-aware variant (loader.c): self = module being checked, mods =
  * registry of every loaded module (used to resolve `import "x" as ns`). */
 bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
@@ -223,10 +234,12 @@ struct Obj {
         } env;             /* OBJ_ENV */
     } as;
     /* Static struct name for a map that is really a value of a named type
-     * (`let p: P = {...}` stamps it), NULL for an anonymous map. The host has
-     * no native backend, so this exists only so `.len` can read the declared
-     * field instead of the key count — the same rule lume-core's two native
-     * backends follow. Not a GC root: it points into the type table. */
+     * (`let p: P = {...}` stamps it). NULL for an anonymous map. Only the
+     * interpreter needs it: both native backends carry the type on their own
+     * value record, and it is what keeps `p.len` on `type P = { len: int }`
+     * from collapsing to the member count on the interpreter side. Not a
+     * GC root and not freed — it points into the type table, which outlives
+     * every value built from it. */
     const char *sname;
 };
 
@@ -305,6 +318,10 @@ void env_set(VM *vm, Env *env, const char *name, Value v);
 char *obj_string(Obj *o);
 size_t obj_string_len(Obj *o);
 
+/* JSON-escaping helper shared by the stdio bridges (bridge_mcp.c /
+ * bridge_lsp.c): writes a quoted JSON string literal for `s` into `b`. */
+void json_esc(sbuf *b, const char *s);
+
 /* Truthiness for `if` / `and` / `or`. */
 bool value_truthy(Value v);
 
@@ -360,15 +377,18 @@ struct VM {
 
     bool error;
     char error_msg[512];
-    /* lume-core增量: 见 lang/PIN `host_owned` (core lume.h) */
-    int main_status;
-    bool no_fs;
-    bool no_net;
 
     bool loop_break;       /* `break` inside a loop body */
     bool loop_continue;    /* `continue` inside a loop body */
 
     Value call_result;        /* `return expr` target, set before unwind */
+
+    /* The value of a top-level `main()` call, i.e. the status the process
+     * exits with. Both native backends forward this same call out of their C
+     * entry, so the interpreter records it here to report the same exit code
+     * as the three legs. Set only by exec_program, and only for the entry
+     * module — a `main()` called from inside a function is an ordinary call. */
+    int main_status;
 
     /* bridge state */
     RouteRec routes[MAX_AL_ROUTES];
@@ -384,6 +404,22 @@ struct VM {
     Obj *session_table;
     bool session_new;
     char session_id[64];
+    /* Opt-in filesystem lock for untrusted scripts. Default is OFF, i.e. the
+     * interpreter is NOT a sandbox: read_file/write_file/files/mkdir still
+     * reach any path the process can open. Turn it on (--no-fs, or
+     * LUME_NO_FS=1) and the path-taking builtins fail at runtime instead.
+     * Deliberately a runtime flag rather than a root allowlist: locks the
+     * language surface without breaking the product tools that legitimately
+     * write .env / report files outside the cwd. */
+    bool no_fs;
+
+    /* Same idea as no_fs, for the outbound side: http_get() is opt-out here
+     * too (--no-net, LUME_NO_NET=1). A script that cannot read or write the
+     * filesystem should not be able to phone home to an attacker-hosted
+     * collector either — the SSRF guards below默认 deny private ranges, but
+     * they deliberately allow public ones, so the kill switch is the only
+     * total answer. */
+    bool no_net;
 
     /* module system (loader.c). The registry is populated once, before
      * agenthttpd_run forks workers; modules and their top-level envs are
@@ -415,12 +451,11 @@ typedef struct Module {
     Env *env;                 /* module top-level environment (OBJ_ENV) */
     Env *exports;             /* exported bindings (OBJ_ENV) */
     struct { char **names; Type **types; int count; } export_types;
-    /* lume-core增量: 见 lang/PIN `host_owned`。 */
-    bool is_entry;            /* the script the process is running: only
-                               * its top-level main may exec on entry */
     bool loading;             /* on the load stack (cycle detect) */
     bool typechecked;
     bool executed;
+    bool is_entry;            /* the script the process is running: only its
+                               * top level decides the exit status         */
 } Module;
 
 /* Load the entry script and every module it transitively imports. Modules are
@@ -432,12 +467,17 @@ int loader_run(VM *vm, const char *entry_path, bool check_only,
                char *errbuf, size_t errbuf_size);
 /* Registry lookup by canonical path; NULL if not loaded. */
 Module *loader_find(VM *vm, const char *canon_path);
+/* Tear the loader down: every module, its AST, its export table and the
+ * registry array. Safe to call twice; run it before vm_free() (modules and
+ * the AST they own can still be reached through VM roots). */
+void loader_free(VM *vm);
 
 /* ===================== parser ===================== */
 
-/* AST node. One struct, union-tagged; nodes are malloc'd for the process
- * lifetime (the program is parsed once before agenthttpd_run forks workers,
- * so per-request evaluation reuses the same immutable tree). */
+/* AST node. One struct, union-tagged; the tree is built once, before
+ * agenthttpd_run forks workers, and per-request evaluation reuses the same
+ * immutable tree. It used to live for the process lifetime — node_free() now
+ * releases it, so a reload or a test case can drop a whole program. */
 typedef enum {
     N_PROGRAM, N_BLOCK, N_LET, N_IF, N_WHILE, N_FOR, N_BREAK, N_CONTINUE,
     N_RETURN, N_EXPR_STMT,
@@ -537,15 +577,14 @@ typedef struct Node {
     } as;
 } Node;
 
-/* lume-core owns this declaration (src/lume.h). This tree keeps its own
- * lume.h because it pulls in agenthttpd.h for the host-only bridge, so any
- * upstream declaration added here has to be carried over by hand - see
- * lang/PIN: `host_owned`. */
-void node_free(Node *n);
-
 /* Parse `source` (NUL-terminated). Returns the program node, or NULL with a
  * human-readable error in errbuf (errbuf_size). */
 Node *parse_program(const char *source, char *errbuf, size_t errbuf_size);
+
+/* Builtin name table (typecheck.c): shared with the LSP bridge for hover /
+ * completion. Count is derived at compile time. */
+extern const char *const LUME_BUILTIN_NAMES[];
+extern const size_t LUME_BUILTIN_COUNT;
 
 /* Shared lexer entry (also used by the REPL builtins). Caller frees the
  * returned token array. NULL + errbuf filled on lexical errors. */
@@ -553,10 +592,23 @@ Token *al_lex(const char *source, char *errbuf, size_t errbuf_size,
               int *out_count);
 
 void node_print(Node *n, int indent);   /* debugging dump */
+/* Free a whole AST subtree. Reclaims the nodes themselves, every
+ * ident_name()/path string inside them and the char**, Node** and Type**
+ * array shells,
+ * but NOT the Type objects behind those pointers — those belong to
+ * type_release_all(). Safe to call only once nothing can walk the tree
+ * again: ObjFunc.body keeps a Node*, so free the VM heap first if you free
+ * the AST through it. */
+void node_free(Node *n);
 
 /* ===================== interpreter / bridge ===================== */
 
 void vm_init(VM *vm);
+/* Tear the VM down: the GC heap with every Obj it still holds (and the
+ * strdup'd map/env keys copied into those), the strdup'd route records
+ * and the load stack. Does NOT free the AST or the Type graph — those are
+ * loader_free()'s and type_release_all()'s. Idempotent. */
+void vm_free(VM *vm);
 /* Execute the top-level of a parsed program (routes/tools registered here,
  * before run() is ever called). Sets vm.error on failure. */
 void exec_program(VM *vm, Node *prog);
@@ -569,12 +621,6 @@ Value vm_pop(VM *vm);
 Value vm_peek(VM *vm, int depth);
 void vm_set_error(VM *vm, const char *fmt, ...);
 
-/* lume-core增量: 同步进来的 typecheck.c / loader.c / interp.c 会调这三个。
- * 同 node_free —— host 的 lume.h 是 agenthttpd 分支, 升级 core 时要手工合。 */
-void type_release_all(void);
-void loader_free(VM *vm);
-void vm_free(VM *vm);
-
 /* bridge.c — translate DSL constructs into libagenthttpd calls. */
 void bridge_init(VM *vm);                      /* bind the shim's VM pointer */
 void bridge_seed_builtins(VM *vm);
@@ -583,5 +629,7 @@ int bridge_define_route(VM *vm, const char *method, const char *path, Value hand
 int bridge_define_tool(VM *vm, const char *name, const char *desc,
                        const char *params_json, Value handler);
 void bridge_run(VM *vm);
+void mcp_run(VM *vm);
+void lsp_run(VM *vm);
 
 #endif /* LUME_H */
