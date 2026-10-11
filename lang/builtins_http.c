@@ -76,10 +76,10 @@ typedef struct ssl_st SSL;
 #define HTTP_MAX_HEADER_SZ   (8u * 1024u)
 
 /* ---- 调试打点:默认关 ----
- * 这三处 fprintf 是移植自 lume-core 时留下的排查用输出。无条件写 stderr 的
- * 后果不是难看:lume 大多是长驻 server,一次 http 调用刷一行,调错一次就是
- * 几百行噪音,而且没人有理由在生产日志里存 connect 失败的 errno。要用就编
- * 的时候给 -DLUME_HTTP_DEBUG(= make CFLAGS_EXTRA='-DLUME_HTTP_DEBUG')。 */
+ * 这三处 fprintf 是排查用输出。无条件写 stderr 的后果不是难看:lume 大多是
+ * 长驻 server,一次 http 调用刷一行,调错一次就是几百行噪音,而且没人有理由
+ * 在生产日志里存 connect 失败的 errno。要用就编译时给 -DLUME_HTTP_DEBUG
+ * (= make CFLAGS_EXTRA='-DLUME_HTTP_DEBUG')。 */
 #ifdef LUME_HTTP_DEBUG
 #define HTTP_DBG(...) fprintf(stderr, "[http] " __VA_ARGS__)
 #else

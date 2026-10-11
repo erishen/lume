@@ -345,15 +345,17 @@ Value b_range(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, a
 Value b_map(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_map); }
 Value b_filter(VM *vm, int argc, Value *args)     { return vm_native(vm, argc, args, native_filter); }
 Value b_reduce(VM *vm, int argc, Value *args)     { return vm_native(vm, argc, args, native_reduce); }
+/* Host-only builtins: sql_* drives agent-httpd's db layer (lang/builtins_sql.c). */
 Value b_sql_query(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_sql_query); }
 Value b_sql_write(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_sql_write); }
 Value b_json(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_json); }
 Value b_stringify(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_stringify); }
 Value b_now(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_now); }
 Value b_env(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_env); }
-Value b_files(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_files); }
 Value b_argv(VM *vm, int argc, Value *args)       { return vm_native(vm, argc, args, native_argv); }
+Value b_files(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_files); }
 Value b_read_file(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_read_file); }
+Value b_read_stdin(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_read_stdin); }
 Value b_write_file(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_write_file); }
 Value b_mkdir(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_mkdir); }
 Value b_lock_file(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_lock_file); }
@@ -368,10 +370,27 @@ Value b_mcps(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, ar
 Value b_discovery_endpoints(VM *vm, int argc, Value *args)
 { return vm_native(vm, argc, args, native_discovery_endpoints); }
 Value b_catalog(VM *vm, int argc, Value *args)   { return vm_native(vm, argc, args, native_catalog); }
-/* 出站 HTTP (builtins_http.c, 源自 lume-core): 五个动词共用 vm_native 包装。 */
 Value b_http_get(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_http_get); }
 Value b_http_post(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_http_post); }
 Value b_http_put(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_http_put); }
 Value b_http_patch(VM *vm, int argc, Value *args){ return vm_native(vm, argc, args, native_http_patch); }
-Value b_http_delete(VM *vm, int argc, Value *args){ return vm_native(vm, argc, args, native_http_delete); }
+Value b_http_delete(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_http_delete); }
+
+/* When the build opts out of HTTP (LUME_HAS_HTTP=0 — the Windows/mingw port
+ * excludes src/builtins_http.c), the five native_http_* symbols still have to
+ * exist so the always-compiled b_http_* wrappers above link. They resolve at
+ * type-check time (LUME_BUILTIN_NAMES carries the names) but fail clearly at
+ * runtime instead of crashing on a missing symbol. */
+#if !LUME_HAS_HTTP
+static void native_http_unavailable(VM *vm, int argc, Value *args, Value *out) {
+    (void)argc; (void)args; (void)out;
+    vm_set_error(vm, "http_* unavailable: this build was compiled without LUME_HAS_HTTP");
+}
+void native_http_get(VM *vm, int argc, Value *args, Value *out)    { native_http_unavailable(vm, argc, args, out); }
+void native_http_post(VM *vm, int argc, Value *args, Value *out)   { native_http_unavailable(vm, argc, args, out); }
+void native_http_put(VM *vm, int argc, Value *args, Value *out)    { native_http_unavailable(vm, argc, args, out); }
+void native_http_patch(VM *vm, int argc, Value *args, Value *out)  { native_http_unavailable(vm, argc, args, out); }
+void native_http_delete(VM *vm, int argc, Value *args, Value *out) { native_http_unavailable(vm, argc, args, out); }
+#endif
+
 Value b_default_route(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_default_route); }

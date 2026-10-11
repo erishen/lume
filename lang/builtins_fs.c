@@ -6,16 +6,16 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <time.h>
-#include <unistd.h>
+/* Advisory file lock + mkdir portability. On POSIX these wrap flock(2) and
+ * mkdir(2); on Windows (mingw-w64) they map to LockFileEx / _mkdir so the
+ * same source builds a native .exe. LOCK_* are the POSIX <sys/file.h> values,
+ * defined here for the Windows branch. */
 #ifdef _WIN32
-/* Windows/mingw: no <sys/file.h>; LOCK_* live here and the flock()/mkdir()
- * shims are implemented in os_win32.c (kept in its own TU because <windows.h>
- * exports a `TokenType` enumerator that collides with lume.h's TokenType type). */
-#include <fcntl.h>
+/* Windows implementations live in os_win32.c (compiled only on Windows) so
+ * this TU can include lume.h's TokenType without colliding with the
+ * TokenType enumerator that <windows.h> pulls in via winnt.h. */
 #include <io.h>
+#include <fcntl.h>
 #ifndef LOCK_SH
 #define LOCK_SH 1
 #define LOCK_EX 2
@@ -26,9 +26,14 @@ int lume_mkdir(const char *p);
 int lume_flock(int fd, int op);
 #else
 #include <sys/file.h>
+#include <sys/stat.h>
 static int lume_mkdir(const char *p) { return mkdir(p, 0700); }
 static int lume_flock(int fd, int op) { return flock(fd, op); }
 #endif
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
+#include <unistd.h>
 
 /* Append v to a list, rooting it while the backing array may grow. */
 void list_push(VM *vm, Obj *list, Value v) {
@@ -103,6 +108,17 @@ void native_env(VM *vm, int argc, Value *args, Value *out) {
     *out = (v && !env_is_sensitive(k)) ? make_string_cstr(vm, v) : val_null();
 }
 
+/* CLI script arguments after the script name (`lume-core script.lume a b`
+ * → ["a", "b"]); empty list when the run carried none. main() seeds them into
+ * vm.argv (a GC root); this getter also covers embedded/other entry paths. */
+void native_argv(VM *vm, int argc, Value *args, Value *out) {
+    (void)argc; (void)args;
+    if (vm->argv) { *out = val_obj(vm->argv); return; }
+    Obj *list = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj((Obj *)list));
+    *out = vm_pop(vm);
+}
+
 /* Runtime guard for the opt-in --no-fs switch (see VM.no_fs). env() already
  * masks credentials, but without this a script could still exfiltrate them by
  * read_file(".env"), so a "masked env" story is only as strong as this lock.
@@ -174,17 +190,6 @@ void native_files(VM *vm, int argc, Value *args, Value *out) {
     *out = vm_pop(vm);
 }
 
-/* CLI script arguments after the script name (`lume script.lume a b`
- * → ["a", "b"]); empty list when the run carried none. main() seeds them into
- * vm.argv (a GC root); this getter also covers embedded/other entry paths. */
-void native_argv(VM *vm, int argc, Value *args, Value *out) {
-    (void)argc; (void)args;
-    if (vm->argv) { *out = val_obj(vm->argv); return; }
-    Obj *list = AS_OBJ(make_list(vm));
-    vm_push(vm, val_obj((Obj *)list));
-    *out = vm_pop(vm);
-}
-
 /* Whole file contents as a string, or null when missing/unreadable.
  * 16 MiB cap: this exists for catalog/skill inspection, not memory dumps. */
 void native_read_file(VM *vm, int argc, Value *args, Value *out) {
@@ -251,7 +256,6 @@ void native_write_file(VM *vm, int argc, Value *args, Value *out) {
     /* 数据文件默认 0600(账本/周报/设置 .env 都经此写;即使用户把
      * IQUEST_REPORTS_DIR 指到 .data 之外,报告也不会随 umask 落成 0644) */
 #ifndef _WIN32
-    /* Windows/mingw 无 fchmod；那里的默认 ACL 由 _open 的模式位给出。 */
     fchmod(fileno(f), 0600);
 #endif
     size_t wrote = data && len ? fwrite(data, 1, len, f) : 0;
@@ -325,7 +329,6 @@ void native_lock_file(VM *vm, int argc, Value *args, Value *out) {
         g_lock_fd = -1;
     }
 #ifdef _WIN32
-    /* mingw 把 O_CREAT/O_RDWR 放在 <fcntl.h> 的下划线命名空间里。 */
     int fd = open(p, _O_CREAT | _O_RDWR, _S_IREAD | _S_IWRITE);
 #else
     int fd = open(p, O_CREAT | O_RDWR, 0600);
@@ -382,8 +385,7 @@ void native_strftime(VM *vm, int argc, Value *args, Value *out) {
     time_t t = (time_t)AS_NUM(args[1]);
     struct tm tm;
     char buf[160];
-    #ifdef _WIN32
-    /* mingw 是 localtime_s(struct tm*, const time_t*)——参数顺序与 POSIX 相反。 */
+#ifdef _WIN32
     if (localtime_s(&tm, &t) == 0 && strftime(buf, sizeof buf, fmt, &tm) > 0)
 #else
     if (localtime_r(&t, &tm) && strftime(buf, sizeof buf, fmt, &tm) > 0)
@@ -406,4 +408,47 @@ void native_put(VM *vm, int argc, Value *args, Value *out) {
     if (!arg_string(vm, args[1], &k)) return;
     map_set(vm, AS_OBJ(args[0]), k, args[2]); /* roots map + value internally */
     *out = args[0];
+}
+
+/* Read from standard input (2026-10-09, lume-nsgm M2 interactive CLI).
+ *   read_stdin()        -> one line, newline stripped ("" at EOF / empty line)
+ *   read_stdin("all")   -> everything until EOF
+ * Used by lume-nsgm's `init` command to collect the module name and field
+ * definitions interactively. EOF and an empty line both yield "" so scripts
+ * only have to test emptiness; the 16 MiB cap matches read_file(). */
+void native_read_stdin(VM *vm, int argc, Value *args, Value *out) {
+    const char *mode = NULL;
+    if (argc >= 1 && !arg_string(vm, args[0], &mode)) return;
+    int all = mode && strcmp(mode, "all") == 0;
+    sbuf b = {0};
+    if (all) {
+        char buf[16384];
+        size_t got;
+        while ((got = fread(buf, 1, sizeof buf, stdin)) > 0) {
+            if (b.len + got > (16u << 20)) {
+                free(b.p);
+                vm_set_error(vm, "read_stdin() too large");
+                *out = val_null();
+                return;
+            }
+            sb_mem(&b, buf, got);
+        }
+    } else {
+        int c;
+        while ((c = fgetc(stdin)) != EOF && c != '\n') {
+            if (b.len + 1 > (16u << 20)) {
+                free(b.p);
+                vm_set_error(vm, "read_stdin() too large");
+                *out = val_null();
+                return;
+            }
+            sb_mem(&b, (const char *)&c, 1);
+        }
+    }
+    if (b.oom) { free(b.p); *out = val_null(); return; }
+    /* EOF / empty input must be "" (an empty line), not null — interactive
+     * scripts test emptiness, and "" + x stays a string concatenation. */
+    if (!b.p || b.len == 0) { *out = make_string(vm, "", 0); return; }
+    *out = make_string(vm, b.p, b.len);
+    free(b.p);
 }

@@ -4,37 +4,38 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/stat.h>
-#include <time.h>
 #ifndef _WIN32
-/* --watch (dev hot reload) is a POSIX-only feature: it relies on fork(2),
- * pipe(2), waitpid(2) and sigaction(2), none of which Windows provides with
- * the same semantics (there is no fork at all; a port would need
- * CreateProcess + threads, which is out of scope). Windows therefore builds
- * this section out and --watch reports a clear "unsupported" error instead. */
 #include <sys/wait.h>
-#include <unistd.h>
 #endif
+#include <time.h>
+#include <unistd.h>
 #if defined(__APPLE__)
 #include <sys/event.h>
 #endif
 
 /* Lume entry point: parse + type check + interpret a script, then hand the
- * process over to agenthttpd_run() when the script calls run(). */
+ * process over to agenthttpd_run() when the script calls run().
+ *
+ * Host build: no native backends here. The --compile family and the
+ * backend/codegen include set belong to the standalone lume-core build; this
+ * tree links agent-httpd instead and ships no backend*.c at all, so the CLI
+ * surface below stops at check/dump/watch/run. */
 
 static void usage(const char *prog) {
     fprintf(stderr,
-            "usage: %s [--check|--dump|--watch] <script.lume>\n"
+            "usage: %s [--check|--dump|--watch] [--no-fs] [--no-net] <script.lume>\n"
             "  --check   parse + type check (no side effects)\n"
-            "  --dump    parse and dump the AST, then exit\n"
-            "  --watch   dev hot reload: validate + restart the server child on\n"
-            "            every edit of <script.lume> (SIGUSR1 = force reload);\n"
-            "            invalid edits keep the old server running\n"
-            "  --no-fs   runtime filesystem lock: read_file/write_file/files/\n"
-            "            mkdir/lock_file fail at runtime instead of touching\n"
-            "            the disk (also settable as LUME_NO_FS=1)\n"
-"  --no-net  runtime network lock: http_get() fails instead of\n"
+"  --no-fs   runtime filesystem lock: read_file/write_file/files/\n"
+"            mkdir/lock_file fail at runtime instead of touching\n"
+"            the disk (also settable as LUME_NO_FS=1)\n"
+"  --no-net runtime network lock: http_get() fails instead of\n"
 "            opening a socket (also settable as LUME_NO_NET=1)\n"
 "  --version print version and exit\n"
+"  --dump    parse and dump the AST, then exit\n"
+            "\n"
+            "  --watch   dev hot reload: validate + restart the child on\n"
+            "            every edit of <script.lume> (SIGUSR1 = force reload);\n"
+            "            invalid edits keep the old process running\n"
             "\n"
             "The script is Lume source: type/struct declarations, server {},\n"
             "route/tool declarations plus expressions with static type\n"
@@ -58,12 +59,7 @@ static char *read_file(const char *path, size_t *len_out) {
     return buf;
 }
 
-#ifndef _WIN32
 /* ---------- --watch: dev hot reload ------------------------------------
- *
- * POSIX-only (see the _WIN32 note at the top of this file): built against
- * fork(2)/pipe(2)/waitpid(2)/sigaction(2). On Windows the whole block is
- * compiled out and run_watch() below degrades to a clear error.
  *
  * The serving process cannot swap its VM in place: routes/tools are
  * registered into two pre-fork tables (agent-httpd g_routes + VM routes[])
@@ -83,6 +79,8 @@ static char *read_file(const char *path, size_t *len_out) {
  * restarts the child (port is freed by the child's graceful shutdown
  * before the next child binds). SIGUSR1 forces the same restart path. */
 
+#ifndef _WIN32   /* --watch needs fork/exec/kqueue, unavailable on Windows */
+
 #define WATCH_POLL_MS       500
 #define WATCH_DEBOUNCE_MS   350
 #define WATCH_STOP_GRACE_MS 3000
@@ -100,15 +98,30 @@ static void watch_signal(int sig) {
     }
 }
 
+/* Hand a finished VM's whole object graph back. Order is deliberate:
+ *   loader_free()  drops the modules and the AST (node_free recurses), which
+ *                  is what ObjFunc/ObjNative bodies point into;
+ *   vm_free()      empties the GC heap and the strdup'd route records;
+ *   type_release_all() sweeps the Type graph shared by the AST, the checker
+ *                  scopes and the module export tables.
+ * Exposed as one function so no exit path can forget a step. */
+static void vm_teardown(VM *vm) {
+    loader_free(vm);
+    vm_free(vm);
+    type_release_all();
+}
+
 /* parse + type check without running; err[] gets the first failure. Goes
  * through the module loader so scripts with `import` validate correctly
- * (dependencies type-checked, cycle detection active). Memory allocated per
- * validation is intentionally not freed: dev tool, one reload = one tree. */
+ * (dependencies type-checked, cycle detection active). Each validation is
+ * now released — see vm_teardown. */
 static bool watch_validate(const char *script, char *err, size_t errsz) {
     VM vm;
     vm_init(&vm);
     bridge_init(&vm);
-    return loader_run(&vm, script, true, err, errsz) == 0;
+    bool ok = loader_run(&vm, script, true, err, errsz) == 0;
+    vm_teardown(&vm);
+    return ok;
 }
 
 static void file_sig(const char *path, struct timespec *mtime, long long *size) {
@@ -308,37 +321,37 @@ static int run_watch(const char *argv0, const char *script) {
     close(g_watch_pipe[1]);
     return 0;
 }
-#else /* _WIN32 */
-/* --watch needs fork/pipe/waitpid, which Windows does not provide. Fail with
- * an actionable message rather than a mysterious "unknown flag". */
-static int run_watch(const char *argv0, const char *script) {
-    (void)argv0; (void)script;
-    fprintf(stderr,
-            "lume: --watch is not supported on Windows (no fork/pipe).\n"
-            "      Run the script directly instead: lume %s\n",
-            script ? script : "<script.lume>");
-    return 2;
+
+#endif /* _WIN32 guard around --watch */
+
+#ifdef _WIN32
+/* Windows has no fork/exec/kqueue, so --watch is compiled out; but the
+ * normal run/check/compile paths still tear the VM down here. */
+static void vm_teardown(VM *vm) {
+    loader_free(vm);
+    vm_free(vm);
+    type_release_all();
 }
-#endif /* !_WIN32 */
+#endif
 
 int main(int argc, char **argv) {
     bool do_check = false;
     bool do_dump = false;
     bool do_watch = false;
-    bool no_net = false;
-    bool no_fs = false;
     const char *script = NULL;
     /* Script trailing CLI arguments (everything after the first non-flag
      * argument); seeded into vm.argv so scripts can read them via argv(). */
     const char *cli_args[64];
     int cli_argc = 0;
+    bool no_fs = false;
+    bool no_net = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--check") == 0) do_check = true;
+        else if (strcmp(argv[i], "--no-fs") == 0) no_fs = true;
+        else if (strcmp(argv[i], "--no-net") == 0) no_net = true;
         else if (strcmp(argv[i], "--dump") == 0) do_dump = true;
         else if (strcmp(argv[i], "--watch") == 0) do_watch = true;
-        else if (strcmp(argv[i], "--no-net") == 0) no_net = true;
-        else if (strcmp(argv[i], "--no-fs") == 0) no_fs = true;
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(argv[0]);
             return 0;
@@ -348,33 +361,40 @@ int main(int argc, char **argv) {
             return 0;
         }
         else if (argv[i][0] != '-') {
-            if (!script) script = argv[i];
+            if (!script) script = argv[i];      /* first non-flag arg = script */
             else if (cli_argc < 64) cli_args[cli_argc++] = argv[i];
         }
         else { usage(argv[0]); return 2; }
     }
+    if (!script) { usage(argv[0]); return 2; }
+
     /* LUME_NO_FS is the same switch as --no-fs, so a supervisor can lock the
      * language down without rewriting the argv it execs. Anything but the
      * documented "off" spellings counts as on, which errs towards locking. */
-    {
-        const char *no_fs_env = getenv("LUME_NO_FS");
-        if (no_fs_env && no_fs_env[0] && strcmp(no_fs_env, "0") != 0 &&
-            strcmp(no_fs_env, "off") != 0 && strcmp(no_fs_env, "false") != 0) {
-            no_fs = true;
-        }
+    const char *no_fs_env = getenv("LUME_NO_FS");
+    /* An empty value counts as unset: `LUME_NO_FS=` is far more likely to come
+     * from a stray export than to mean "lock it down". */
+    if (no_fs_env && no_fs_env[0] && strcmp(no_fs_env, "0") != 0 &&
+        strcmp(no_fs_env, "off") != 0 && strcmp(no_fs_env, "false") != 0) {
+        no_fs = true;
     }
-    /* LUME_NO_NET is the same switch as --no-net, so a supervisor can lock the
-     * outbound side without editing argv (empty value counts as unset). */
-    {
-        const char *nn = getenv("LUME_NO_NET");
-        if (nn && nn[0] && strcmp(nn, "0") != 0 &&
-            strcmp(nn, "off") != 0 && strcmp(nn, "false") != 0) {
-            no_net = true;
-        }
-    }
-    if (!script) { usage(argv[0]); return 2; }
 
+    /* Same env spelling as --no-net (see LUME_NO_FS above for the rationale:
+     * a supervisor locks the language down without rewriting argv). */
+    const char *no_net_env = getenv("LUME_NO_NET");
+    if (no_net_env && no_net_env[0] && strcmp(no_net_env, "0") != 0 &&
+        strcmp(no_net_env, "off") != 0 && strcmp(no_net_env, "false") != 0) {
+        no_net = true;
+    }
+
+#ifndef _WIN32
     if (do_watch) return run_watch(argv[0], script);
+#else
+    if (do_watch) {
+        fprintf(stderr, "lume: --watch is not supported on Windows\n");
+        return 2;
+    }
+#endif
 
     if (do_dump) {
         /* single-file AST dump (imports are resolved by the loader, which is
@@ -393,6 +413,7 @@ int main(int argc, char **argv) {
             return 1;
         }
         node_print(prog, 0);
+        node_free(prog);        /* the dump is the parser's only consumer */
         free(source);
         type_release_all();     /* the parser builds Type nodes of its own */
         return 0;
@@ -400,8 +421,8 @@ int main(int argc, char **argv) {
 
     VM vm;
     vm_init(&vm);
-    vm.no_net = no_net;
     vm.no_fs = no_fs;
+    vm.no_net = no_net;
     bridge_init(&vm);
 
     /* Seed argv() with the script's trailing CLI arguments (after the script
@@ -420,37 +441,34 @@ int main(int argc, char **argv) {
      * module top levels in dependency order, the entry's last (entry env ==
      * vm->globals, so builtins and route/tool registrations keep working). */
     char err[512] = {0};
-    /* Every exit below abandons the VM, so each one sweeps the Type graph the
-     * loader/checker built - type_release_all() is idempotent and nothing can
-     * walk a Type once the VM is gone. The run() exit is deliberately absent
-     * from that list: see the note on it. */
     if (loader_run(&vm, script, do_check, err, sizeof(err)) != 0) {
         fprintf(stderr, "lume: %s\n", err[0] ? err : "load error");
-        type_release_all();
+        vm_teardown(&vm);
         return 1;
     }
 
     if (do_check) {
         printf("parse OK (%s)\n", script);
-        type_release_all();
+        vm_teardown(&vm);
         return 0;
     }
 
     if (vm.error) {
         fprintf(stderr, "lume: %s\n", vm.error_msg);
-        type_release_all();
+        vm_teardown(&vm);
         return 1;
     }
 
-    /* run() hands the process to agent-httpd. A script that never calls it
+    /* run() hands the process to agent-httpd (agenthttpd_run blocks inside the
+     * interpreter until the server shuts down). A script that never calls it
      * is a pure language program (compute + print) — that is fine, just not
-     * a server. That branch is also the only exit allowed to sweep: once
-     * run() is up the server is still serving routes that point into the
-     * AST, and the Type graph has to stay reachable for as long as it is. */
+     * a server. The run() exit is deliberately absent from the sweep list:
+     * once run() is up the server is still serving routes that point into
+     * the AST, and the Type graph has to stay reachable for as long as it is. */
     if (!vm.run_called) {
-        fprintf(stderr, "lume: note: script completed without run()\n");
-        type_release_all();
-        return 0;
+        int status = vm.main_status;   /* a top-level main() is the exit status */
+        vm_teardown(&vm);
+        return status;
     }
     return 0;
 }

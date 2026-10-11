@@ -1,6 +1,10 @@
 #include "lume.h"
 #include "builtins.h"
 #ifndef _WIN32
+/* Host build: iquest.c and the tool slices read the JSON reader half that
+ * rides in with agent-httpd's minijson.h; the sbuf writer half arrived the
+ * same way. Windows builds get lang/sbuf.h from lume.h instead and exclude
+ * the slices that need the reader (see the Makefile's $(IS_WINDOWS) branch). */
 #include "minijson.h"
 #endif
 #include <math.h>
@@ -12,9 +16,20 @@
  * The bridge (bridge.c) reuses the same call machinery for HTTP routes and
  * agent tool callbacks. */
 
+/* Statements and expressions are dispatched by a single big switch; the heavy
+ * cases live in their own functions so the dispatcher stays readable. */
 static void exec_statement(VM *vm, Node *n, Env *env);
 static void exec_block_walk(VM *vm, Node *block, Env *env);
+static void exec_statement_for(VM *vm, Node *n, Env *env);
+static void exec_statement_route(VM *vm, Node *n, Env *env);
+static void exec_statement_verbs(VM *vm, Node *n, Env *env);
+static void exec_statement_tool(VM *vm, Node *n, Env *env);
+static void eval_expr(VM *vm, Node *n, Env *env);
+static void eval_expr_literal(VM *vm, Node *n);
+static void eval_expr_member(VM *vm, Node *n, Env *env);
 static void eval_expr_index(VM *vm, Node *n, Env *env);
+static void eval_expr_binary(VM *vm, Node *n, Env *env);
+static void eval_expr_call(VM *vm, Node *n, Env *env);
 
 /* ---------- VM plumbing ---------- */
 
@@ -188,28 +203,9 @@ static Value vm_zero_value(VM *vm, Type *t) {
 static void eval_expr(VM *vm, Node *n, Env *env) {
     if (vm->error) return;
     switch (n->type) {
-        case N_LITERAL: {
-            switch (n->as.lit.kind) {
-                case LIT_NUM:
-                    /* Integers keep their i64 (docs/SPEC.md); only float literals take
-                     * the double slot. Pushing both through val_num() is what used to
-                     * round every int past 2^53. */
-                    if (n->as.lit.is_float) vm_push(vm, val_float(n->as.lit.num));
-                    else                   vm_push(vm, val_int(n->as.lit.inum));
-                    return;
-                case LIT_TRUE: vm_push(vm, val_bool(true)); return;
-                case LIT_FALSE: vm_push(vm, val_bool(false)); return;
-                case LIT_NULL: vm_push(vm, val_null()); return;
-                case LIT_STR: {
-                    int len = 0;
-                    char *txt = unescape_literal(n->as.lit.text, n->as.lit.len, &len);
-                    vm_push(vm, make_string(vm, txt, (size_t)len));
-                    free(txt);
-                    return;
-                }
-            }
+        case N_LITERAL:
+            eval_expr_literal(vm, n);
             return;
-        }
         case N_VAR: {
             int found = 0;
             Value v = env_get(env, n->as.var.name, &found);
@@ -279,84 +275,18 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
             vm_push(vm, f);
             return;
         }
+        case N_MEMBER:
+            eval_expr_member(vm, n, env);
+            return;
         case N_INDEX:
             eval_expr_index(vm, n, env);
             return;
-        case N_MEMBER: {
-            eval_expr(vm, n->as.member.obj, env);
-            if (vm->error) return;
-            Value objv = vm_peek(vm, 0);
-            if (IS_OBJ(objv)) {
-                Obj *o = AS_OBJ(objv);
-                if (o->type == OBJ_MAP) {
-                    /* An anonymous map answers `.len` / `.length` with its key
-                     * count. The list and the string below do the same; the
-                     * checker already types a map's `.len` as int, so refusing
-                     * it here would reject a program that type-checked clean. */
-                    if (!o->sname &&
-                        (strcmp(n->as.member.name, "len") == 0 ||
-                         strcmp(n->as.member.name, "length") == 0)) {
-                        vm_pop(vm);
-                        vm_push(vm, val_int((long long)o->as.map.count));
-                        return;
-                    }
-                    /* A map carrying a static struct name is one of those
-                     * bound to a named type: `.len` is the field the user
-                     * declared (what a native backend emits), not a key
-                     * count. The lookup below reads it; without such a field
-                     * the checker already rejected the program. */
-                    int found = 0;
-                    Value v = map_get(vm, o, n->as.member.name, &found);
-                    if (!found) {
-                        /* Member type is known statically (tool handler args
-                         * typed by the schema): a missing key reads as the
-                         * type's zero value instead of failing. */
-                        if (n->as.member.type) {
-                            Value z = vm_zero_value(vm, n->as.member.type);
-                            vm_pop(vm);
-                            vm_push(vm, z);
-                            return;
-                        }
-                        vm_set_error(vm, "line %zu: map has no field '%s'", n->line, n->as.member.name);
-                        return;
-                    }
-                    vm_pop(vm);
-                    vm_push(vm, v);
-                    return;
-                }
-                if (o->type == OBJ_STRING &&
-                    (strcmp(n->as.member.name, "len") == 0 ||
-                     strcmp(n->as.member.name, "length") == 0)) {
-                    vm_pop(vm);
-                    vm_push(vm, val_int((long long)o->as.str.len));
-                    return;
-                }
-                if (o->type == OBJ_LIST &&
-                    (strcmp(n->as.member.name, "len") == 0 ||
-                     strcmp(n->as.member.name, "length") == 0)) {
-                    vm_pop(vm);
-                    vm_push(vm, val_int(o->as.list.count));
-                    return;
-                }
-                if (o->type == OBJ_ENV) {
-                    /* `import "x" as ns` — read a module export */
-                    Env *e = (Env *)o;
-                    int found = 0;
-                    Value v = env_get(e, n->as.member.name, &found);
-                    if (!found) {
-                        vm_set_error(vm, "line %zu: module has no export '%s'",
-                                     n->line, n->as.member.name);
-                        return;
-                    }
-                    vm_pop(vm);
-                    vm_push(vm, v);
-                    return;
-                }
-            }
-            vm_set_error(vm, "line %zu: cannot read field '%s' on this value",
-                         n->line, n->as.member.name);
+        case N_BINARY:
+            eval_expr_binary(vm, n, env);
             return;
-        }
+        case N_CALL:
+            eval_expr_call(vm, n, env);
+            return;
         case N_UNARY: {
             eval_expr(vm, n->as.unary.operand, env);
             if (vm->error) return;
@@ -374,166 +304,35 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
             }
             return;
         }
-        case N_BINARY: {
-            Op op = n->as.binary.op;
-            if (op == OP_AND || op == OP_OR) {
-                /* short-circuit: never evaluate the right operand unless the
-                 * left decides the result (b != 0 and a / b > 1 must not
-                 * divide by zero when b == 0) */
-                eval_expr(vm, n->as.binary.left, env);
-                if (vm->error) return;
-                bool lt = value_truthy(vm_pop(vm));
-                if ((op == OP_AND && !lt) || (op == OP_OR && lt)) {
-                    vm_push(vm, val_bool(lt));
-                    return;
-                }
-                eval_expr(vm, n->as.binary.right, env);
-                if (vm->error) return;
-                bool rt = value_truthy(vm_pop(vm));
-                vm_push(vm, val_bool(op == OP_AND ? (lt && rt) : (lt || rt)));
-                return;
-            }
-            eval_expr(vm, n->as.binary.left, env);
-            if (vm->error) return;
-            eval_expr(vm, n->as.binary.right, env);
-            if (vm->error) return;
-            Value r = vm_pop(vm);
-            Value l = vm_pop(vm);
-
-            if (n->as.binary.op == OP_EQ || n->as.binary.op == OP_NE) {
-                bool eq = values_equal(l, r);
-                vm_push(vm, val_bool(n->as.binary.op == OP_EQ ? eq : !eq));
-                return;
-            }
-
-            /* string concatenation with + */
-            if (n->as.binary.op == OP_ADD &&
-                IS_OBJ(l) && AS_OBJ(l)->type == OBJ_STRING &&
-                IS_OBJ(r) && AS_OBJ(r)->type == OBJ_STRING) {
-                Obj *a = AS_OBJ(l), *b = AS_OBJ(r);
-                size_t total = a->as.str.len + b->as.str.len;
-                char *buf = malloc(total + 1);
-                if (total) {
-                    memcpy(buf, obj_string(a), a->as.str.len);
-                    memcpy(buf + a->as.str.len, obj_string(b), b->as.str.len);
-                }
-                buf[total] = '\0';
-                Value s = make_string(vm, buf, total);
-                free(buf);
-                vm_push(vm, s);
-                return;
-            }
-
-            if (!IS_NUM(l) || !IS_NUM(r)) {
-                vm_set_error(vm, "line %zu: operator needs numbers", n->line);
-                return;
-            }
-            /* int op int is i64 arithmetic, wrapping like the native backends'
-             * unadorned `add i64` (docs/SPEC.md §integers). Everything else promotes
-             * to double. This must not be reordered into a single double path: doing
-             * so is what made `m + 1` saturate in the interpreter while the native
-             * backends wrapped, i.e. the same program meant two different numbers.
-             * `/` and `%` promote even for two ints, because `/` is documented as
-             * floating-point division (7 / 2 == 3.5) and codegen widens to match. */
-            if (IS_INT(l) && IS_INT(r) &&
-                n->as.binary.op != OP_DIV && n->as.binary.op != OP_MOD) {
-                long long a = AS_INT(l), b = AS_INT(r);
-                switch (n->as.binary.op) {
-                    case OP_ADD: vm_push(vm, val_int((long long)((unsigned long long)a + (unsigned long long)b))); return;
-                    case OP_SUB: vm_push(vm, val_int((long long)((unsigned long long)a - (unsigned long long)b))); return;
-                    case OP_MUL: vm_push(vm, val_int((long long)((unsigned long long)a * (unsigned long long)b))); return;
-                    case OP_LT:  vm_push(vm, val_bool(a <  b)); return;
-                    case OP_LE:  vm_push(vm, val_bool(a <= b)); return;
-                    case OP_GT:  vm_push(vm, val_bool(a >  b)); return;
-                    case OP_GE:  vm_push(vm, val_bool(a >= b)); return;
-                    default: vm_push(vm, val_null()); return;
-                }
-            }
-            double a = AS_NUM(l), b = AS_NUM(r);
-            switch (n->as.binary.op) {
-                case OP_ADD: vm_push(vm, val_float(a + b)); return;
-                case OP_SUB: vm_push(vm, val_float(a - b)); return;
-                case OP_MUL: vm_push(vm, val_float(a * b)); return;
-                case OP_DIV:
-                    if (b == 0) { vm_set_error(vm, "division by zero"); return; }
-                    vm_push(vm, val_float(a / b));
-                    return;
-                case OP_MOD:
-                    if (b == 0) { vm_set_error(vm, "modulo by zero"); return; }
-                    /* Integer modulo stays integer (and keeps C's sign convention:
-                     * the result takes the dividend's sign) so that `n % 2` on a large
-                     * int is not routed through fmod's double. Computed from AS_INT,
-                     * not the widened a/b — a % b on doubles would be UB for values
-                     * that are not exactly representable.
-                     *
-                     * Both emitters reject `%` on floats outright
-                     * ("'%' does not apply to floats", codegen_expr.c / llvm_codegen.c),
-                     * so the interpreter must refuse it too rather than answer with
-                     * fmod: the three have to agree byte-for-byte (docs/SPEC.md §6). */
-                    if (IS_INT(l) && IS_INT(r)) {
-                        long long ia = AS_INT(l), ib = AS_INT(r);
-                        vm_push(vm, val_int(ia % ib));
-                    } else {
-                        vm_set_error(vm, "line %zu: '%%' does not apply to floats",
-                                     n->line);
-                        return;
-                    }
-                    return;
-                case OP_LT: vm_push(vm, val_bool(a < b)); return;
-                case OP_LE: vm_push(vm, val_bool(a <= b)); return;
-                case OP_GT: vm_push(vm, val_bool(a > b)); return;
-                case OP_GE: vm_push(vm, val_bool(a >= b)); return;
-                default: vm_push(vm, val_null()); return;
-            }
-        }
-        case N_CALL: {
-            eval_expr(vm, n->as.call.callee, env);
-            if (vm->error) return;
-            for (int i = 0; i < n->as.call.argc; i++) {
-                eval_expr(vm, n->as.call.args[i], env);
-                if (vm->error) return;
-            }
-            /* stack now: [callee, a0..an-1] */
-            Value callee = vm_peek(vm, n->as.call.argc);
-            if (!IS_OBJ(callee) ||
-                (AS_OBJ(callee)->type != OBJ_FUNC && AS_OBJ(callee)->type != OBJ_NATIVE)) {
-                vm_set_error(vm, "line %zu: trying to call a non-function", n->line);
-                return;
-            }
-            call_function(vm, callee, n->as.call.argc);
-            if (vm->error) return;
-            if (n->as.call.propagate) {
-                /* `?` — unwrap a Result: `{ err: e }` propagates up like a
-                 * return; `{ ok: v }` becomes the expression's value. */
-                Value r = vm_peek(vm, 0);
-                if (IS_OBJ(r) && AS_OBJ(r)->type == OBJ_MAP) {
-                    Obj *res = AS_OBJ(r);
-                    int found = 0;
-                    map_get(vm, res, "err", &found);
-                    if (found) {
-                        if (vm->jump_depth <= 0) {
-                            vm_set_error(vm,
-                                "line %zu: '?' with an error outside a function",
-                                n->line);
-                            return;
-                        }
-                        vm->call_result = r;
-                        longjmp(vm->jump_bufs[vm->jump_depth - 1], 1);
-                    }
-                    Value o = map_get(vm, res, "ok", &found);
-                    if (found) {
-                        vm_pop(vm);
-                        vm_push(vm, o);
-                    }
-                    /* neither key: not a Result — no-op (loose callee) */
-                }
-            }
-            return;
-        }
         default:
             vm_set_error(vm, "line %zu: internal error (expr node %d)", n->line, (int)n->type);
             return;
     }
+}
+
+/* ---------- expression cases, one function each ---------- */
+
+static void eval_expr_literal(VM *vm, Node *n) {
+    switch (n->as.lit.kind) {
+        case LIT_NUM:
+            /* Integers keep their i64 (docs/SPEC.md); only float literals take
+             * the double slot. Pushing both through val_num() is what used to
+             * round every int past 2^53. */
+            if (n->as.lit.is_float) vm_push(vm, val_float(n->as.lit.num));
+            else                   vm_push(vm, val_int(n->as.lit.inum));
+            return;
+        case LIT_TRUE: vm_push(vm, val_bool(true)); return;
+        case LIT_FALSE: vm_push(vm, val_bool(false)); return;
+        case LIT_NULL: vm_push(vm, val_null()); return;
+        case LIT_STR: {
+            int len = 0;
+            char *txt = unescape_literal(n->as.lit.text, n->as.lit.len, &len);
+            vm_push(vm, make_string(vm, txt, (size_t)len));
+            free(txt);
+            return;
+        }
+    }
+    return;
 }
 
 /* `m["k"]` / `l[0]`. The index expression is evaluated first and left on the
@@ -594,6 +393,243 @@ static void eval_expr_index(VM *vm, Node *n, Env *env) {
     vm_push(vm, out);
 }
 
+static void eval_expr_member(VM *vm, Node *n, Env *env) {
+    eval_expr(vm, n->as.member.obj, env);
+    if (vm->error) return;
+    Value objv = vm_peek(vm, 0);
+    if (IS_OBJ(objv)) {
+        Obj *o = AS_OBJ(objv);
+        if (o->type == OBJ_MAP) {
+            /* An anonymous map answers `.len` / `.length` with its key count.
+             * The list and the string below do the same, and both native
+             * backends already route `.len` to lume_map_len — the interpreter
+             * must not be the one leg that refuses it. */
+            if (!o->sname &&
+                (strcmp(n->as.member.name, "len") == 0 ||
+                 strcmp(n->as.member.name, "length") == 0)) {
+                vm_pop(vm);
+                vm_push(vm, val_int((long long)o->as.map.count));
+                return;
+            }
+            /* A map carrying a static struct name (sname, set when a literal
+             * is bound to a named type) is not a bare bag of keys: `.len` is
+             * the field the user declared, which is what both native backends
+             * read. The lookup below answers it, and a struct with no such
+             * field fails the way the compiler fails — it must not quietly
+             * hand back a member count. */
+            int found = 0;
+            Value v = map_get(vm, o, n->as.member.name, &found);
+            if (!found) {
+                /* Member type is known statically (tool handler args
+                 * typed by the schema): a missing key reads as the
+                 * type's zero value instead of failing. */
+                if (n->as.member.type) {
+                    Value z = vm_zero_value(vm, n->as.member.type);
+                    vm_pop(vm);
+                    vm_push(vm, z);
+                    return;
+                }
+                vm_set_error(vm, "line %zu: map has no field '%s'", n->line, n->as.member.name);
+                return;
+            }
+            vm_pop(vm);
+            vm_push(vm, v);
+            return;
+        }
+        if (o->type == OBJ_STRING &&
+            (strcmp(n->as.member.name, "len") == 0 ||
+             strcmp(n->as.member.name, "length") == 0)) {
+            vm_pop(vm);
+            vm_push(vm, val_int((long long)o->as.str.len));
+            return;
+        }
+        if (o->type == OBJ_LIST &&
+            (strcmp(n->as.member.name, "len") == 0 ||
+             strcmp(n->as.member.name, "length") == 0)) {
+            vm_pop(vm);
+            vm_push(vm, val_int(o->as.list.count));
+            return;
+        }
+        if (o->type == OBJ_ENV) {
+            /* `import "x" as ns` — read a module export */
+            Env *e = (Env *)o;
+            int found = 0;
+            Value v = env_get(e, n->as.member.name, &found);
+            if (!found) {
+                vm_set_error(vm, "line %zu: module has no export '%s'",
+                             n->line, n->as.member.name);
+                return;
+            }
+            vm_pop(vm);
+            vm_push(vm, v);
+            return;
+        }
+    }
+    vm_set_error(vm, "line %zu: cannot read field '%s' on this value",
+                 n->line, n->as.member.name);
+    return;
+}
+
+static void eval_expr_binary(VM *vm, Node *n, Env *env) {
+    Op op = n->as.binary.op;
+    if (op == OP_AND || op == OP_OR) {
+        /* short-circuit: never evaluate the right operand unless the
+         * left decides the result (b != 0 and a / b > 1 must not
+         * divide by zero when b == 0) */
+        eval_expr(vm, n->as.binary.left, env);
+        if (vm->error) return;
+        bool lt = value_truthy(vm_pop(vm));
+        if ((op == OP_AND && !lt) || (op == OP_OR && lt)) {
+            vm_push(vm, val_bool(lt));
+            return;
+        }
+        eval_expr(vm, n->as.binary.right, env);
+        if (vm->error) return;
+        bool rt = value_truthy(vm_pop(vm));
+        vm_push(vm, val_bool(op == OP_AND ? (lt && rt) : (lt || rt)));
+        return;
+    }
+    eval_expr(vm, n->as.binary.left, env);
+    if (vm->error) return;
+    eval_expr(vm, n->as.binary.right, env);
+    if (vm->error) return;
+    Value r = vm_pop(vm);
+    Value l = vm_pop(vm);
+
+    if (n->as.binary.op == OP_EQ || n->as.binary.op == OP_NE) {
+        bool eq = values_equal(l, r);
+        vm_push(vm, val_bool(n->as.binary.op == OP_EQ ? eq : !eq));
+        return;
+    }
+
+    /* string concatenation with + */
+    if (n->as.binary.op == OP_ADD &&
+        IS_OBJ(l) && AS_OBJ(l)->type == OBJ_STRING &&
+        IS_OBJ(r) && AS_OBJ(r)->type == OBJ_STRING) {
+        Obj *a = AS_OBJ(l), *b = AS_OBJ(r);
+        size_t total = a->as.str.len + b->as.str.len;
+        char *buf = malloc(total + 1);
+        /* malloc is unchecked two lines below this; on a NULL return the
+         * terminator write would land on NULL. */
+        if (!buf) { vm_set_error(vm, "out of memory"); return; }
+        if (total) {
+            memcpy(buf, obj_string(a), a->as.str.len);
+            memcpy(buf + a->as.str.len, obj_string(b), b->as.str.len);
+        }
+        buf[total] = '\0';
+        Value s = make_string(vm, buf, total);
+        free(buf);
+        vm_push(vm, s);
+        return;
+    }
+
+    if (!IS_NUM(l) || !IS_NUM(r)) {
+        vm_set_error(vm, "line %zu: operator needs numbers", n->line);
+        return;
+    }
+    /* int op int is i64 arithmetic, wrapping like the native backends'
+     * unadorned `add i64` (docs/SPEC.md §integers). Everything else promotes
+     * to double. This must not be reordered into a single double path: doing
+     * so is what made `m + 1` saturate in the interpreter while the native
+     * backends wrapped, i.e. the same program meant two different numbers.
+     * `/` and `%` promote even for two ints, because `/` is documented as
+     * floating-point division (7 / 2 == 3.5) and codegen widens to match. */
+    if (IS_INT(l) && IS_INT(r) &&
+        n->as.binary.op != OP_DIV && n->as.binary.op != OP_MOD) {
+        long long a = AS_INT(l), b = AS_INT(r);
+        switch (n->as.binary.op) {
+            case OP_ADD: vm_push(vm, val_int((long long)((unsigned long long)a + (unsigned long long)b))); return;
+            case OP_SUB: vm_push(vm, val_int((long long)((unsigned long long)a - (unsigned long long)b))); return;
+            case OP_MUL: vm_push(vm, val_int((long long)((unsigned long long)a * (unsigned long long)b))); return;
+            case OP_LT:  vm_push(vm, val_bool(a <  b)); return;
+            case OP_LE:  vm_push(vm, val_bool(a <= b)); return;
+            case OP_GT:  vm_push(vm, val_bool(a >  b)); return;
+            case OP_GE:  vm_push(vm, val_bool(a >= b)); return;
+            default: vm_push(vm, val_null()); return;
+        }
+    }
+    double a = AS_NUM(l), b = AS_NUM(r);
+    switch (n->as.binary.op) {
+        case OP_ADD: vm_push(vm, val_float(a + b)); return;
+        case OP_SUB: vm_push(vm, val_float(a - b)); return;
+        case OP_MUL: vm_push(vm, val_float(a * b)); return;
+        case OP_DIV:
+            if (b == 0) { vm_set_error(vm, "division by zero"); return; }
+            vm_push(vm, val_float(a / b));
+            return;
+        case OP_MOD:
+            if (b == 0) { vm_set_error(vm, "modulo by zero"); return; }
+            /* Integer modulo stays integer (and keeps C's sign convention:
+             * the result takes the dividend's sign) so that `n % 2` on a large
+             * int is not routed through fmod's double. Computed from AS_INT,
+             * not the widened a/b — a % b on doubles would be UB for values
+             * that are not exactly representable.
+             *
+             * Both emitters reject `%` on floats outright
+             * ("'%' does not apply to floats", codegen_expr.c / llvm_codegen.c),
+             * so the interpreter must refuse it too rather than answer with
+             * fmod: the three have to agree byte-for-byte (docs/SPEC.md §6). */
+            if (IS_INT(l) && IS_INT(r)) {
+                long long ia = AS_INT(l), ib = AS_INT(r);
+                vm_push(vm, val_int(ia % ib));
+            } else {
+                vm_set_error(vm, "line %zu: '%%' does not apply to floats",
+                             n->line);
+                return;
+            }
+            return;
+        case OP_LT: vm_push(vm, val_bool(a < b)); return;
+        case OP_LE: vm_push(vm, val_bool(a <= b)); return;
+        case OP_GT: vm_push(vm, val_bool(a > b)); return;
+        case OP_GE: vm_push(vm, val_bool(a >= b)); return;
+        default: vm_push(vm, val_null()); return;
+    }
+}
+
+static void eval_expr_call(VM *vm, Node *n, Env *env) {
+    eval_expr(vm, n->as.call.callee, env);
+    if (vm->error) return;
+    for (int i = 0; i < n->as.call.argc; i++) {
+        eval_expr(vm, n->as.call.args[i], env);
+        if (vm->error) return;
+    }
+    /* stack now: [callee, a0..an-1] */
+    Value callee = vm_peek(vm, n->as.call.argc);
+    if (!IS_OBJ(callee) ||
+        (AS_OBJ(callee)->type != OBJ_FUNC && AS_OBJ(callee)->type != OBJ_NATIVE)) {
+        vm_set_error(vm, "line %zu: trying to call a non-function", n->line);
+        return;
+    }
+    call_function(vm, callee, n->as.call.argc);
+    if (vm->error) return;
+    if (!n->as.call.propagate) return;
+    /* `?` — unwrap a Result: `{ err: e }` propagates up like a
+     * return; `{ ok: v }` becomes the expression's value. */
+    Value r = vm_peek(vm, 0);
+    if (IS_OBJ(r) && AS_OBJ(r)->type == OBJ_MAP) {
+        Obj *res = AS_OBJ(r);
+        int found = 0;
+        map_get(vm, res, "err", &found);
+        if (found) {
+            if (vm->jump_depth <= 0) {
+                vm_set_error(vm,
+                    "line %zu: '?' with an error outside a function",
+                    n->line);
+                return;
+            }
+            vm->call_result = r;
+            longjmp(vm->jump_bufs[vm->jump_depth - 1], 1);
+        }
+        Value o = map_get(vm, res, "ok", &found);
+        if (found) {
+            vm_pop(vm);
+            vm_push(vm, o);
+        }
+        /* neither key: not a Result — no-op (loose callee) */
+    }
+    return;
+}
+
 /* ---------- statements ---------- */
 
 static void exec_statement(VM *vm, Node *n, Env *env) {
@@ -609,8 +645,10 @@ static void exec_statement(VM *vm, Node *n, Env *env) {
             eval_expr(vm, n->as.let.init, env);
             if (vm->error) return;
             Value v = vm_pop(vm);
-            /* 具名 struct 类型的 map 保留类型名: `.len` 之后要读用户声明的
-             * 字段(而不是键数量), 与 lume-core 两个原生后端同规则。 */
+            /* Keep the named struct type on the object when a map literal is
+             * bound to it: `.len` then reads the declared field (which is
+             * what the compiler emits) instead of answering with the key
+             * count, so the interpreter and the native backends agree. */
             Type *at = n->as.let.annot;
             if (at && at->kind == TY_STRUCT && at->name &&
                 IS_OBJ(v) && AS_OBJ(v)->type == OBJ_MAP)
@@ -643,63 +681,9 @@ static void exec_statement(VM *vm, Node *n, Env *env) {
             vm->loop_continue = saved_cont;
             return;
         }
-        case N_FOR: {
-            bool saved_brk = vm->loop_break, saved_cont = vm->loop_continue;
-            vm->loop_break = vm->loop_continue = false;
-            if (n->as.fors.is_in) {
-                /* for (x in xs) — iterate a list's items or a map's keys */
-                eval_expr(vm, n->as.fors.iterable, env);
-                if (vm->error) goto for_done;
-                Value it = vm_pop(vm);
-                if (!IS_OBJ(it)) {
-                    vm_set_error(vm, "line %zu: for-in expects a list or map", n->line);
-                    goto for_done;
-                }
-                Obj *o = AS_OBJ(it);
-                int n_items = -1;
-                if (o->type == OBJ_LIST) n_items = o->as.list.count;
-                else if (o->type == OBJ_MAP) n_items = o->as.map.count;
-                if (n_items < 0) {
-                    vm_set_error(vm, "line %zu: for-in expects a list or map", n->line);
-                    goto for_done;
-                }
-                for (int i = 0; i < n_items && !vm->error; i++) {
-                    Value item = (o->type == OBJ_LIST)
-                                     ? o->as.list.items[i]
-                                     : make_string_cstr(vm, o->as.map.keys[i]);
-                    env_set(vm, env, n->as.fors.var, item);
-                    exec_statement(vm, n->as.fors.body, env);
-                    if (vm->error) break;
-                    if (vm->loop_break) { vm->loop_break = false; break; }
-                    if (vm->loop_continue) vm->loop_continue = false;
-                }
-            } else {
-                /* for (init; cond; incr) — C-style, all three optional */
-                if (n->as.fors.init) {
-                    exec_statement(vm, n->as.fors.init, env);
-                    if (vm->error) goto for_done;
-                }
-                while (!vm->error) {
-                    if (n->as.fors.cond) {
-                        eval_expr(vm, n->as.fors.cond, env);
-                        if (vm->error) goto for_done;
-                        if (!value_truthy(vm_pop(vm))) break;
-                    }
-                    exec_statement(vm, n->as.fors.body, env);
-                    if (vm->error) goto for_done;
-                    if (vm->loop_break) { vm->loop_break = false; break; }
-                    if (vm->loop_continue) vm->loop_continue = false;
-                    if (n->as.fors.incr) {
-                        exec_statement(vm, n->as.fors.incr, env);
-                        if (vm->error) goto for_done;
-                    }
-                }
-            }
-        for_done:
-            vm->loop_break = saved_brk;
-            vm->loop_continue = saved_cont;
+        case N_FOR:
+            exec_statement_for(vm, n, env);
             return;
-        }
         case N_BREAK:
             vm->loop_break = true;
             return;
@@ -749,147 +733,15 @@ static void exec_statement(VM *vm, Node *n, Env *env) {
             }
             return;
         }
-        case N_ROUTE: {
-            Value handler;
-            if (n->as.route.handler) {
-                eval_expr(vm, n->as.route.handler, env);
-                if (vm->error) return;
-                handler = vm_pop(vm);
-            } else {
-                handler = vm->default_handler; /* handler-less route */
-            }
-            if (n->as.route.alias) {
-                /* `group "path", handler;` -> one route per method in the
-                 * group, all sharing the same handler. A list group registers
-                 * bare methods; a map group (method -> label) also attaches a
-                 * label that the shim exposes as req.label. */
-                int found = 0;
-                Value group = env_get(env, n->as.route.alias, &found);
-                if (!found || !IS_OBJ(group) ||
-                    (AS_OBJ(group)->type != OBJ_LIST &&
-                     AS_OBJ(group)->type != OBJ_MAP)) {
-                    vm_set_error(vm, "line %zu: unknown verb group '%s' "
-                                 "(declare it with `verbs %s = [...];` first)",
-                                 n->line, n->as.route.alias, n->as.route.alias);
-                    return;
-                }
-                Obj *g = AS_OBJ(group);
-                if (g->type == OBJ_LIST) {
-                    for (int i = 0; i < g->as.list.count; i++) {
-                        Value mv = g->as.list.items[i];
-                        if (!IS_OBJ(mv) || AS_OBJ(mv)->type != OBJ_STRING) {
-                            vm_set_error(vm, "line %zu: verb group '%s' must contain "
-                                         "only method strings",
-                                         n->line, n->as.route.alias);
-                            return;
-                        }
-                        const char *m = obj_string(AS_OBJ(mv));
-                        if (bridge_define_route(vm, m, n->as.route.path, handler,
-                                                NULL) != 0) {
-                            vm_set_error(vm, "failed to register route %s %s", m,
-                                         n->as.route.path);
-                            return;
-                        }
-                    }
-                } else {
-                    for (int i = 0; i < g->as.map.count; i++) {
-                        const char *m = g->as.map.keys[i];
-                        Value lv = g->as.map.vals[i];
-                        const char *label = NULL;
-                        if (IS_OBJ(lv) && AS_OBJ(lv)->type == OBJ_STRING) {
-                            label = obj_string(AS_OBJ(lv));
-                        } else if (!IS_NULL(lv)) {
-                            vm_set_error(vm, "line %zu: verb group '%s' label for "
-                                         "%s must be a string",
-                                         n->line, n->as.route.alias, m);
-                            return;
-                        }
-                        if (bridge_define_route(vm, m, n->as.route.path, handler,
-                                                label) != 0) {
-                            vm_set_error(vm, "failed to register route %s %s", m,
-                                         n->as.route.path);
-                            return;
-                        }
-                    }
-                }
-                return;
-            }
-            if (bridge_define_route(vm, n->as.route.method, n->as.route.path, handler,
-                                    NULL) != 0)
-                vm_set_error(vm, "failed to register route %s %s",
-                             n->as.route.method, n->as.route.path);
+        case N_ROUTE:
+            exec_statement_route(vm, n, env);
             return;
-        }
-        case N_VERBS: {
-            eval_expr(vm, n->as.verbs.methods, env);
-            if (vm->error) return;
-            Value methods = vm_pop(vm);
-            if (!IS_OBJ(methods) ||
-                (AS_OBJ(methods)->type != OBJ_LIST &&
-                 AS_OBJ(methods)->type != OBJ_MAP)) {
-                vm_set_error(vm, "line %zu: `verbs %s` needs a list of methods or "
-                             "a map of method -> label", n->line, n->as.verbs.name);
-                return;
-            }
-            Obj *g = AS_OBJ(methods);
-            if (g->type == OBJ_LIST) {
-                for (int i = 0; i < g->as.list.count; i++) {
-                    Value mv = g->as.list.items[i];
-                    if (!IS_OBJ(mv) || AS_OBJ(mv)->type != OBJ_STRING) {
-                        vm_set_error(vm, "line %zu: `verbs %s` items must be strings",
-                                     n->line, n->as.verbs.name);
-                        return;
-                    }
-                }
-            } else {
-                for (int i = 0; i < g->as.map.count; i++) {
-                    Value lv = g->as.map.vals[i];
-                    if (!IS_NULL(lv) &&
-                        !(IS_OBJ(lv) && AS_OBJ(lv)->type == OBJ_STRING)) {
-                        vm_set_error(vm, "line %zu: `verbs %s` label for %s must be "
-                                     "a string", n->line, n->as.verbs.name,
-                                     g->as.map.keys[i]);
-                        return;
-                    }
-                }
-            }
-            env_set(vm, env, n->as.verbs.name, methods);
+        case N_VERBS:
+            exec_statement_verbs(vm, n, env);
             return;
-        }
-        case N_TOOL: {
-            eval_expr(vm, n->as.tool.params, env);
-            if (vm->error) return;
-            Value params = vm_pop(vm);
-            sbuf b = {0};
-            if (IS_OBJ(params) && AS_OBJ(params)->type == OBJ_MAP) {
-                /* { a: int } — a bare type keyword evaluates to the seeded
-                 * native/function; rewrite such values to their name string so
-                 * the schema serializes as { a: "int" }. */
-                vm_push(vm, params);
-                Obj *m = AS_OBJ(params);
-                for (int i = 0; i < m->as.map.count; i++) {
-                    Value v = m->as.map.vals[i];
-                    if (IS_OBJ(v) && (AS_OBJ(v)->type == OBJ_NATIVE ||
-                                      AS_OBJ(v)->type == OBJ_FUNC)) {
-                        const char *nm = (AS_OBJ(v)->type == OBJ_NATIVE)
-                                             ? AS_OBJ(v)->as.native.name
-                                             : AS_OBJ(v)->as.fn.name;
-                        m->as.map.vals[i] = make_string_cstr(vm, nm ? nm : "");
-                    }
-                }
-                json_append_value(vm, &b, params);
-                vm_pop(vm);
-            } else {
-                json_append_value(vm, &b, params);
-            }
-            eval_expr(vm, n->as.tool.handler, env);
-            if (vm->error) return;
-            Value handler = vm_pop(vm);
-            if (bridge_define_tool(vm, n->as.tool.name, n->as.tool.desc,
-                                   b.p ? b.p : "", handler) != 0)
-                vm_set_error(vm, "failed to register tool '%s'", n->as.tool.name);
+        case N_TOOL:
+            exec_statement_tool(vm, n, env);
             return;
-        }
         case N_IMPORT: {
             /* `import "x.lume" as ns;` — the loader has already executed this
              * module's dependencies and rewritten the path to the canonical
@@ -907,6 +759,207 @@ static void exec_statement(VM *vm, Node *n, Env *env) {
             vm_set_error(vm, "line %zu: internal error (stmt node %d)", n->line, (int)n->type);
             return;
     }
+}
+
+/* ---------- statement cases, one function each ---------- */
+
+static void exec_statement_for(VM *vm, Node *n, Env *env) {
+    bool saved_brk = vm->loop_break, saved_cont = vm->loop_continue;
+    vm->loop_break = vm->loop_continue = false;
+    if (n->as.fors.is_in) {
+        /* for (x in xs) — iterate a list's items or a map's keys */
+        eval_expr(vm, n->as.fors.iterable, env);
+        if (vm->error) goto done;
+        Value it = vm_pop(vm);
+        if (!IS_OBJ(it)) {
+            vm_set_error(vm, "line %zu: for-in expects a list or map", n->line);
+            goto done;
+        }
+        Obj *o = AS_OBJ(it);
+        int n_items = -1;
+        if (o->type == OBJ_LIST) n_items = o->as.list.count;
+        else if (o->type == OBJ_MAP) n_items = o->as.map.count;
+        if (n_items < 0) {
+            vm_set_error(vm, "line %zu: for-in expects a list or map", n->line);
+            goto done;
+        }
+        for (int i = 0; i < n_items && !vm->error; i++) {
+            Value item = (o->type == OBJ_LIST)
+                             ? o->as.list.items[i]
+                             : make_string_cstr(vm, o->as.map.keys[i]);
+            env_set(vm, env, n->as.fors.var, item);
+            exec_statement(vm, n->as.fors.body, env);
+            if (vm->error) break;
+            if (vm->loop_break) { vm->loop_break = false; break; }
+            if (vm->loop_continue) vm->loop_continue = false;
+        }
+    } else {
+        /* for (init; cond; incr) — C-style, all three optional */
+        if (n->as.fors.init) {
+            exec_statement(vm, n->as.fors.init, env);
+            if (vm->error) goto done;
+        }
+        while (!vm->error) {
+            if (n->as.fors.cond) {
+                eval_expr(vm, n->as.fors.cond, env);
+                if (vm->error) goto done;
+                if (!value_truthy(vm_pop(vm))) break;
+            }
+            exec_statement(vm, n->as.fors.body, env);
+            if (vm->error) goto done;
+            if (vm->loop_break) { vm->loop_break = false; break; }
+            if (vm->loop_continue) vm->loop_continue = false;
+            if (n->as.fors.incr) {
+                exec_statement(vm, n->as.fors.incr, env);
+                if (vm->error) goto done;
+            }
+        }
+    }
+done:
+    vm->loop_break = saved_brk;
+    vm->loop_continue = saved_cont;
+}
+
+static void exec_statement_route(VM *vm, Node *n, Env *env) {
+    Value handler;
+    if (n->as.route.handler) {
+        eval_expr(vm, n->as.route.handler, env);
+        if (vm->error) return;
+        handler = vm_pop(vm);
+    } else {
+        handler = vm->default_handler; /* handler-less route */
+    }
+    if (n->as.route.alias) {
+        /* `group "path", handler;` -> one route per method in the
+         * group, all sharing the same handler. A list group registers
+         * bare methods; a map group (method -> label) also attaches a
+         * label that the shim exposes as req.label. */
+        int found = 0;
+        Value group = env_get(env, n->as.route.alias, &found);
+        if (!found || !IS_OBJ(group) ||
+            (AS_OBJ(group)->type != OBJ_LIST &&
+             AS_OBJ(group)->type != OBJ_MAP)) {
+            vm_set_error(vm, "line %zu: unknown verb group '%s' "
+                         "(declare it with `verbs %s = [...];` first)",
+                         n->line, n->as.route.alias, n->as.route.alias);
+            return;
+        }
+        Obj *g = AS_OBJ(group);
+        if (g->type == OBJ_LIST) {
+            for (int i = 0; i < g->as.list.count; i++) {
+                Value mv = g->as.list.items[i];
+                if (!IS_OBJ(mv) || AS_OBJ(mv)->type != OBJ_STRING) {
+                    vm_set_error(vm, "line %zu: verb group '%s' must contain "
+                                 "only method strings",
+                                 n->line, n->as.route.alias);
+                    return;
+                }
+                const char *m = obj_string(AS_OBJ(mv));
+                if (bridge_define_route(vm, m, n->as.route.path, handler,
+                                        NULL) != 0) {
+                    vm_set_error(vm, "failed to register route %s %s", m,
+                                 n->as.route.path);
+                    return;
+                }
+            }
+        } else {
+            for (int i = 0; i < g->as.map.count; i++) {
+                const char *m = g->as.map.keys[i];
+                Value lv = g->as.map.vals[i];
+                const char *label = NULL;
+                if (IS_OBJ(lv) && AS_OBJ(lv)->type == OBJ_STRING) {
+                    label = obj_string(AS_OBJ(lv));
+                } else if (!IS_NULL(lv)) {
+                    vm_set_error(vm, "line %zu: verb group '%s' label for "
+                                 "%s must be a string",
+                                 n->line, n->as.route.alias, m);
+                    return;
+                }
+                if (bridge_define_route(vm, m, n->as.route.path, handler,
+                                        label) != 0) {
+                    vm_set_error(vm, "failed to register route %s %s", m,
+                                 n->as.route.path);
+                    return;
+                }
+            }
+        }
+        return;
+    }
+    if (bridge_define_route(vm, n->as.route.method, n->as.route.path, handler,
+                            NULL) != 0)
+        vm_set_error(vm, "failed to register route %s %s",
+                     n->as.route.method, n->as.route.path);
+}
+
+static void exec_statement_verbs(VM *vm, Node *n, Env *env) {
+    eval_expr(vm, n->as.verbs.methods, env);
+    if (vm->error) return;
+    Value methods = vm_pop(vm);
+    if (!IS_OBJ(methods) ||
+        (AS_OBJ(methods)->type != OBJ_LIST &&
+         AS_OBJ(methods)->type != OBJ_MAP)) {
+        vm_set_error(vm, "line %zu: `verbs %s` needs a list of methods or "
+                     "a map of method -> label", n->line, n->as.verbs.name);
+        return;
+    }
+    Obj *g = AS_OBJ(methods);
+    if (g->type == OBJ_LIST) {
+        for (int i = 0; i < g->as.list.count; i++) {
+            Value mv = g->as.list.items[i];
+            if (!IS_OBJ(mv) || AS_OBJ(mv)->type != OBJ_STRING) {
+                vm_set_error(vm, "line %zu: `verbs %s` items must be strings",
+                             n->line, n->as.verbs.name);
+                return;
+            }
+        }
+    } else {
+        for (int i = 0; i < g->as.map.count; i++) {
+            Value lv = g->as.map.vals[i];
+            if (!IS_NULL(lv) &&
+                !(IS_OBJ(lv) && AS_OBJ(lv)->type == OBJ_STRING)) {
+                vm_set_error(vm, "line %zu: `verbs %s` label for %s must be "
+                             "a string", n->line, n->as.verbs.name,
+                             g->as.map.keys[i]);
+                return;
+            }
+        }
+    }
+    env_set(vm, env, n->as.verbs.name, methods);
+}
+
+static void exec_statement_tool(VM *vm, Node *n, Env *env) {
+    eval_expr(vm, n->as.tool.params, env);
+    if (vm->error) return;
+    Value params = vm_pop(vm);
+    sbuf b = {0};
+    if (IS_OBJ(params) && AS_OBJ(params)->type == OBJ_MAP) {
+        /* { a: int } — a bare type keyword evaluates to the seeded
+         * native/function; rewrite such values to their name string so
+         * the schema serializes as { a: "int" }. */
+        vm_push(vm, params);
+        Obj *m = AS_OBJ(params);
+        for (int i = 0; i < m->as.map.count; i++) {
+            Value v = m->as.map.vals[i];
+            if (IS_OBJ(v) && (AS_OBJ(v)->type == OBJ_NATIVE ||
+                              AS_OBJ(v)->type == OBJ_FUNC)) {
+                const char *nm = (AS_OBJ(v)->type == OBJ_NATIVE)
+                                     ? AS_OBJ(v)->as.native.name
+                                     : AS_OBJ(v)->as.fn.name;
+                m->as.map.vals[i] = make_string_cstr(vm, nm ? nm : "");
+            }
+        }
+        json_append_value(vm, &b, params);
+        vm_pop(vm);
+    } else {
+        json_append_value(vm, &b, params);
+    }
+    eval_expr(vm, n->as.tool.handler, env);
+    if (vm->error) { free(b.p); return; }
+    Value handler = vm_pop(vm);
+    if (bridge_define_tool(vm, n->as.tool.name, n->as.tool.desc,
+                           b.p ? b.p : "", handler) != 0)
+        vm_set_error(vm, "failed to register tool '%s'", n->as.tool.name);
+    free(b.p); /* bridge_define_tool only snprintf'd a copy into ToolRec */
 }
 
 /* ---------- VM setup & top-level execution ---------- */
@@ -943,6 +996,15 @@ static void seed_verb_groups(VM *vm) {
     vm_pop(vm);
 }
 
+/* http_get() 的实现在 builtins_http.c, 而它并不在所有下游里。下游换用
+ * 本文件(而不是自己 pin 一份)时, 注册这一行会留下一个未定义的 b_http_get,
+ * 链接直接失败。做成开关而不是硬注册, 下游就能用 -DLUME_HAS_HTTP=0 显式
+ * 声明「我没有这个内建」—— 这样 host 的 lang/interp.c 才有脱离 host_owned
+ * 的可能。默认开, 本树照旧。 */
+#ifndef LUME_HAS_HTTP
+#define LUME_HAS_HTTP 1
+#endif
+
 void bridge_seed_builtins(VM *vm) {
     struct { const char *name; NativeFn fn; } built[] = {
         {"run", b_run},
@@ -975,9 +1037,10 @@ void bridge_seed_builtins(VM *vm) {
         {"stringify", b_stringify},
         {"now", b_now},
         {"env", b_env},
-        {"files", b_files},
         {"argv", b_argv},
+        {"files", b_files},
         {"read_file", b_read_file},
+        {"read_stdin", b_read_stdin},
         {"write_file", b_write_file},
         {"mkdir", b_mkdir},
         {"lock_file", b_lock_file},
@@ -986,9 +1049,8 @@ void bridge_seed_builtins(VM *vm) {
         {"put", b_put},
         {"push", b_push}, /* DSL 层列表追加 (2026-09-27) */
         {"try", b_try}, /* 捕获 VM error -> {ok}/{err} (2026-09-27) */
-        /* 出站 HTTP (builtins_http.c, 源自 lume-core): raw socket, no libcurl.
-         * 私有地址默认拒绝;--no-net / LUME_NO_NET=1 整体关掉。注册挂在
-         * LUME_HAS_HTTP 开关上,缺 builtins_http.c 的下游可置 0。 */
+        /* 出站 HTTP (2026-10-04, builtins_http.c): raw socket, no libcurl.
+         * 私有地址默认拒绝,--no-net / LUME_NO_NET=1 整体关掉。 */
 #if LUME_HAS_HTTP
         {"http_get", b_http_get},
         {"http_post", b_http_post},
@@ -1034,13 +1096,41 @@ void vm_init(VM *vm) {
     bridge_seed_builtins(vm);
 }
 
+/* Is this statement an *expression statement* that calls `main`? Only such a
+ * statement is a program's status: the two native backends read main()'s value
+ * off the same kind of call when they build their C entry point, so the
+ * interpreter records it from the same place. */
+static bool is_top_level_main_call(Node *n) {
+    Node *e = n && n->type == N_EXPR_STMT ? n->as.expr_stmt.expr : NULL;
+    if (!e || e->type != N_CALL || !e->as.call.callee ||
+        e->as.call.callee->type != N_VAR)
+        return false;
+    const char *nm = e->as.call.callee->as.var.name;
+    return nm && strcmp(nm, "main") == 0;
+}
+
+/* Evaluate a top-level `main()` and keep its value as the process status —
+ * the statement itself would only pop it. TRUE when the statement was one, so
+ * the caller can skip the ordinary statement path. */
+static bool exec_top_main(VM *vm, Node *n, Env *env) {
+    if (!is_top_level_main_call(n)) return false;
+    eval_expr(vm, n->as.expr_stmt.expr, env);
+    if (vm->error) return true;
+    Value v = vm_pop(vm);
+    vm->main_status = IS_NUM(v) ? (int)AS_NUM(v) : 0;
+    return true;
+}
+
 void exec_program(VM *vm, Node *prog) {
     if (!prog || prog->type != N_PROGRAM) {
         vm_set_error(vm, "no program to run");
         return;
     }
-    for (int i = 0; i < prog->as.program.count && !vm->error; i++)
-        exec_statement(vm, prog->as.program.stmts[i], vm->globals);
+    for (int i = 0; i < prog->as.program.count && !vm->error; i++) {
+        Node *n = prog->as.program.stmts[i];
+        if (exec_top_main(vm, n, vm->globals)) continue;
+        exec_statement(vm, n, vm->globals);
+    }
 }
 
 /* Execute one module's top level (loader.c calls this in dependency order,
@@ -1053,8 +1143,14 @@ void exec_module_top(VM *vm, Module *m) {
     Env *saved_exports = vm->export_env;
     vm->globals = m->env;
     vm->export_env = m->exports;
-    for (int i = 0; i < m->prog->as.program.count && !vm->error; i++)
-        exec_statement(vm, m->prog->as.program.stmts[i], m->env);
+    for (int i = 0; i < m->prog->as.program.count && !vm->error; i++) {
+        Node *n = m->prog->as.program.stmts[i];
+        /* Only the entry module's main() is the process status; an imported
+         * module that happens to call one is an ordinary call like any
+         * other, and its value belongs to nobody. */
+        if (m->is_entry && exec_top_main(vm, n, m->env)) continue;
+        exec_statement(vm, n, m->env);
+    }
     vm->export_env = saved_exports;
     vm->globals = saved_globals;
 }

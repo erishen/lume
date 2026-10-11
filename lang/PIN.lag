@@ -1,16 +1,17 @@
 # upstream line count accepted for each host-owned file,
 # written by `sync-lang.py accept-lag`.  check reports growth
 # past this number, not the number itself.
-builtins.c 21
-builtins.h 2
+bridge_stub.c 1
+builtins.c 2
+builtins.h 1
 builtins_catalog.c 46
-builtins_fs.c 15
-builtins_http.c 3
-builtins_internal.h 59
-interp.c 552
-lume.h 75
-main.c 253
-typecheck.c 74
+builtins_fs.c 0
+builtins_http.c 4
+builtins_internal.h 35
+interp.c 1
+lume.h 9
+main.c 203
+typecheck.c 1
 typecheck_expr.c 0
 typecheck_stmt.c 0
 vdom.c 1
