@@ -6,6 +6,17 @@ All notable changes to Lume are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `lang/` hand-merged upstream lume-core @ `1435930` (pin `6e7a691` →
+  `1435930`): the DSL gains `sort(list)` (in-place, homogeneous
+  int/float/string, exact i64 ordering) and `str_match(pattern, text)` /
+  `regex` (POSIX ERE findall → `[{text, index, groups}]`), and the outbound
+  HTTP builtins now honor `NO_PROXY` / `no_proxy` (`.domain` suffix, exact
+  host/IP, `*`, optional `:port`; `LUME_NO_PROXY` wins over
+  `LUME_HTTP_PROXY`). Host-only parts kept: `HTTP_DBG` debug logging,
+  proxy-failure direct-connect fallback, `sql_*` registrations.
+
 ### Fixed
 
 - READMEs (en/zh) no longer claim the DSL has no outbound HTTP builtin —
