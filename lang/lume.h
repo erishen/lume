@@ -58,7 +58,7 @@
 typedef enum {
     TOK_EOF, TOK_ERROR,
 
-    TOK_IDENT, TOK_NUMBER, TOK_STRING,
+    TOK_IDENT, TOK_NUMBER, TOK_STRING, TOK_ISTR,
 
     /* keywords */
     TOK_SERVER, TOK_ROUTE, TOK_TOOL, TOK_FUNC, TOK_RETURN,
@@ -69,6 +69,7 @@ typedef enum {
     TOK_TYPE, TOK_INT, TOK_FLOAT, TOK_KW_STRING, TOK_BOOL, TOK_RESULT,
     TOK_GET, TOK_HEAD, TOK_POST, TOK_PUT, TOK_PATCH, TOK_DELETE, TOK_OPTIONS,
     TOK_VERBS,
+    TOK_ENUM, TOK_MATCH, TOK_PIPE,
 
     TOK_LPAREN, TOK_RPAREN, TOK_LBRACE, TOK_RBRACE,
     TOK_LBRACKET, TOK_RBRACKET,
@@ -90,6 +91,14 @@ typedef struct {
                           * value as the operand of a unary minus
                           * (`-9223372036854775808` == LLONG_MIN). inum holds
                           * the clamped LLONG_MAX until the parser negates it. */
+    /* TOK_ISTR only: the scanned segments of an `s!"..."` interpolated string,
+     * serialized as (tag byte 'L' = literal, already unescaped; 'E' = expression
+     * source text) + int32 length + payload, repeated. The parser deserializes
+     * this into a `str(...) + ...` tree and frees it; every token-free site
+     * must free a non-NULL istr. Heap-allocated (malloc'd), NULL for all other
+     * token types. */
+    char *istr;
+    int istr_len;
 } Token;
 
 const char *token_type_name(TokenType t);
@@ -105,6 +114,11 @@ typedef enum {
     TY_ANY,    /* untyped: route handlers, builtins, unchecked params */
     TY_LIST,   /* elem is the element type */
     TY_STRUCT, /* name != NULL for declared structs; anonymous otherwise */
+    TY_ENUM,   /* declared `enum X { ... }`: name is the enum name. A value
+                * travels as the same heap map the interpreter builds
+                * (`{ "$": variant, ...payload }`), so it is an opaque i8*
+                * natively — the variant list lives in the checker's enum
+                * table and each emitter's EDef table, keyed by name. */
     TY_FUNC,   /* a named/top-level function value */
     TY_RESULT, /* `{ ok: ... }` or `{ err: ... }` */
     TY_NS      /* module namespace: `import "lib.lume" as ns` — name is the
@@ -134,6 +148,7 @@ Type *type_prim(TypeKind kind);
 Type *type_list(Type *elem);
 Type *type_struct(const char *name);   /* named reference, resolved by checker */
 Type *type_anon_struct(void);
+Type *type_enum(const char *name);     /* enum reference, resolved by checker */
 Type *type_func(int arity, Type **params, Type *ret);
 Type *type_result(void);
 void type_add_member(Type *t, const char *name, Type *ty);
@@ -154,6 +169,31 @@ void type_release_all(void);
  * first error. Runs after parsing, before execution. */
 bool type_check_program(Node *prog, char *errbuf, size_t errbuf_size);
 bool is_builtin_name(const char *name);
+
+/* Local functions (SPEC §4.14): rewrite `func` declarations nested inside a
+ * function body into hoisted module-level functions.
+ *
+ * Every nested N_FUNC_DECL gets a synthetic name (`cname`), and every call
+ * inside its enclosing function that names the local is rewritten to that
+ * synthetic name. The local therefore resolves nowhere else — a top-level
+ * call to the source name is an undefined variable in all three backends,
+ * which is exactly the scoping a local declaration should have. Locals do
+ * not capture: they compile like any other module function.
+ *
+ * Idempotent (cnames are stamped once; already-rewritten calls no longer
+ * match the source name). Returns false + errbuf when two locals in one
+ * enclosing function share a name — the rewrite would otherwise rename
+ * both call sets to the second cname. Runs before the checker and again
+ * (as a guard) before native codegen. */
+bool lume_resolve_localfns(Node *prog, char *errbuf, size_t errbuf_size);
+
+/* Every N_FUNC_DECL in the program, top-level and nested (locals), in
+ * pre-order. Writes at most `cap` entries into `out` (which may be NULL);
+ * always returns the full count, so callers size their array with a NULL
+ * first pass. Shared by the checker's registration pass and both native
+ * backends. */
+int lume_collect_funcs(Node *prog, Node **out, int cap);
+
 /* Module-aware variant (loader.c): self = module being checked, mods =
  * registry of every loaded module (used to resolve `import "x" as ns`). */
 bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
@@ -287,6 +327,11 @@ struct Env {
     KVPair vars;
     Env *parent;
     Env *next_active;    /* dynamic frame chain for GC traversal */
+    bool is_boundary;    /* function frame / module env: assignment never
+                          * resolves past this point, so "assigning a name
+                          * that only exists further out defines a local"
+                          * (top-level names inside a function, globals
+                          * inside a module) keeps working. */
 };
 
 /* ---- GC / heap ---- */
@@ -294,6 +339,14 @@ Obj *gc_alloc(VM *vm, ObjType type, size_t size);
 void gc_collect(VM *vm);
 char *gc_strdup(VM *vm, const char *s, size_t n);
 char *gc_cstr(VM *vm, const char *s);
+
+/* The one escape table for string literals: \n \t \r \0 \\ \" (an unknown
+ * escape keeps the character verbatim). Interpreter and lexer share it so the
+ * two can never drift — the native backends unescape through it too, which is
+ * what keeps `"a\nb"` from printing four characters there. Input is the raw
+ * body WITHOUT quotes; the result is malloc'd (caller frees) and NUL-safe
+ * only as a convenience (a literal \0 keeps its length). */
+char *lume_unescape(const char *s, size_t n, size_t *out_len);
 
 /* ---- value constructors (allocate on the VM heap) ---- */
 Value make_string(VM *vm, const char *s, size_t n);
@@ -308,6 +361,7 @@ Value make_env(VM *vm, Env *parent);
 /* ---- map / env access ---- */
 Value map_get(VM *vm, Obj *map, const char *key, int *found);
 void map_set(VM *vm, Obj *map, const char *key, Value v);
+Obj *map_shallow_copy(VM *vm, Obj *src); /* `{ p with ... }` — see value.c */
 Value env_get(Env *env, const char *name, int *found);
 void env_set(VM *vm, Env *env, const char *name, Value v);
 
@@ -481,11 +535,15 @@ void loader_free(VM *vm);
 typedef enum {
     N_PROGRAM, N_BLOCK, N_LET, N_IF, N_WHILE, N_FOR, N_BREAK, N_CONTINUE,
     N_RETURN, N_EXPR_STMT,
-    N_SERVER, N_ROUTE, N_TOOL, N_VERBS, N_FUNC_DECL, N_TYPE_DECL,
+    N_SERVER, N_ROUTE, N_TOOL, N_VERBS, N_FUNC_DECL, N_TYPE_DECL, N_ENUM_DECL,
     N_VAR, N_ASSIGN, N_ASSIGN_MEMBER,
     N_LITERAL, N_MAP_LIT, N_LIST_LIT, N_FUNC_LIT,
     N_CALL, N_MEMBER, N_INDEX,
-    N_UNARY, N_BINARY,
+    N_UNARY, N_BINARY, N_TERNARY,
+    N_MATCH, N_CTOR, N_IF_LET,
+    N_LET_PAT, /* `let { a, b } = e;` — record destructuring */
+    N_LET_EXPR, /* `let x = e1 in e2` in expression position — Lean's let-in */
+    N_STRUCT_UPDATE, /* `{ base with f: e, ... }` — Lean's structure update */
     N_IMPORT   /* `import "path" as ns;` — top-level only */
 } NodeType;
 
@@ -499,6 +557,34 @@ typedef enum {
     OP_AND, OP_OR, OP_NEG, OP_NOT
 } Op;
 
+/* One alternative of a match arm's pattern: a variant name (or "_" for the
+ * catch-all) plus the positional binds. An or-pattern arm (`A | B => body`)
+ * carries one MatchPat per alternative; all alternatives must bind the same
+ * names (types unified per name), so the arm has a single binding set — the
+ * Lean rule where each alternative may bind differently-typed names is an
+ * MVP restriction here (see docs/SPEC.md 3.7).
+ * vfields/vfieldc are stamped by parser.c's resolve_ctors: the variant's own
+ * field names, borrowed from the enum decl (not owned — freed with it). */
+typedef struct MatchPat {
+    char *vname;
+    char **binds;
+    int bindc;
+    char **vfields;   /* resolve_ctors stamp; borrowed from the enum decl */
+    int vfieldc;
+    Type **vfield_types;  /* same stamp, payload types (scalars only) */
+} MatchPat;
+
+/* One `Pattern | Pattern [if guard] => body` arm of a match. `guard` is NULL
+ * when the arm is unconditional. A guarded arm does not count towards
+ * exhaustiveness (Lean's rule) and never conflicts with a later arm. */
+typedef struct MatchArm {
+    MatchPat *pats;
+    int patc;
+    struct Node *guard;
+    struct Node *body;
+    size_t line;
+} MatchArm;
+
 typedef struct Node {
     NodeType type;
     size_t line;
@@ -509,6 +595,8 @@ typedef struct Node {
         struct { struct Node **stmts; int count; } program;
         struct { struct Node **stmts; int count; } block;
         struct { char *name; Type *annot; struct Node *init; } let;
+        struct { char *name; Type *annot; struct Node *init; struct Node *body;
+                 Type *ty; } letx;   /* ty: checker-stamped body type (SPEC 4.15) */
         struct { struct Node *cond, *then, *els; } ifs;
         struct { struct Node *cond, *body; } whiles;
         /* for: C-style uses init/cond/incr (is_in=false); for-in uses
@@ -527,12 +615,66 @@ typedef struct Node {
         struct { char *name; char *desc; struct Node *params;
                  struct Node *handler; } tool;
         struct { char *name; char **names; Type **param_types; Type *ret;
-                 int arity; struct Node *body; } func;
+                 int arity; struct Node *body;
+                 char *cname; /* local function only: synthetic module-level
+                               * name assigned by lume_resolve_localfns();
+                               * call sites inside the enclosing function are
+                               * rewritten to it, so the local stays invisible
+                               * everywhere else. NULL = top-level function. */
+               } func;
         struct { char *name; char **field_names; Type **field_types;
                  int count; } type_decl;
+        /* `enum Name { V | V(f: t) | ... }` — variants in source order.
+         * vnames[i] is the variant name; vfields[i]/vfield_types[i] are its
+         * payload field names/types (NULL when the variant carries nothing)
+         * and vfield_counts[i] its arity. */
+        struct { char *name; char **vnames; char ***vfields;
+                 Type ***vfield_types; int *vfield_counts; int vcount;
+                 } enum_decl;
+        /* A constructor application `V(args...)` / bare `V` — created by
+         * parser.c's post-parse rewrite from N_CALL/N_VAR once the file's
+         * enum table is known. `name` is the *variant* name; the ctor's arity
+         * and payload types come from the enum decl. `fields`/`fieldc` and
+         * `ename` are resolve_ctors stamps: the payload field names (borrowed
+         * from the enum decl) and the enum's own name, so the interpreter and
+         * both emitters build values with no enum table of their own. */
+        struct { char *name; struct Node **args; int argc;
+                 char **fields; int fieldc; char *ename; } ctor;
+        /* `match (scrutinee) { arm, arm, ... }` — an expression. */
+        struct { struct Node *scrutinee; struct MatchArm *arms; int armc;
+                 } matchn;
+        /* `if let Pattern [| Pattern] = value { then } [else ...]` — a
+         * statement. Binds live in the then-branch only; guards are not
+         * part of the form. patc >= 1. */
+        struct { MatchPat *pats; int patc; struct Node *value,
+                 *then, *els; } iflet;
+        /* `let { a, b } = e;` — record destructuring (Lean's
+         * `let ⟨x, y⟩ := p`). Binds every name to the like-named key of
+         * the map e evaluates to, in the CURRENT scope (if-let's binds
+         * live in the then-branch only), with e evaluated once —
+         * equivalent to `let a = e.a; let b = e.b;` sharing one value.
+         * types[i] is stamped by the checker with the field's value type,
+         * exactly as N_MEMBER.type carries it; NULL for a map whose shape
+         * is not statically known (the native backends refuse those, the
+         * same way they refuse `m.x` on a dynamic map). names are owned
+         * (ident_name copies); types are borrowed from the type tables. */
+        struct { char **names;     /* bound names (always owned) */
+                 char **fields;    /* struct field read per name
+                                    * (rename form `{ f: n }`); for a bare
+                                    * `{ a }` fields[i] == names[i] but is a
+                                    * SEPARATE strdup so both arrays free
+                                    * independently). */
+                 Type **types; int count;
+                 struct Node *init; } letpat;
         struct { char *name; } var;
         struct { char *name; struct Node *value; } assign;
         struct { struct Node *obj; char *name; struct Node *value; } assign_mem;
+        /* `{ base with k: v, ... }`: a fresh map/struct with base's slots
+         * shallow-copied and the listed keys overwritten in order. The base is
+         * never mutated (functional semantics, like Lean's `{ p with y := 3 }`).
+         * keys are owned (ident_name copies); vals are children. */
+        struct { struct Node *base; char **keys; struct Node **vals;
+                 int count; } supd;
         /* lit.text: `char *`, NOT `const char *`. Only LIT_STR sets it
          * (parser_expr.c:parse_primary mallocs a quote-including copy and
          * reallocs it while merging adjacent literals), so the field owns
@@ -552,7 +694,12 @@ typedef struct Node {
                                  * when it does. Still set at type-check time
                                  * means the source had no such minus. */
                } lit; /* is_float: LIT_NUM came from `1.5` */
-        struct { char **keys; struct Node **vals; int count; } map;
+        struct { char **keys; struct Node **vals; int count;
+                 bool is_tuple; /* set by the `(a, b)` literal sugar. A tuple
+                                 * is anonymous by default — resolve_struct_lit
+                                 * names a literal only from its context — and
+                                 * infer_list_elem uses the flag to type a
+                                 * homogeneous list of tuples by their shape. */ } map;
         struct { struct Node **items; int count; } list;
         struct { char **names; Type **param_types; Type *ret; int arity;
                  struct Node *body;
@@ -570,6 +717,10 @@ typedef struct Node {
         struct { struct Node *obj; struct Node *index; } index;
         struct { Op op; struct Node *operand; } unary;
         struct { Op op; struct Node *left, *right; } binary;
+        /* `cond ? then : els` — 右结合；else 分支不逃逸求值（只算选中那支）。
+         * 与 `f()?` 传播后缀的歧义由 parser_expr.c 的 ternary_colon_ahead
+         * 前瞻消解。 */
+        struct { struct Node *cond, *then, *els; } ternary;
         /* import: path is the raw string literal from the source (resolved
          * against the importing file's directory by the loader); ns is the
          * `as` alias. */

@@ -26,6 +26,7 @@ bool advance(Parser *p);
 bool match(Parser *p, TokenType t);
 bool expect(Parser *p, TokenType t);
 char *ident_name(Parser *p, Token t);
+char *dupcstr(const char *s);   /* owned strdup, freed by free_name_array */
 bool is_method_keyword(TokenType t);
 const char *method_keyword_name(TokenType t);
 bool is_field_token(TokenType t);
@@ -42,6 +43,7 @@ void node_free_orphan(Node *n);
 void node_unjournal(Node *n);
 
 /* ---- 类型 / 块 / 函数声明(parser.c) ---- */
+Type *any_type(void);          /* defined in typecheck.c; the "anything" type */
 Type *parse_type(Parser *p);
 bool parse_params(Parser *p, char ***names_out, Type ***types_out,
                   int *arity_out);
@@ -53,5 +55,9 @@ Node *parse_route_tail(Parser *p, Node *n);
 /* ---- 语句 / 表达式(parser_stmt.c / parser_expr.c) ---- */
 Node *parse_statement(Parser *p);
 Node *parse_expression(Parser *p);
+
+/* `V(b, ...)` / bare `V` / `_`, `|`-separated into alternatives (parser.c).
+ * Shared by match arms and if-let; the caller owns the array. */
+bool parse_patterns(Parser *p, MatchPat **out, int *outc);
 
 #endif /* LUME_PARSER_INTERNAL_H */

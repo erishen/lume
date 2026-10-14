@@ -137,6 +137,13 @@ char *ident_name(Parser *p, Token t) {
     return s;
 }
 
+char *dupcstr(const char *s) {
+    size_t n = strlen(s) + 1;
+    char *r = malloc(n);
+    memcpy(r, s, n);
+    return r;
+}
+
 /* `type`/`int`/... are keywords in type position but stay usable as map keys
  * and member field names (e.g. a route response's `type` field). */
 /* `get`/`post`/... are route-shorthand keywords at statement level, but stay
@@ -184,8 +191,20 @@ Type *parse_type(Parser *p) {
             /* ident_name() allocates the name, type_struct() copies it into
              * the Type — so the throwaway has to be released here. Owning
              * both ends in one expression silently leaked a block per named
-             * type parsed (`let p: Pt = ...`, `func f(): Pt`, ...). */
+             * type parsed (`let p: Pt = ...`, `func f(): Pt`, ...).
+             *
+             * The bare built-in container name `list` is NOT a struct: it is
+             * the homogeneous container (TY_LIST). Building `type_struct("list")`
+             * here made `let x: list = ...` annotate as a *named struct called
+             * "list"* with no definition, so the native emitters (which read
+             * llvm_type_of/ty_of off the annotation) reported "no codegen type"
+             * while the interpreter — which uses the checker-resolved type —
+             * tolerated it. Redirect the keyword to TY_LIST so the annotation
+             * matches the way list literals are already typed. (`map` stays a
+             * struct reference: a map is an anonymous struct at runtime and
+             * there is no singleton TY_MAP representation to annotate.) */
             char *nm = ident_name(p, t);
+            if (strcmp(nm, "list") == 0) { free(nm); ty = type_list(any_type()); break; }
             ty = type_struct(nm);
             free(nm);
             break;
@@ -323,7 +342,66 @@ Node *parse_route_tail(Parser *p, Node *n) {
     return n;
 }
 
+/* ---------- pattern lists (match arms and if-let share this) ---------- */
+
+static void free_name_array(char **a, int n); /* defined with node_free_own */
+
+/* `Variant(b, ...)` / bare `Variant` / `_`, `|`-separated into alternatives.
+ * Shared by match arms (`A | B => body`) and if-let (`if let A | B = e`).
+ * The caller owns the returned array; vnames and binds are heap strings,
+ * the resolve_ctors stamps start NULL (parser.c's post-parse pass fills
+ * them in once the file's enum table is known). Guards are NOT parsed
+ * here — the match-arm caller adds `if cond` after the list. */
+bool parse_patterns(Parser *p, MatchPat **out, int *outc) {
+    MatchPat *pats = NULL;
+    int patc = 0;
+    for (;;) {
+        Token pt = peek(p);
+        if (pt.type != TOK_IDENT) {
+            perror_at(p, pt.line, "expected variant name in pattern", NULL);
+            goto fail;
+        }
+        advance(p);
+        pats = realloc(pats, sizeof(MatchPat) * ((size_t)patc + 1));
+        if (!pats) goto fail;
+        MatchPat *pat = &pats[patc];
+        memset(pat, 0, sizeof *pat);
+        pat->vname = ident_name(p, pt);
+        if (match(p, TOK_LPAREN)) {
+            /* positional binds — plain identifiers separated by commas */
+            do {
+                Token bt = peek(p);
+                if (bt.type != TOK_IDENT) {
+                    perror_at(p, bt.line,
+                              "expected a binding name in pattern", NULL);
+                    goto fail;
+                }
+                advance(p);
+                pat->binds = realloc(pat->binds,
+                        sizeof(char *) * ((size_t)pat->bindc + 1));
+                if (!pat->binds) goto fail;
+                pat->binds[pat->bindc++] = ident_name(p, bt);
+            } while (match(p, TOK_COMMA));
+            if (!expect(p, TOK_RPAREN)) goto fail;
+        }
+        patc++;
+        if (!match(p, TOK_PIPE)) break;
+    }
+    *out = pats;
+    *outc = patc;
+    return true;
+fail:
+    for (int i = 0; i < patc; i++) {
+        free(pats[i].vname);
+        free_name_array(pats[i].binds, pats[i].bindc);
+    }
+    free(pats);
+    return false;
+}
+
 /* ---------- program ---------- */
+
+static void resolve_ctors(Node *prog);
 
 Node *parse_program(const char *source, char *errbuf, size_t errbuf_size) {
     char lexerr[256] = {0};
@@ -376,14 +454,231 @@ Node *parse_program(const char *source, char *errbuf, size_t errbuf_size) {
          * so only its own shell goes here. */
         free(prog->as.program.stmts);
         free(prog);
+        for (int i = 0; i < count; i++) free(toks[i].istr);
         free(toks);
         orphan_release_all();
         orphan_drop();
         return NULL;
     }
+    for (int i = 0; i < count; i++) free(toks[i].istr);
     free(toks);
     orphan_drop(); /* prog owns every node in the batch now */
+    resolve_ctors(prog);
     return prog;
+}
+
+/* ---------- post-parse constructor resolution ---------- */
+
+/* A variant name is a constructor everywhere in its file once its enum is
+ * declared (Lean's namespace rule, minus the qualification). The parser
+ * cannot know that while it parses — the enum may sit after the use site —
+ * so after the program is built this pass runs once:
+ *
+ *   pass 1 collects every N_ENUM_DECL's variant names (top-level only, so
+ *   a flat scan of the program suffices),
+ *   pass 2 rewrites
+ *     - `V(args...)` — an N_CALL whose callee is the bare name V — into a
+ *       proper N_CTOR (arguments moved over, the callee shell freed), and
+ *     - a bare `V` (N_VAR, zero-payload variant) in place, by flipping the
+ *       node's type and keeping the name.
+ *
+ * `V()?` (propagate suffix on a constructor) is left as a call on purpose:
+ * N_CTOR carries no propagate flag, and a `Result`-valued ctor is not a
+ * thing, so the checker reports it as a call of a non-function instead of
+ * inventing an error message for a shape nobody should write.
+ *
+ * Shadowing is prevented, not resolved: typecheck.c rejects a let / param /
+ * function whose name collides with a constructor, so this rewrite can
+ * never steal a live binding. */
+
+typedef struct {
+    char *name;     /* variant name */
+    char *ename;    /* owning enum's name */
+    char **fields;  /* payload field names (borrowed from the enum decl) */
+    Type **ftypes;  /* payload field types — parser-built, and for the four
+                     * allowed scalars the shell *is* the resolved def, so
+                     * binding allocas can use it without the checker */
+    int fieldc;
+} CtorEnt;
+
+typedef struct { CtorEnt *v; int count; } CtorTab;
+
+static CtorEnt *ctor_find(CtorTab *tab, const char *name) {
+    for (int i = 0; i < tab->count; i++)
+        if (strcmp(tab->v[i].name, name) == 0) return &tab->v[i];
+    return NULL;
+}
+
+static void ctor_rewrite(Node *n, CtorTab *tab);
+
+/* Stamp one pattern with its variant's payload field names/types (borrowed
+ * from the enum decl). A "_" pattern and an unknown name stay unstamped —
+ * the checker reports the unknown name, and "_" carries no fields. */
+static void stamp_pat(MatchPat *pat, CtorTab *tab) {
+    CtorEnt *ce = strcmp(pat->vname, "_") == 0
+                    ? NULL : ctor_find(tab, pat->vname);
+    pat->vfields = ce ? ce->fields : NULL;
+    pat->vfieldc = ce ? ce->fieldc : 0;
+    pat->vfield_types = ce ? ce->ftypes : NULL;
+}
+
+static void ctor_rewrite(Node *n, CtorTab *tab) {
+    if (!n) return;
+    switch (n->type) {
+    case N_PROGRAM:
+    case N_BLOCK:
+        for (int i = 0; i < n->as.program.count; i++)
+            ctor_rewrite(n->as.program.stmts[i], tab);
+        return; /* count/stmts are the same union member for both kinds */
+    case N_ENUM_DECL: return; /* declarations carry no expressions */
+    case N_LET:        ctor_rewrite(n->as.let.init, tab); return;
+    case N_LET_PAT:    ctor_rewrite(n->as.letpat.init, tab); return;
+    case N_IF:
+        ctor_rewrite(n->as.ifs.cond, tab);
+        ctor_rewrite(n->as.ifs.then, tab);
+        ctor_rewrite(n->as.ifs.els, tab);
+        return;
+    case N_WHILE:
+        ctor_rewrite(n->as.whiles.cond, tab);
+        ctor_rewrite(n->as.whiles.body, tab);
+        return;
+    case N_FOR:
+        ctor_rewrite(n->as.fors.init, tab);
+        ctor_rewrite(n->as.fors.cond, tab);
+        ctor_rewrite(n->as.fors.incr, tab);
+        ctor_rewrite(n->as.fors.iterable, tab);
+        ctor_rewrite(n->as.fors.body, tab);
+        return;
+    case N_RETURN:    ctor_rewrite(n->as.ret.expr, tab); return;
+    case N_EXPR_STMT: ctor_rewrite(n->as.expr_stmt.expr, tab); return;
+    case N_SERVER:
+        for (int i = 0; i < n->as.server.count; i++)
+            ctor_rewrite(n->as.server.assigns[i], tab);
+        return;
+    case N_ROUTE: ctor_rewrite(n->as.route.handler, tab); return;
+    case N_TOOL:
+        ctor_rewrite(n->as.tool.params, tab);
+        ctor_rewrite(n->as.tool.handler, tab);
+        return;
+    case N_VERBS:   ctor_rewrite(n->as.verbs.methods, tab); return;
+    case N_FUNC_DECL: ctor_rewrite(n->as.func.body, tab); return;
+    case N_FUNC_LIT:  ctor_rewrite(n->as.funclit.body, tab); return;
+    case N_ASSIGN:    ctor_rewrite(n->as.assign.value, tab); return;
+    case N_ASSIGN_MEMBER:
+        ctor_rewrite(n->as.assign_mem.obj, tab);
+        ctor_rewrite(n->as.assign_mem.value, tab);
+        return;
+    case N_MAP_LIT:
+        for (int i = 0; i < n->as.map.count; i++)
+            ctor_rewrite(n->as.map.vals[i], tab);
+        return;
+    case N_LIST_LIT:
+        for (int i = 0; i < n->as.list.count; i++)
+            ctor_rewrite(n->as.list.items[i], tab);
+        return;
+    case N_MEMBER: ctor_rewrite(n->as.member.obj, tab); return;
+    case N_INDEX:
+        ctor_rewrite(n->as.index.obj, tab);
+        ctor_rewrite(n->as.index.index, tab);
+        return;
+    case N_UNARY:  ctor_rewrite(n->as.unary.operand, tab); return;
+    case N_BINARY:
+        ctor_rewrite(n->as.binary.left, tab);
+        ctor_rewrite(n->as.binary.right, tab);
+        return;
+    case N_TERNARY:
+        ctor_rewrite(n->as.ternary.cond, tab);
+        ctor_rewrite(n->as.ternary.then, tab);
+        ctor_rewrite(n->as.ternary.els, tab);
+        return;
+    case N_MATCH:
+        ctor_rewrite(n->as.matchn.scrutinee, tab);
+        for (int i = 0; i < n->as.matchn.armc; i++) {
+            MatchArm *arm = &n->as.matchn.arms[i];
+            for (int k = 0; k < arm->patc; k++) stamp_pat(&arm->pats[k], tab);
+            ctor_rewrite(arm->guard, tab);
+            ctor_rewrite(arm->body, tab);
+        }
+        return;
+    case N_IF_LET:
+        /* patterns are variant-name strings, not expressions — stamp them
+         * like match arms do, then walk the three expression slots */
+        for (int k = 0; k < n->as.iflet.patc; k++)
+            stamp_pat(&n->as.iflet.pats[k], tab);
+        ctor_rewrite(n->as.iflet.value, tab);
+        ctor_rewrite(n->as.iflet.then, tab);
+        ctor_rewrite(n->as.iflet.els, tab);
+        return;
+    case N_CTOR:
+        for (int i = 0; i < n->as.ctor.argc; i++)
+            ctor_rewrite(n->as.ctor.args[i], tab);
+        return;    case N_CALL:
+        /* Rewrite BEFORE walking the callee: `Circle(1.0)` must become one
+         * N_CTOR carrying its arguments, not a call whose bare-name callee
+         * already got flipped into a zero-arg N_CTOR by the N_VAR case. */
+        if (!n->as.call.propagate && n->as.call.callee &&
+            n->as.call.callee->type == N_VAR) {
+            CtorEnt *ce = ctor_find(tab, n->as.call.callee->as.var.name);
+            if (ce) {
+                Node *callee = n->as.call.callee;
+                n->type = N_CTOR;
+                n->as.ctor.name = callee->as.var.name; /* name moved over */
+                n->as.ctor.args = n->as.call.args;
+                n->as.ctor.argc = n->as.call.argc;
+                n->as.ctor.fields = ce->fields;
+                n->as.ctor.fieldc = ce->fieldc;
+                n->as.ctor.ename = ce->ename;
+                free(callee); /* shell only: name and args moved */
+                for (int i = 0; i < n->as.ctor.argc; i++)
+                    ctor_rewrite(n->as.ctor.args[i], tab);
+                return;
+            }
+        }
+        ctor_rewrite(n->as.call.callee, tab);
+        for (int i = 0; i < n->as.call.argc; i++)
+            ctor_rewrite(n->as.call.args[i], tab);
+        return;
+    case N_VAR:
+        /* A bare zero-payload variant: flip the node in place. The var
+         * union's name field is the ctor union's first field, so the name
+         * pointer carries over untouched. */
+        {
+            CtorEnt *ce = ctor_find(tab, n->as.var.name);
+            if (ce) {
+                n->type = N_CTOR;
+                n->as.ctor.args = NULL;
+                n->as.ctor.argc = 0;
+                n->as.ctor.fields = ce->fields;
+                n->as.ctor.fieldc = ce->fieldc;
+                n->as.ctor.ename = ce->ename;
+            }
+        }
+        return;
+    default:
+        return; /* literals, imports, route/verb names — no expressions */
+    }
+}
+
+static void resolve_ctors(Node *prog) {
+    if (!prog || prog->type != N_PROGRAM) return;
+    CtorTab tab = { NULL, 0 };
+    for (int i = 0; i < prog->as.program.count; i++) {
+        Node *s = prog->as.program.stmts[i];
+        if (s->type != N_ENUM_DECL) continue;
+        for (int j = 0; j < s->as.enum_decl.vcount; j++) {
+            tab.v = realloc(tab.v, sizeof(CtorEnt) * ((size_t)tab.count + 1));
+            CtorEnt *ce = &tab.v[tab.count++];
+            ce->name = s->as.enum_decl.vnames[j];
+            ce->ename = s->as.enum_decl.name;
+            ce->fields = s->as.enum_decl.vfields[j];
+            ce->ftypes = s->as.enum_decl.vfield_types[j];
+            ce->fieldc = s->as.enum_decl.vfield_counts[j];
+        }
+    }
+    if (tab.count) ctor_rewrite(prog, &tab);
+    /* The table itself is scratch — names/fields are borrowed from the enum
+     * decls, which the AST owns and frees. */
+    free(tab.v);
 }
 
 /* ---------- teardown ---------- */
@@ -437,6 +732,7 @@ static void node_free_kids(Node *n) {
         break;
     }
     case N_LET:  node_free(n->as.let.init); break;
+    case N_LET_PAT: node_free(n->as.letpat.init); break;
     case N_IF:
         node_free(n->as.ifs.cond);
         node_free(n->as.ifs.then);
@@ -490,6 +786,11 @@ static void node_free_kids(Node *n) {
         node_free(n->as.binary.left);
         node_free(n->as.binary.right);
         break;
+    case N_TERNARY:
+        node_free(n->as.ternary.cond);
+        node_free(n->as.ternary.then);
+        node_free(n->as.ternary.els);
+        break;
     case N_INDEX:
         /* Index syntax (m["k"], l[0]) chains like N_MEMBER: without this
          * case the node fell into the "no children" default and both the
@@ -497,6 +798,27 @@ static void node_free_kids(Node *n) {
          * it the day after the syntax landed). */
         node_free(n->as.index.obj);
         node_free(n->as.index.index);
+        break;
+    case N_CTOR:
+        for (int i = 0; i < n->as.ctor.argc; i++)
+            node_free(n->as.ctor.args[i]);
+        break;
+    case N_MATCH:
+        node_free(n->as.matchn.scrutinee);
+        for (int i = 0; i < n->as.matchn.armc; i++) {
+            node_free(n->as.matchn.arms[i].guard);
+            node_free(n->as.matchn.arms[i].body);
+        }
+        break;
+    case N_IF_LET:
+        node_free(n->as.iflet.value);
+        node_free(n->as.iflet.then);
+        node_free(n->as.iflet.els);
+        break;
+    case N_STRUCT_UPDATE:
+        node_free(n->as.supd.base);
+        for (int i = 0; i < n->as.supd.count; i++)
+            node_free(n->as.supd.vals[i]);
         break;
     default: break; /* no children (literals, imports, declarations, ...) */
     }
@@ -514,6 +836,11 @@ static void node_free_own(Node *n) {
         break;
     }
     case N_LET:           free(n->as.let.name); break;
+    case N_LET_PAT:
+        free_name_array(n->as.letpat.names, n->as.letpat.count);
+        free_name_array(n->as.letpat.fields, n->as.letpat.count);
+        free(n->as.letpat.types);   /* Type* elements: type_release_all() */
+        break;
     case N_FOR:           free(n->as.fors.var); break;
     case N_ROUTE:
         free(n->as.route.method);
@@ -542,6 +869,44 @@ static void node_free_own(Node *n) {
         free_name_array(n->as.type_decl.field_names, n->as.type_decl.count);
         free(n->as.type_decl.field_types);
         break;
+    case N_ENUM_DECL: {
+        free(n->as.enum_decl.name);
+        int vc = n->as.enum_decl.vcount;
+        for (int i = 0; i < vc; i++) {
+            free(n->as.enum_decl.vnames[i]);
+            free_name_array(n->as.enum_decl.vfields[i],
+                            n->as.enum_decl.vfield_counts[i]);
+            free(n->as.enum_decl.vfield_types[i]); /* Type* elems: release_all */
+        }
+        free(n->as.enum_decl.vnames);
+        free(n->as.enum_decl.vfields);
+        free(n->as.enum_decl.vfield_types);
+        free(n->as.enum_decl.vfield_counts);
+        break;
+    }
+    case N_CTOR:
+        free(n->as.ctor.name);
+        free(n->as.ctor.args);
+        break;
+    case N_MATCH:
+        for (int i = 0; i < n->as.matchn.armc; i++) {
+            MatchArm *arm = &n->as.matchn.arms[i];
+            for (int k = 0; k < arm->patc; k++) {
+                free(arm->pats[k].vname);
+                free_name_array(arm->pats[k].binds, arm->pats[k].bindc);
+            }
+            free(arm->pats);
+        }
+        free(n->as.matchn.arms);
+        break;
+    case N_IF_LET:
+        for (int k = 0; k < n->as.iflet.patc; k++) {
+            free(n->as.iflet.pats[k].vname);
+            free_name_array(n->as.iflet.pats[k].binds,
+                            n->as.iflet.pats[k].bindc);
+        }
+        free(n->as.iflet.pats);
+        break;
     case N_VAR:               free(n->as.var.name); break;
     case N_ASSIGN:            free(n->as.assign.name); break;
     case N_ASSIGN_MEMBER:     free(n->as.assign_mem.name); break;
@@ -549,6 +914,10 @@ static void node_free_own(Node *n) {
     case N_MAP_LIT:
         free_name_array(n->as.map.keys, n->as.map.count);
         free(n->as.map.vals);
+        break;
+    case N_STRUCT_UPDATE:
+        free_name_array(n->as.supd.keys, n->as.supd.count);
+        free(n->as.supd.vals);
         break;
     case N_LIST_LIT:          free(n->as.list.items); break;
     case N_CALL:              free(n->as.call.args); break;
@@ -641,6 +1010,18 @@ void node_print(Node *n, int depth) {
         case N_LET:
             indent_print(depth); printf("let %s\n", n->as.let.name);
             node_print(n->as.let.init, depth + 1);
+            break;
+        case N_LET_PAT:
+            indent_print(depth);
+            printf("let-pattern {");
+            for (int i = 0; i < n->as.letpat.count; i++) {
+                const char *f = n->as.letpat.fields[i];
+                const char *nm = n->as.letpat.names[i];
+                printf("%s%s", i ? ", " : "", f);
+                if (strcmp(f, nm) != 0) printf(": %s", nm);
+            }
+            printf("}\n");
+            node_print(n->as.letpat.init, depth + 1);
             break;
         case N_ROUTE:
             indent_print(depth);

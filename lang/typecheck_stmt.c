@@ -23,6 +23,7 @@ void ck_fn(Checker *c, char **names, Type *ft, Node *body) {
     int loop_saved = c->loop_depth;
     c->scope = scope_new(saved);
     for (int i = 0; i < ft->count; i++) {
+        ck_ctor_shadow(c, names[i], body ? body->line : 0);
         /* Same reason as the top-level `let` in ck_stmt: the body is walked
          * twice, and re-running scope_decl on the parameters would report a
          * duplicate binding the second time around. */
@@ -148,8 +149,14 @@ void ck_stmt(Checker *c, Node *n) {
             ck_blk(c, n);
             return;
         case N_LET: {
+            ck_ctor_shadow(c, n->as.let.name, n->line);
             Type *annot = n->as.let.annot ? resolve(c, n->as.let.annot, n->line)
                                           : NULL;
+            /* Write the resolved annotation back for the native emitters —
+             * they read let.annot directly and have no checker tables, so a
+             * `Shape` shell must arrive as the TY_ENUM def (see pass C in
+             * typecheck.c for the param/ret side of the same story). */
+            if (n->as.let.annot) n->as.let.annot = annot;
             Type *it = ck_expr(c, n->as.let.init, annot);
             if (annot && !type_compat(c, it, annot, n->line)) {
                 ck_fail(c, n->line, "'%s' is not assignable to the declared type '%s' of '%s'",
@@ -172,11 +179,88 @@ void ck_stmt(Checker *c, Node *n) {
                            scope_get(c->scope, n->as.let.name));
             return;
         }
+        case N_LET_PAT: {
+            /* `let { a, b } = e;` — bind every name to the like-named key
+             * of e's map, in the current scope, e evaluated once. The rules
+             * mirror m.x exactly: a shaped map (a literal or a named
+             * struct) must declare every pattern name, and the stamped
+             * type is what the emitters dispatch on and what the
+             * interpreter's missing-key fallback materialises; a map of
+             * unknown shape (any) is accepted dynamically — the native
+             * backends refuse those at emit time, just as they refuse
+             * `m.x` on a dynamic map. */
+            Type *it = ck_expr(c, n->as.letpat.init, NULL);
+            it = resolve(c, it, n->line);
+            if (it->kind == TY_ENUM)
+                ck_fail(c, n->line,
+                        "destructuring needs a map value (got %s) — use "
+                        "if-let to destructure an enum", ty_str(it));
+            else if (it->kind != TY_STRUCT && it->kind != TY_ANY)
+                ck_fail(c, n->line,
+                        "destructuring needs a map value (got %s)",
+                        ty_str(it));
+            for (int i = 0; i < n->as.letpat.count; i++) {
+                const char *nm = n->as.letpat.names[i];
+                const char *fld = n->as.letpat.fields[i];
+                ck_ctor_shadow(c, nm, n->line);
+                Type *vt = NULL;
+                if (it->kind == TY_STRUCT) {
+                    for (int j = 0; j < it->count; j++)
+                        if (strcmp(fld, it->names[j]) == 0) {
+                            vt = it->types[j];
+                            break;
+                        }
+                    if (!vt) {
+                        ck_fail(c, n->line, "type has no field '%s'", fld);
+                        vt = any_type();
+                    }
+                }
+                /* NULL stays NULL for a dynamic map: the same state
+                 * N_MEMBER.type is in after `m.x` on an any-typed base. */
+                n->as.letpat.types[i] = vt;
+                if (c->collecting)
+                    scope_put(c->scope, nm, vt ? vt : any_type());
+                else
+                    scope_decl(c, c->scope, nm, vt ? vt : any_type(),
+                               n->line);
+            }
+            if (n->is_export)
+                for (int i = 0; i < n->as.letpat.count; i++)
+                    export_add(c, n->as.letpat.names[i],
+                               scope_get(c->scope, n->as.letpat.names[i]));
+            return;
+        }
         case N_IF: {
             Type *ct = ck_expr(c, n->as.ifs.cond, NULL);
             is_bool_ok(c, ct, n->line);
             ck_stmt(c, n->as.ifs.then);
             if (n->as.ifs.els) ck_stmt(c, n->as.ifs.els);
+            return;
+        }
+        case N_IF_LET: {
+            /* `if let P [| P] = value { then } [else ...]`. The value must
+             * be an enum (or any — patterns unvalidated, like match). Binds
+             * are declared in a child scope around the then-branch ONLY:
+             * the else-branch and everything after the statement see
+             * nothing, which is what makes the binding block-scoped (match
+             * arms behave the same way). */
+            Type *vt = ck_expr(c, n->as.iflet.value, NULL);
+            vt = resolve(c, vt, n->line);
+            EnumDef *ed = NULL;
+            if (vt && vt->kind == TY_ENUM)
+                ed = find_enum(c, vt->name);
+            else if (vt && vt->kind != TY_ANY) {
+                ck_fail(c, n->line, "if-let needs an enum value (got %s)",
+                        ty_str(vt));
+            }
+            int bindc = ck_pat_list(c, n->as.iflet.pats, n->as.iflet.patc,
+                                    ed, n->line);
+            CScope *saved = c->scope;
+            c->scope = scope_new(saved);
+            ck_put_pat_binds(c, n->as.iflet.pats, bindc, n->line);
+            ck_stmt(c, n->as.iflet.then);
+            c->scope = saved;
+            if (n->as.iflet.els) ck_stmt(c, n->as.iflet.els);
             return;
         }
         case N_WHILE: {
@@ -232,12 +316,19 @@ void ck_stmt(Checker *c, Node *n) {
             ck_expr(c, n->as.expr_stmt.expr, NULL);
             return;
         case N_FUNC_DECL: {
-            Type *ft = scope_get(c->scope, n->as.func.name);
+            /* A local function was registered (and its call sites rewritten)
+             * under its synthetic cname; a top-level function keeps its
+             * source name. Same lookup rule in both cases. */
+            const char *fname = n->as.func.cname ? n->as.func.cname
+                                                 : n->as.func.name;
+            Type *ft = scope_get(c->scope, fname);
             if (ft && ft->kind == TY_FUNC)
                 ck_fn(c, n->as.func.names, ft, n->as.func.body);
             return;
         }
         case N_TYPE_DECL: /* registered in pass A, filled in pass B */
+            return;
+        case N_ENUM_DECL: /* registered in pass A2, filled in pass B2 */
             return;
         case N_SERVER:
             for (int i = 0; i < n->as.server.count; i++)

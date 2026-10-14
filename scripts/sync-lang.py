@@ -88,7 +88,15 @@ HOST_PINNED = {"lume.h", "main.c", "builtins_internal.h", "builtins.c",
                # build links no HTTP server. Pinned so `sync` cannot silently
                # swap in lume-core's bridge_stub.c (which defers to
                # bridge_serve.c) and break the Windows link.
-               "bridge_stub.c"}
+               "bridge_stub.c",
+               # Upstream grew its own builtins_sql.c (ce6ed80, self-contained
+               # language-level SQLite) AFTER this host had carried its own
+               # lang/builtins_sql.c for months - one with app-specific table
+               # policy (the portfolio-mirror rule) that upstream explicitly
+               # called host business and left out. The two files share a name
+               # and builtin names but not ownership; keep ours, let the lag
+               # report track upstream's.
+               "builtins_sql.c"}
 
 # Upstream lines behind in a pinned file stop being news at about this many;
 # below it the file is just locally edited.

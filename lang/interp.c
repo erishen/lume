@@ -1,5 +1,8 @@
 #include "lume.h"
 #include "builtins.h"
+#include <math.h>
+#include <stdarg.h>
+
 #ifndef _WIN32
 /* Host build: iquest.c and the tool slices read the JSON reader half that
  * rides in with agent-httpd's minijson.h; the sbuf writer half arrived the
@@ -7,8 +10,6 @@
  * the slices that need the reader (see the Makefile's $(IS_WINDOWS) branch). */
 #include "minijson.h"
 #endif
-#include <math.h>
-#include <stdarg.h>
 
 /* Tree-walk interpreter (the "Runtime"). Every expression evaluation leaves
  * exactly ONE value on the VM's value stack, so partial results are always
@@ -62,34 +63,114 @@ Value vm_peek(VM *vm, int depth) {
 
 /* ---------- string literal unescaping ---------- */
 
+/* Thin wrapper over the shared table (value.c): s spans the raw lexeme
+ * INCLUDING the surrounding quotes, so the body is s[1..n-1). Kept as a
+ * function because every call site reads the quote-inclusive span straight off
+ * the token. */
 static char *unescape_literal(const char *s, int n, int *out_len) {
-    /* s spans the raw lexeme INCLUDING the surrounding quotes. */
-    char *buf = malloc((size_t)n + 1);
-    int w = 0;
-    for (int i = 1; i < n - 1; i++) {
-        char c = s[i];
-        if (c == '\\' && i + 1 < n - 1) {
-            i++;
-            switch (s[i]) {
-                case 'n': buf[w++] = '\n'; break;
-                case 't': buf[w++] = '\t'; break;
-                case 'r': buf[w++] = '\r'; break;
-                case '0': buf[w++] = '\0'; break;
-                case '\\': buf[w++] = '\\'; break;
-                case '"': buf[w++] = '"'; break;
-                default: buf[w++] = s[i]; break;
-            }
-        } else {
-            buf[w++] = c;
-        }
-    }
-    buf[w] = '\0';
-    *out_len = w;
+    size_t w = 0;
+    char *buf = lume_unescape(s + 1, (size_t)(n - 2), &w);
+    *out_len = (int)w;
     return buf;
 }
 
 #include "builtins.h"
 /* ---------- function call engine ---------- */
+
+/* Bind one function declaration into `env`, under the name its call sites
+ * spell: the synthetic cname for a hoisted local function, the source name
+ * for a top-level one. Shared by the statement executor and the frame hoist
+ * below. */
+static void bind_func_decl(VM *vm, Env *env, Node *n)
+{
+    const char *fname = n->as.func.cname ? n->as.func.cname
+                                         : n->as.func.name;
+    Value f = make_func(vm, fname, n->as.func.names,
+                        n->as.func.arity, n->as.func.body, env);
+    env_set(vm, env, fname, f);
+}
+
+/* Pre-bind every local function declared inside `body` into the frame env
+ * before the body runs. The native backends resolve a local through a
+ * signature table built before any code executes, so a call that textually
+ * precedes the declaration works there; hoisting at frame setup gives the
+ * interpreter the same reach, recursion included. The walk mirrors the
+ * resolver's scan: statement level, control-flow blocks and lambda bodies —
+ * but never a nested function's own body, whose locals bind when that
+ * function's own frame is set up (through this same hoist). */
+static void hoist_local_fns(VM *vm, Env *env, Node *n)
+{
+    if (!n || vm->error) return;
+    switch (n->type) {
+    case N_FUNC_DECL:
+        bind_func_decl(vm, env, n);
+        return;
+    case N_FUNC_LIT:
+        hoist_local_fns(vm, env, n->as.funclit.body);
+        return;
+    case N_PROGRAM: case N_BLOCK:
+        for (int i = 0; i < n->as.block.count; i++)
+            hoist_local_fns(vm, env, n->as.block.stmts[i]);
+        return;
+    case N_LET:        hoist_local_fns(vm, env, n->as.let.init); return;
+    case N_LET_PAT:    hoist_local_fns(vm, env, n->as.letpat.init); return;
+    case N_IF:
+        hoist_local_fns(vm, env, n->as.ifs.cond);
+        hoist_local_fns(vm, env, n->as.ifs.then);
+        hoist_local_fns(vm, env, n->as.ifs.els);
+        return;
+    case N_WHILE:
+        hoist_local_fns(vm, env, n->as.whiles.cond);
+        hoist_local_fns(vm, env, n->as.whiles.body);
+        return;
+    case N_FOR:
+        hoist_local_fns(vm, env, n->as.fors.init);
+        hoist_local_fns(vm, env, n->as.fors.cond);
+        hoist_local_fns(vm, env, n->as.fors.incr);
+        hoist_local_fns(vm, env, n->as.fors.iterable);
+        hoist_local_fns(vm, env, n->as.fors.body);
+        return;
+    case N_RETURN:     hoist_local_fns(vm, env, n->as.ret.expr); return;
+    case N_EXPR_STMT:  hoist_local_fns(vm, env, n->as.expr_stmt.expr); return;
+    case N_ASSIGN:     hoist_local_fns(vm, env, n->as.assign.value); return;
+    case N_ASSIGN_MEMBER:
+        hoist_local_fns(vm, env, n->as.assign_mem.obj);
+        hoist_local_fns(vm, env, n->as.assign_mem.value);
+        return;
+    case N_CALL:
+        hoist_local_fns(vm, env, n->as.call.callee);
+        for (int i = 0; i < n->as.call.argc; i++)
+            hoist_local_fns(vm, env, n->as.call.args[i]);
+        return;
+    case N_MEMBER:     hoist_local_fns(vm, env, n->as.member.obj); return;
+    case N_INDEX:
+        hoist_local_fns(vm, env, n->as.index.obj);
+        hoist_local_fns(vm, env, n->as.index.index);
+        return;
+    case N_UNARY:      hoist_local_fns(vm, env, n->as.unary.operand); return;
+    case N_BINARY:
+        hoist_local_fns(vm, env, n->as.binary.left);
+        hoist_local_fns(vm, env, n->as.binary.right);
+        return;
+    case N_TERNARY:
+        hoist_local_fns(vm, env, n->as.ternary.cond);
+        hoist_local_fns(vm, env, n->as.ternary.then);
+        hoist_local_fns(vm, env, n->as.ternary.els);
+        return;
+    case N_MATCH:
+        hoist_local_fns(vm, env, n->as.matchn.scrutinee);
+        for (int i = 0; i < n->as.matchn.armc; i++) {
+            hoist_local_fns(vm, env, n->as.matchn.arms[i].guard);
+            hoist_local_fns(vm, env, n->as.matchn.arms[i].body);
+        }
+        return;
+    case N_LET_EXPR:
+        hoist_local_fns(vm, env, n->as.letx.init);
+        hoist_local_fns(vm, env, n->as.letx.body);
+        return;
+    default: return;
+    }
+}
 
 /* Contract: the caller has already pushed the callee and its args onto the
  * value stack (callee first, then the args for a total of argc+1 slots).
@@ -137,9 +218,15 @@ void call_function(VM *vm, Value callee, int argc) {
     Value envv = make_env(vm, f->as.fn.closure);
     vm_push(vm, envv); /* root the fresh frame until activated */
     Env *frame = (Env *)AS_OBJ(envv);
+    frame->is_boundary = true; /* assignment resolves no further out */
 
     for (int i = 0; i < argc; i++)
         env_set(vm, frame, f->as.fn.params[i], vm->stack[slot + 1 + i]);
+    if (vm->error) goto user_done;
+
+    /* Locals of this body bind before the body runs, matching the native
+     * backends' pre-built signature tables (forward calls and recursion). */
+    hoist_local_fns(vm, frame, (Node *)f->as.fn.body);
     if (vm->error) goto user_done;
 
     frame->next_active = vm->active_envs;
@@ -220,6 +307,25 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
             eval_expr(vm, n->as.assign.value, env);
             if (vm->error) return;
             Value v = vm_peek(vm, 0); /* keep rooted on the stack */
+            /* `=` reuses the nearest visible binding inside the current
+             * function/module frame — the typechecker models it that way
+             * ("外层已有同名时复用") and the native backends store straight
+             * into that variable's slot. The walk stops at the first
+             * boundary env (function frame / module), which is what keeps
+             * "assigning a top-level name inside a function defines a
+             * local" intact. Without the walk, an assignment inside a
+             * match arm or if-let body (both run in a child env) would
+             * silently shadow the outer variable instead of updating it,
+             * diverging from the other two backends. */
+            for (Env *e = env; e; e = e->parent) {
+                for (int i = 0; i < e->vars.count; i++) {
+                    if (strcmp(e->vars.keys[i], n->as.assign.name) == 0) {
+                        env_set(vm, e, n->as.assign.name, v);
+                        return; /* result: assigned value, already on stack */
+                    }
+                }
+                if (e->is_boundary) break;
+            }
             env_set(vm, env, n->as.assign.name, v);
             return; /* result: assigned value, already on stack */
         }
@@ -250,6 +356,30 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
                 map_set(vm, m, n->as.map.keys[i], v);
             }
             return; /* map stays on stack */
+        }
+        case N_STRUCT_UPDATE: {
+            /* `{ base with k: v, ... }`: copy the base, then overwrite. The
+             * base stays on the stack across the copy — map_shallow_copy's
+             * single gc_alloc can trigger a collection, and an unrooted base
+             * would be swept out from under the copy loop. */
+            eval_expr(vm, n->as.supd.base, env);
+            if (vm->error) return;
+            Value base = vm_peek(vm, 0);
+            if (!IS_OBJ(base) || AS_OBJ(base)->type != OBJ_MAP) {
+                vm_set_error(vm, "line %zu: 'with' update requires a map or "
+                                 "struct base", n->line);
+                return;
+            }
+            Obj *m = map_shallow_copy(vm, AS_OBJ(base));
+            vm_pop(vm);              /* drop the base */
+            vm_push(vm, val_obj(m)); /* root the copy during the overrides */
+            for (int i = 0; i < n->as.supd.count; i++) {
+                eval_expr(vm, n->as.supd.vals[i], env);
+                if (vm->error) return;
+                Value v = vm_pop(vm);
+                map_set(vm, m, n->as.supd.keys[i], v);
+            }
+            return; /* the updated map stays on stack */
         }
         case N_LIST_LIT: {
             Obj *list = AS_OBJ(make_list(vm));
@@ -284,6 +414,134 @@ static void eval_expr(VM *vm, Node *n, Env *env) {
         case N_BINARY:
             eval_expr_binary(vm, n, env);
             return;
+        case N_TERNARY:
+            /* 只求值选中分支——`flag ? 1 : 1/0` 在 flag 为真时不得除零。 */
+            eval_expr(vm, n->as.ternary.cond, env);
+            if (vm->error) return;
+            {
+                Value c = vm_pop(vm);
+                eval_expr(vm, value_truthy(c) ? n->as.ternary.then
+                                              : n->as.ternary.els, env);
+            }
+            return;
+        case N_LET_EXPR: {
+            /* `let x = e1 in e2` — e1 evaluates once, the binding lands in
+             * a child env that lives exactly as long as e2, and e2's value
+             * is the expression's. The child env is what makes the binding
+             * invisible after the expression and what lets it shadow an
+             * outer same-name binding for the body only — the same scope
+             * the native backends spell as an emit-time slot push plus a
+             * truncate. Assignments inside the body still reach through:
+             * the env-chain walk in N_ASSIGN stops at the first boundary,
+             * and this child is not one. */
+            eval_expr(vm, n->as.letx.init, env);
+            if (vm->error) return;
+            Value v = vm_pop(vm);
+            /* Keep the named struct type on the object when a map literal
+             * is bound to it (same stamp a statement let applies, so `.len`
+             * reads the declared field here too). */
+            Type *at = n->as.letx.annot;
+            if (at && at->kind == TY_STRUCT && at->name &&
+                IS_OBJ(v) && AS_OBJ(v)->type == OBJ_MAP)
+                AS_OBJ(v)->sname = at->name;
+            Value envv = make_env(vm, env);
+            Env *benv = (Env *)AS_OBJ(envv);
+            env_set(vm, benv, n->as.letx.name, v);
+            benv->next_active = vm->active_envs;
+            vm->active_envs = benv;
+            eval_expr(vm, n->as.letx.body, benv);
+            vm->active_envs = benv->next_active;
+            return; /* e2's value is already on the stack */
+        }
+        case N_CTOR: {
+            /* 构造值 = 带 "$" 标签的 map：`{ "$": V, f1: a1, ... }`。字段名
+             * 由 parser.c 的 resolve_ctors 盖戳（借用 enum decl），这里无需
+             * 查任何表。 */
+            Obj *m = AS_OBJ(make_map(vm));
+            vm_push(vm, val_obj(m)); /* root during construction */
+            Value tag = make_string_cstr(vm, n->as.ctor.name);
+            map_set(vm, m, "$", tag);
+            for (int i = 0; i < n->as.ctor.argc; i++) {
+                eval_expr(vm, n->as.ctor.args[i], env);
+                if (vm->error) return;
+                Value v = vm_pop(vm);
+                map_set(vm, m, n->as.ctor.fields[i], v);
+            }
+            return; /* map stays on stack */
+        }
+        case N_MATCH: {
+            /* 标签分发：读 "$"，逐臂逐模式比对（或通配），臂内绑定进子作用域。
+             * typecheck 已保证穷尽；未命中的运行时形状（伪造 map）报错。
+             * GC 纪律：scrutinee pop 后重新压根——make_env/env_set 可能触发
+             * 回收，而 sv 在臂环境建好前不被任何根引用（ctor 直传值时它只在
+             * 栈上）。根在求值臂体前一刻才弹，臂体结果于是干净地留在栈顶。 */
+            eval_expr(vm, n->as.matchn.scrutinee, env);
+            if (vm->error) return;
+            Value sv = vm_pop(vm);
+            vm_push(vm, sv); /* re-root the scrutinee across the arm setup */
+            if (!IS_OBJ(sv) || AS_OBJ(sv)->type != OBJ_MAP) {
+                vm_set_error(vm, "line %zu: match needs an enum value",
+                             n->line);
+                return;
+            }
+            int found = 0;
+            Value tagv = map_get(vm, AS_OBJ(sv), "$", &found);
+            if (!found || !IS_OBJ(tagv) ||
+                AS_OBJ(tagv)->type != OBJ_STRING) {
+                vm_set_error(vm,
+                        "line %zu: match needs an enum value (a map with a "
+                        "'$' variant tag)", n->line);
+                return;
+            }
+            const char *tag = obj_string(AS_OBJ(tagv));
+            for (int i = 0; i < n->as.matchn.armc; i++) {
+                MatchArm *arm = &n->as.matchn.arms[i];
+                for (int pi = 0; pi < arm->patc; pi++) {
+                    MatchPat *pat = &arm->pats[pi];
+                    bool hit = strcmp(pat->vname, "_") == 0 ||
+                               strcmp(pat->vname, tag) == 0;
+                    if (!hit) continue;
+                    Value envv = make_env(vm, env);
+                    vm_push(vm, envv); /* root the fresh frame until activated */
+                    Env *arm_env = (Env *)AS_OBJ(envv);
+                    for (int k = 0; k < pat->bindc; k++) {
+                        int f2 = 0;
+                        Value pv = map_get(vm, AS_OBJ(sv), pat->vfields[k], &f2);
+                        env_set(vm, arm_env, pat->binds[k],
+                                f2 ? pv : val_null());
+                    }
+                    /* Same dynamic-root dance as a call frame: hand the arm env
+                     * to vm->active_envs (the GC marks that chain), drop the
+                     * explicit stack root, and only then evaluate — the value
+                     * the body pushes must be the thing this eval leaves on
+                     * top of the stack. */
+                    arm_env->next_active = vm->active_envs;
+                    vm->active_envs = arm_env;
+                    vm_pop(vm); /* drop the env root; active_envs holds it */
+                    if (arm->guard) {
+                        /* The guard runs in the arm env — it may read the
+                         * binds. False falls through to the next pattern. */
+                        eval_expr(vm, arm->guard, arm_env);
+                        if (vm->error) {
+                            vm->active_envs = arm_env->next_active;
+                            return;
+                        }
+                        bool ok = value_truthy(vm_pop(vm));
+                        if (!ok) {
+                            vm->active_envs = arm_env->next_active;
+                            break; /* next pattern of this arm */
+                        }
+                    }
+                    vm_pop(vm); /* drop the scrutinee root; body is next */
+                    eval_expr(vm, arm->body, arm_env);
+                    vm->active_envs = arm_env->next_active;
+                    return;
+                }
+            }
+            vm_set_error(vm, "line %zu: no match arm for variant '%s'",
+                         n->line, tag);
+            return;
+        }
         case N_CALL:
             eval_expr_call(vm, n, env);
             return;
@@ -658,11 +916,93 @@ static void exec_statement(VM *vm, Node *n, Env *env) {
                 env_set(vm, vm->export_env, n->as.let.name, v);
             return;
         }
+        case N_LET_PAT: {
+            /* `let { a, b } = e;` — one evaluation of e, then every name
+             * bound to e's like-named key in the CURRENT env (if-let's
+             * binds live in a child env; this is a let, so it stays).
+             * A missing key reads as the stamped type's zero value when
+             * the checker knew the shape — the same fallback m.x uses,
+             * and the same value the native getters' zero default gives —
+             * and fails on a dynamic map, where nothing is known. */
+            eval_expr(vm, n->as.letpat.init, env);
+            if (vm->error) return;
+            Value v = vm_pop(vm);
+            if (!IS_OBJ(v) || AS_OBJ(v)->type != OBJ_MAP) {
+                vm_set_error(vm, "line %zu: destructuring needs a map value",
+                             n->line);
+                return;
+            }
+            Obj *m = AS_OBJ(v);
+            /* Root the map across the loop: env_set (and a zero value's
+             * allocation) can collect, and every bound value either lives
+             * inside m or is kept on the stack around its own env_set. */
+            vm_push(vm, v);
+            for (int i = 0; i < n->as.letpat.count; i++) {
+                int found = 0;
+                Value fv = map_get(vm, m, n->as.letpat.fields[i], &found);
+                if (!found) {
+                    Type *vt = n->as.letpat.types[i];
+                    if (!vt) {
+                        vm_set_error(vm, "line %zu: map has no field '%s'",
+                                     n->line, n->as.letpat.fields[i]);
+                        return;
+                    }
+                    fv = vm_zero_value(vm, vt);
+                    vm_push(vm, fv);   /* root the fresh zero value */
+                }
+                env_set(vm, env, n->as.letpat.names[i], fv);
+                if (n->is_export && vm->export_env)
+                    env_set(vm, vm->export_env, n->as.letpat.names[i], fv);
+                if (!found) vm_pop(vm);
+            }
+            vm_pop(vm);
+            return;
+        }
         case N_IF: {
             eval_expr(vm, n->as.ifs.cond, env);
             if (vm->error) return;
             if (value_truthy(vm_pop(vm))) exec_statement(vm, n->as.ifs.then, env);
             else if (n->as.ifs.els) exec_statement(vm, n->as.ifs.els, env);
+            return;
+        }
+        case N_IF_LET: {
+            /* `if let P [| P] = value { then } [else ...]` — a match with one
+             * arm and no exhaustiveness requirement. Binds live in a child
+             * env around the then-branch only (same scoping as a match arm);
+             * the value stays rooted on the stack while the env is built. */
+            eval_expr(vm, n->as.iflet.value, env);
+            if (vm->error) return;
+            Value vv = vm_pop(vm);
+            vm_push(vm, vv);
+            for (int pi = 0; pi < n->as.iflet.patc; pi++) {
+                MatchPat *pat = &n->as.iflet.pats[pi];
+                const char *tag = NULL;
+                if (IS_OBJ(vv) && AS_OBJ(vv)->type == OBJ_MAP) {
+                    int found = 0;
+                    Value tagv = map_get(vm, AS_OBJ(vv), "$", &found);
+                    if (found && IS_OBJ(tagv) &&
+                        AS_OBJ(tagv)->type == OBJ_STRING)
+                        tag = obj_string(AS_OBJ(tagv));
+                }
+                bool hit = tag && (strcmp(pat->vname, "_") == 0 ||
+                                   strcmp(pat->vname, tag) == 0);
+                if (!hit) continue;
+                Value envv = make_env(vm, env);
+                Env *benv = (Env *)AS_OBJ(envv);
+                for (int k = 0; k < pat->bindc; k++) {
+                    int f2 = 0;
+                    Value pv = map_get(vm, AS_OBJ(vv), pat->vfields[k], &f2);
+                    env_set(vm, benv, pat->binds[k], f2 ? pv : val_null());
+                }
+                benv->next_active = vm->active_envs;
+                vm->active_envs = benv;
+                vm_pop(vm); /* drop the value root; the binds hold their own */
+                exec_statement(vm, n->as.iflet.then, benv);
+                vm->active_envs = benv->next_active;
+                return;
+            }
+            vm_pop(vm); /* no pattern matched: drop the value root */
+            if (n->as.iflet.els) exec_statement(vm, n->as.iflet.els, env);
             return;
         }
         case N_WHILE: {
@@ -710,15 +1050,24 @@ static void exec_statement(VM *vm, Node *n, Env *env) {
             break; /* unreachable */
         }
         case N_FUNC_DECL: {
-            Value f = make_func(vm, n->as.func.name, n->as.func.names,
+            /* A local function was hoisted by lume_resolve_localfns: its call
+             * sites inside the enclosing function spell the synthetic cname,
+             * so the binding must land under the same name (and the frame
+             * hoist has usually bound it already — this re-set is harmless).
+             * A local is never exported, so the export path only fires for
+             * top-level declarations, whose cname is NULL. */
+            const char *fname = n->as.func.cname ? n->as.func.cname
+                                                 : n->as.func.name;
+            Value f = make_func(vm, fname, n->as.func.names,
                                 n->as.func.arity, n->as.func.body, env);
-            env_set(vm, env, n->as.func.name, f);
+            env_set(vm, env, fname, f);
             if (n->is_export && vm->export_env)
-                env_set(vm, vm->export_env, n->as.func.name, f);
+                env_set(vm, vm->export_env, fname, f);
             return;
         }
         case N_TYPE_DECL:
-            /* type declarations are checked statically, then vanish */
+        case N_ENUM_DECL:
+            /* type/enum declarations are checked statically, then vanish */
             return;
         case N_SERVER: {
             if (!vm->server_config)
@@ -1031,6 +1380,8 @@ void bridge_seed_builtins(VM *vm) {
         {"map", b_map},
         {"filter", b_filter},
         {"reduce", b_reduce},
+        /* SQLite (2026-10-12, builtins_sql.c): guarded SELECT / write with
+         * ? binding; stubs fail clearly on builds without libsqlite3. */
         {"sql_query", b_sql_query},
         {"sql_write", b_sql_write},
         {"json", b_json},

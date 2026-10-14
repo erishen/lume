@@ -71,6 +71,14 @@ Type *type_anon_struct(void) {
     return t;
 }
 
+Type *type_enum(const char *name) {
+    Type *t = calloc(1, sizeof(Type));
+    t->kind = TY_ENUM;
+    t->name = strdup(name);
+    ty_keep(t);
+    return t;
+}
+
 Type *type_func(int arity, Type **params, Type *ret) {
     Type *t = calloc(1, sizeof(Type));
     t->kind = TY_FUNC;
@@ -174,6 +182,9 @@ static void tp_inner(Type *t) {
         case TY_BOOL:   printf("bool"); break;
         case TY_ANY:    printf("any"); break;
         case TY_RESULT: printf("Result"); break;
+        case TY_ENUM:
+            printf("%s", t->name ? t->name : "enum");
+            break;
         case TY_NS:
             printf("module");
             break;
@@ -213,7 +224,17 @@ void type_print(Type *t) {
 
 /* Format a type into a static buffer (for error messages). */
 const char *ty_str(Type *t) {
-    static char buf[128];
+    /* A ring of buffers, not one: one diagnostic routinely spells two types
+     * ("'==' does not apply to %s and %s"), and with a single static buffer
+     * the *second* call cleared what the first had returned — even when the
+     * second answered straight from a literal, because the reset at the top
+     * runs on every call. The result was an empty type name in the message
+     * ("does not apply to  and int") for every container operand. Each call
+     * takes the next slot, so a message with a handful of types — including
+     * the recursive `int[]` spelling below — stays intact. */
+    static char bufs[8][128];
+    static unsigned next;
+    char *buf = bufs[next++ % 8];
     buf[0] = '\0';
     if (!t || t->kind == TY_ANY) return "any";
     if (t->kind == TY_NULL) return "null";
@@ -222,6 +243,25 @@ const char *ty_str(Type *t) {
     if (t->kind == TY_STRING) return "string";
     if (t->kind == TY_BOOL) return "bool";
     if (t->kind == TY_RESULT) return "Result";
+    if (t->kind == TY_ENUM) return t->name ? t->name : "enum";
+    if (t->kind == TY_LIST) {
+        /* `int[]` reads better than the raw kind; the element type is only
+         * spelled when it is known, since `[]` alone is any[]. The element
+         * string is copied out first — ty_str spells into a ring slot, and
+         * snprintf with source and destination overlapping is undefined. */
+        if (t->elem && t->elem->kind != TY_ANY) {
+            char eb[64];
+            snprintf(eb, sizeof eb, "%s", ty_str(t->elem));
+            snprintf(buf, sizeof buf, "%s[]", eb);
+        } else {
+            snprintf(buf, sizeof buf, "list");
+        }
+        return buf;
+    }
+    if (t->kind == TY_STRUCT)
+        return t->name ? t->name : "map";
+    if (t->kind == TY_FUNC)
+        return "func";
     snprintf(buf, sizeof(buf), "<%s>", t->name ? t->name : "?");
     return buf;
 }
@@ -308,6 +348,26 @@ static void ck_free(Checker *c) {
     }
     c->all_scopes = NULL;
     c->structs = NULL;
+    EnumDef *e = c->enums;
+    while (e) {
+        EnumDef *en = e->next;
+        for (int j = 0; j < e->vcount; j++) {
+            free(e->vnames[j]);
+            /* vfields[j]/vfield_types[j] shells: the field-name strings are
+             * owned by the AST (freed with node_free); the Type* payloads
+             * belong to type_release_all(). Only the shells die here. */
+            free(e->vfields[j]);
+            free(e->vfield_types[j]);
+        }
+        free(e->vnames);
+        free(e->vfields);
+        free(e->vfield_types);
+        free(e->vfield_counts);
+        free(e->name);
+        free(e);
+        e = en;
+    }
+    c->enums = NULL;
 }
 
 void scope_put(CScope *s, const char *name, Type *t) {
@@ -333,12 +393,15 @@ void scope_put(CScope *s, const char *name, Type *t) {
  * lists that nobody checked against each other. */
 const char *const LUME_BUILTIN_NAMES[] = {
     "run", "print", "str", "int", "len", "keys", "get",
+    /* SQLite (2026-10-12, builtins_sql.c): registered in every build;
+     * without libsqlite3 the runtime stub reports the missing dep. */
+    "sql_query", "sql_write",
     "json", "stringify", "now", "el", "render", "html",
     "float", "bool", "string", "type", "Result", /* type words usable as idents */
     "write", "read", /* built-in verb groups (see seed_verb_groups) */
     "env", "argv", "files", "read_file", "read_stdin", "write_file", "mkdir", "strftime", "put",
     "range", "map", "filter", "reduce", /* collection tools */
-    "sql_query", "sql_write", /* host build only: agent-httpd's db layer */
+    /* sql_query / sql_write: host build only. */
     "lock_file", "unlock_file", /* flock advisory lock (invest ledger) */
     "tools", "skills", "mcps",
     "discovery_endpoints", "catalog", /* discovery builtins */
@@ -418,12 +481,139 @@ void add_struct(Checker *c, const char *name, Type *t) {
     c->structs = d;
 }
 
+EnumDef *find_enum(Checker *c, const char *name) {
+    for (EnumDef *d = c->enums; d; d = d->next)
+        if (strcmp(d->name, name) == 0) return d;
+    return NULL;
+}
+
+void add_enum(Checker *c, EnumDef *d) {
+    d->next = c->enums;
+    c->enums = d;
+}
+
+/* Two payload types are "the same" for or-pattern binds: same kind, and
+ * for the named kinds the same name. Deliberately stricter than
+ * type_compat — an or-pattern arm has ONE binding set, so `A(x: int) |
+ * B(x: float)` is rejected rather than silently widened (write two arms). */
+static bool pat_types_same(Type *a, Type *b) {
+    if (!a || !b) return true;              /* unstamped: nothing to compare */
+    if (a->kind != b->kind) return false;
+    if (a->name || b->name) return a->name && b->name &&
+                                  strcmp(a->name, b->name) == 0;
+    return true;
+}
+
+/* Validate one pattern list — a match arm's or-pattern, or an if-let's.
+ *  - every pattern must name a variant of `ed` and bind exactly its
+ *    payload count (skipped when ed is NULL: an untyped scrutinee, where
+ *    nothing can be validated);
+ *  - `_` binds nothing;
+ *  - no variant twice inside the list;
+ *  - the alternatives bind the same names with the same types.
+ * Returns pats[0].bindc — the arm's single binding-set size. */
+int ck_pat_list(Checker *c, MatchPat *pats, int patc, EnumDef *ed,
+                size_t line) {
+    for (int pi = 0; pi < patc; pi++) {
+        MatchPat *pat = &pats[pi];
+        if (strcmp(pat->vname, "_") == 0) {
+            if (pat->bindc > 0)
+                ck_fail(c, line, "the '_' match pattern binds no payload");
+            continue;
+        }
+        if (ed) {
+            int vi = -1;
+            for (int j = 0; j < ed->vcount; j++)
+                if (strcmp(ed->vnames[j], pat->vname) == 0) { vi = j; break; }
+            if (vi < 0) {
+                ck_fail(c, line, "enum '%s' has no variant '%s'",
+                        ed->name, pat->vname);
+                continue;
+            }
+            if (ed->vfield_counts[vi] != pat->bindc)
+                ck_fail(c, line,
+                        "variant '%s' carries %d payload field(s), "
+                        "arm binds %d",
+                        pat->vname, ed->vfield_counts[vi], pat->bindc);
+        }
+        for (int pj = 0; pj < pi; pj++)
+            if (strcmp(pats[pj].vname, pat->vname) == 0)
+                ck_fail(c, line, "duplicate match pattern '%s'", pat->vname);
+    }
+    if (patc > 1) {
+        for (int pi = 1; pi < patc; pi++) {
+            if (pats[pi].bindc != pats[0].bindc)
+                ck_fail(c, line,
+                        "or-pattern alternatives must bind the same names "
+                        "(%d vs %d)", pats[0].bindc, pats[pi].bindc);
+            for (int k = 0; k < pats[0].bindc && k < pats[pi].bindc; k++) {
+                if (strcmp(pats[pi].binds[k], pats[0].binds[k]) != 0)
+                    ck_fail(c, line,
+                            "or-pattern alternatives must bind the same "
+                            "names ('%s' vs '%s')",
+                            pats[0].binds[k], pats[pi].binds[k]);
+                Type *t0 = pats[0].vfield_types ? pats[0].vfield_types[k]
+                                                : NULL;
+                Type *t1 = pats[pi].vfield_types ? pats[pi].vfield_types[k]
+                                                 : NULL;
+                if (!pat_types_same(t0, t1))
+                    ck_fail(c, line,
+                            "or-pattern binding '%s' has conflicting types "
+                            "('%s' vs '%s')",
+                            pats[0].binds[k], ty_str(t0), ty_str(t1));
+            }
+        }
+    }
+    return pats[0].bindc;
+}
+
+/* Declare an arm's (already validated) binding set in the CURRENT scope —
+ * the caller has already switched to a fresh child scope. Types come from
+ * the first alternative's stamp; an untyped scrutinee or an unstamped
+ * variant degrades to any. The first (collecting) walk uses scope_put —
+ * the second walk re-declares. */
+void ck_put_pat_binds(Checker *c, MatchPat *pats, int bindc, size_t line) {
+    for (int k = 0; k < bindc; k++) {
+        Type *pt = pats[0].vfield_types ? pats[0].vfield_types[k]
+                                        : any_type();
+        if (c->collecting)
+            scope_put(c->scope, pats[0].binds[k], pt);
+        else
+            scope_decl(c, c->scope, pats[0].binds[k], pt, line);
+    }
+}
+
+/* A constructor name resolves to its enum + variant. Linear over every
+ * variant of every enum — the tables are file-sized, that is fine. */
+EnumDef *find_ctor(Checker *c, const char *name, int *vidx) {
+    for (EnumDef *d = c->enums; d; d = d->next)
+        for (int i = 0; i < d->vcount; i++)
+            if (strcmp(d->vnames[i], name) == 0) {
+                if (vidx) *vidx = i;
+                return d;
+            }
+    return NULL;
+}
+
+/* A variant name is a constructor file-wide (parser.c rewrites every bare
+ * use), so a let/param/func with the same name would be silently unreachable
+ * — the rewrite would win. Reject the declaration instead of letting the
+ * name mean two things. */
+void ck_ctor_shadow(Checker *c, const char *name, size_t line) {
+    if (find_ctor(c, name, NULL))
+        ck_fail(c, line,
+                "'%s' shadows an enum constructor (variant names are "
+                "reserved across the file)", name);
+}
+
 /* Resolve a named struct reference to its definition (or TY_ANY). */
 Type *resolve(Checker *c, Type *t, size_t line) {
     if (!t) return any_type();
     if (t->kind == TY_STRUCT && t->name) {
         StructDef *d = find_struct(c, t->name);
         if (!d) {
+            EnumDef *e = find_enum(c, t->name);
+            if (e) return e->type;
             /* Types exported by an imported module are already fully formed
              * (the dependency is type-checked before the importer), so they
              * are usable directly even though they are not registered in
@@ -443,11 +633,24 @@ bool type_compat(Checker *c, Type *src, Type *dst, size_t line) {
     if (!dst || dst->kind == TY_ANY) return true;
     if (src->kind == TY_NULL) return true;          /* all types nullable */
     if (src->kind == TY_INT && dst->kind == TY_FLOAT) return true; /* widen */
-    if (src->kind != dst->kind) return false;
+    if (src->kind != dst->kind) {
+        /* A TY_STRUCT shell is what the parser produces for every ident
+         * type; after resolve() the enum side is TY_ENUM. If the kinds
+         * disagree but the names agree, one of the two is an unresolved
+         * shell spelling the same declared type — accept it by name. */
+        bool s_named = (src->kind == TY_ENUM || src->kind == TY_STRUCT) && src->name;
+        bool d_named = (dst->kind == TY_ENUM || dst->kind == TY_STRUCT) && dst->name;
+        if (s_named && d_named && strcmp(src->name, dst->name) == 0)
+            return true;
+        return false;
+    }
 
     switch (src->kind) {
         case TY_LIST:
             return type_compat(c, src->elem, dst->elem, line);
+        case TY_ENUM:
+            return src->name && dst->name &&
+                   strcmp(src->name, dst->name) == 0;
         case TY_STRUCT: {
             if (src->name && dst->name)
                 return strcmp(src->name, dst->name) == 0;
@@ -516,6 +719,11 @@ bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
                        Node *prog, char *errbuf, size_t errbuf_size) {
     if (!prog || prog->type != N_PROGRAM) return true;
 
+    /* Local functions first: stamp cnames and rewrite the call sites inside
+     * each enclosing function, so every pass below sees the hoisted names
+     * (SPEC §4.14). Idempotent; the native backends re-run it as a guard. */
+    if (!lume_resolve_localfns(prog, errbuf, errbuf_size)) return false;
+
     Checker c;
     memset(&c, 0, sizeof(c));
     if (errbuf && errbuf_size) errbuf[0] = '\0';
@@ -552,6 +760,32 @@ bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
         }
     }
 
+    /* Pass A2: register every enum name the same way (same namespace as
+     * structs — a file cannot declare `type X` and `enum X`). */
+    for (int i = 0; i < prog->as.program.count && !c.failed; i++) {
+        Node *s = prog->as.program.stmts[i];
+        if (s->type != N_ENUM_DECL) continue;
+        if (find_enum(&c, s->as.enum_decl.name) ||
+            find_struct(&c, s->as.enum_decl.name)) {
+            ck_fail(&c, s->line, "type '%s' already defined",
+                    s->as.enum_decl.name);
+            break;
+        }
+        EnumDef *d = calloc(1, sizeof(EnumDef));
+        d->name = strdup(s->as.enum_decl.name);
+        d->vcount = s->as.enum_decl.vcount;
+        d->vnames = calloc((size_t)d->vcount + 1, sizeof(char *));
+        d->vfields = calloc((size_t)d->vcount + 1, sizeof(char **));
+        d->vfield_types = calloc((size_t)d->vcount + 1, sizeof(Type **));
+        d->vfield_counts = calloc((size_t)d->vcount + 1, sizeof(int));
+        for (int j = 0; j < d->vcount; j++) {
+            d->vnames[j] = strdup(s->as.enum_decl.vnames[j]);
+            d->vfield_counts[j] = s->as.enum_decl.vfield_counts[j];
+        }
+        d->type = type_enum(d->name);
+        add_enum(&c, d);
+    }
+
     /* Pass B: fill struct fields. */
     if (!c.failed) {
         for (int i = 0; i < prog->as.program.count && !c.failed; i++) {
@@ -567,23 +801,81 @@ bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
         }
     }
 
+    /* Pass B2: resolve enum payload types. Only the four scalars are
+     * allowed: the value is a runtime map, and a named-struct payload would
+     * have to travel as an aggregate through a map slot the emitters spell
+     * as i8* — that needs an explicit boxing decision before it can be
+     * more than a silent mismatch waiting to happen. */
+    if (!c.failed) {
+        for (int i = 0; i < prog->as.program.count && !c.failed; i++) {
+            Node *s = prog->as.program.stmts[i];
+            if (s->type != N_ENUM_DECL) continue;
+            EnumDef *d = find_enum(&c, s->as.enum_decl.name);
+            for (int j = 0; j < s->as.enum_decl.vcount && !c.failed; j++) {
+                int fc = s->as.enum_decl.vfield_counts[j];
+                if (fc == 0) continue;
+                d->vfields[j] = calloc((size_t)fc + 1, sizeof(char *));
+                d->vfield_types[j] = calloc((size_t)fc + 1, sizeof(Type *));
+                for (int k = 0; k < fc && !c.failed; k++) {
+                    d->vfields[j][k] = s->as.enum_decl.vfields[j][k];
+                    Type *ft = resolve(&c, s->as.enum_decl.vfield_types[j][k],
+                                       s->line);
+                    TypeKind k2 = ft ? ft->kind : TY_ANY;
+                    if (k2 != TY_INT && k2 != TY_FLOAT && k2 != TY_STRING &&
+                        k2 != TY_BOOL && k2 != TY_ANY)
+                        ck_fail(&c, s->line,
+                                "enum payload field '%s' must be int, float, "
+                                "string or bool (got %s)",
+                                d->vfields[j][k], ty_str(ft));
+                    d->vfield_types[j][k] = ft;
+                }
+            }
+        }
+    }
+
     /* Pass C: register function signatures (two passes so mutual recursion
-     * between functions resolves). */
-    for (int i = 0; i < prog->as.program.count && !c.failed; i++) {
-        Node *s = prog->as.program.stmts[i];
-        if (s->type != N_FUNC_DECL) continue;
-        Type **params = calloc((size_t)s->as.func.arity + 1, sizeof(Type *));
-        for (int j = 0; j < s->as.func.arity; j++)
-            params[j] = s->as.func.param_types[j]
-                            ? resolve(&c, s->as.func.param_types[j], s->line)
-                            : any_type();
-        Type *ret = s->as.func.ret ? resolve(&c, s->as.func.ret, s->line)
-                                   : any_type();
-        scope_decl(&c, c.scope, s->as.func.name,
-                   type_func(s->as.func.arity, params, ret), s->line);
-        if (s->is_export)
-            export_add(&c, s->as.func.name,
-                       scope_get(c.scope, s->as.func.name));
+     * between functions resolves). Local functions register too, under their
+     * synthetic cname: the call sites inside the enclosing function were
+     * rewritten to that name, and the source name exists in no scope at all,
+     * so a call from anywhere else is an undefined variable — the scoping a
+     * local declaration should have (SPEC §4.14). */
+    {
+        int nfn = lume_collect_funcs(prog, NULL, 0);
+        Node **allfns = nfn > 0 ? malloc(sizeof(Node *) * (size_t)nfn) : NULL;
+        if (nfn > 0) lume_collect_funcs(prog, allfns, nfn);
+        for (int i = 0; i < nfn && !c.failed; i++) {
+            Node *s = allfns[i];
+            const char *fname = s->as.func.cname ? s->as.func.cname
+                                                 : s->as.func.name;
+            ck_ctor_shadow(&c, fname, s->line);
+            Type **params = calloc((size_t)s->as.func.arity + 1, sizeof(Type *));
+            for (int j = 0; j < s->as.func.arity; j++) {
+                params[j] = s->as.func.param_types[j]
+                                ? resolve(&c, s->as.func.param_types[j], s->line)
+                                : any_type();
+                /* Write the resolved type back: the native emitters read the
+                 * AST's param_types directly, and a TY_STRUCT shell spelled
+                 * `Shape` must not be mistaken for a struct aggregate when the
+                 * name is an enum (the emitters have no checker tables). Only
+                 * annotated slots are written — NULL means "left to inference"
+                 * and the signature pass keys off that. */
+                if (s->as.func.param_types[j])
+                    s->as.func.param_types[j] = params[j];
+            }
+            Type *ret = s->as.func.ret ? resolve(&c, s->as.func.ret, s->line)
+                                       : any_type();
+            if (s->as.func.ret)
+                s->as.func.ret = ret;   /* same write-back, for the emitters */
+            scope_decl(&c, c.scope, fname,
+                       type_func(s->as.func.arity, params, ret), s->line);
+            /* Only a top-level function can be exported; a local's export
+             * flag is never set by the parser, and its cname must not leak
+             * into the module surface anyway. */
+            if (s->is_export && !s->as.func.cname)
+                export_add(&c, s->as.func.name,
+                           scope_get(c.scope, fname));
+        }
+        free(allfns);
     }
 
     /* Pass D: walk everything (function bodies included).

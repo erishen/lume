@@ -4,6 +4,137 @@
 
 #include "parser_internal.h"
 
+/* Build an N_LET_PAT node from parallel fields[]/names[] arrays. The
+ * caller owns both arrays and every string in them (ident_name copies or
+ * dupcstr); node_free_own releases them. */
+static Node *make_let_pat(Parser *p, size_t line, char **fields,
+                          char **names, int count, Node *init) {
+    (void)p;
+    Node *n = nalloc(N_LET_PAT, line);
+    n->as.letpat.names = names;
+    n->as.letpat.fields = fields;
+    n->as.letpat.types = calloc((size_t)count, sizeof(Type *));
+    n->as.letpat.count = count;
+    n->as.letpat.init = init;
+    return n;
+}
+
+/* `let { a, b } = e;` — record destructuring (SPEC §4.12). The pattern is
+ * a comma-separated name list; each name binds to the like-named key of
+ * e (or to a renamed key via `{ field: bind }`, a Lean record-update-style
+ * rename) in the current scope, with e evaluated once. `len`/`length` are
+ * refused because on an anonymous map they name the container property, not
+ * a key (the same footgun `.len` already is); a named struct that really
+ * declares such a field is read through a plain `let` instead. */
+static Node *parse_let_pattern(Parser *p, size_t line) {
+    advance(p);                       /* { */
+    char **names = NULL, **fields = NULL;
+    int count = 0;
+    if (check(p, TOK_RBRACE)) {
+        perror_at(p, peek(p).line,
+                  "a destructuring pattern needs at least one name", NULL);
+        return NULL;
+    }
+    for (;;) {
+        if (!check(p, TOK_IDENT)) {
+            perror_at(p, peek(p).line,
+                      "expected a name in the destructuring pattern", NULL);
+            goto fail;
+        }
+        Token fld = peek(p);
+        if ((fld.length == 3 && memcmp(fld.start, "len", 3) == 0) ||
+            (fld.length == 6 && memcmp(fld.start, "length", 6) == 0)) {
+            perror_at(p, fld.line,
+                      "'len' is a container property, not a map key — "
+                      "choose another name", NULL);
+            goto fail;
+        }
+        advance(p);
+        Token nm = fld;               /* bind name defaults to the field */
+        if (match(p, TOK_COLON)) {    /* rename form: `field: bind` */
+            if (!check(p, TOK_IDENT)) {
+                perror_at(p, peek(p).line,
+                          "expected a bind name after ':'", NULL);
+                goto fail;
+            }
+            nm = peek(p);
+            advance(p);
+        }
+        for (int i = 0; i < count; i++)
+            if (strlen(names[i]) == (size_t)nm.length &&
+                memcmp(names[i], nm.start, (size_t)nm.length) == 0) {
+                perror_at(p, nm.line, "pattern binds '%s' twice", names[i]);
+                goto fail;
+            }
+        names = realloc(names, sizeof(char *) * ((size_t)count + 1));
+        fields = realloc(fields, sizeof(char *) * ((size_t)count + 1));
+        names[count] = ident_name(p, nm);
+        fields[count] = ident_name(p, fld);
+        count++;
+        if (!match(p, TOK_COMMA)) break;
+    }
+    if (!expect(p, TOK_RBRACE)) goto fail;
+    if (!expect(p, TOK_EQ)) goto fail;
+    Node *init = parse_expression(p);
+    if (!init) goto fail;
+    if (!expect(p, TOK_SEMI)) goto fail;
+    return make_let_pat(p, line, fields, names, count, init);
+fail:
+    for (int i = 0; i < count; i++) { free(names[i]); free(fields[i]); }
+    free(names); free(fields);
+    return NULL;
+}
+
+/* `let (x, y) = e;` — tuple destructuring (SPEC §4.13). A tuple is an
+ * anonymous struct with positional fields `_0`, `_1`, ... (see the tuple
+ * literal in parser_expr.c), so this desugars to a rename N_LET_PAT that
+ * binds field `_0` to x, `_1` to y, and so on. Requires >= 1 name. */
+static Node *parse_tuple_pattern(Parser *p, size_t line) {
+    advance(p);                       /* ( */
+    char **names = NULL, **fields = NULL;
+    int count = 0;
+    for (;;) {
+        if (!check(p, TOK_IDENT)) {
+            perror_at(p, peek(p).line,
+                      "expected a name in the tuple pattern", NULL);
+            goto fail;
+        }
+        Token nm = peek(p);
+        if ((nm.length == 3 && memcmp(nm.start, "len", 3) == 0) ||
+            (nm.length == 6 && memcmp(nm.start, "length", 6) == 0)) {
+            perror_at(p, nm.line,
+                      "'len' is a container property, not a tuple slot", NULL);
+            goto fail;
+        }
+        for (int i = 0; i < count; i++)
+            if (strlen(names[i]) == (size_t)nm.length &&
+                memcmp(names[i], nm.start, (size_t)nm.length) == 0) {
+                perror_at(p, nm.line, "pattern binds '%s' twice", names[i]);
+                goto fail;
+            }
+        advance(p);
+        char fbuf[16];
+        snprintf(fbuf, sizeof fbuf, "_%d", count);
+        names = realloc(names, sizeof(char *) * ((size_t)count + 1));
+        fields = realloc(fields, sizeof(char *) * ((size_t)count + 1));
+        names[count] = ident_name(p, nm);
+        fields[count] = dupcstr(fbuf);
+        count++;
+        if (!match(p, TOK_COMMA)) break;
+        if (check(p, TOK_RPAREN)) break;   /* trailing comma */
+    }
+    if (!expect(p, TOK_RPAREN)) goto fail;
+    if (!expect(p, TOK_EQ)) goto fail;
+    Node *init = parse_expression(p);
+    if (!init) goto fail;
+    if (!expect(p, TOK_SEMI)) goto fail;
+    return make_let_pat(p, line, fields, names, count, init);
+fail:
+    for (int i = 0; i < count; i++) { free(names[i]); free(fields[i]); }
+    free(names); free(fields);
+    return NULL;
+}
+
 Node *parse_statement(Parser *p) {
     Token t = peek(p);
 
@@ -56,6 +187,34 @@ Node *parse_statement(Parser *p) {
     }
     if (t.type == TOK_IF) {
         advance(p);
+        if (check(p, TOK_LET)) {
+            /* if let Pattern [| Pattern] = expr { then } [else ...]
+             * A statement (if is a statement; the ternary is the expression
+             * form). Binds live in the then-branch only. No guard form —
+             * write a match for that. */
+            advance(p);
+            size_t pline = peek(p).line;
+            MatchPat *pats = NULL;
+            int patc = 0;
+            if (!parse_patterns(p, &pats, &patc)) return NULL;
+            if (!expect(p, TOK_EQ)) return NULL;
+            Node *value = parse_expression(p);
+            if (!value) return NULL;
+            Node *then = parse_statement(p);
+            if (!then) return NULL;
+            Node *els = NULL;
+            if (match(p, TOK_ELSE)) {
+                els = parse_statement(p);
+                if (!els) return NULL;
+            }
+            Node *n = nalloc(N_IF_LET, pline);
+            n->as.iflet.pats = pats;
+            n->as.iflet.patc = patc;
+            n->as.iflet.value = value;
+            n->as.iflet.then = then;
+            n->as.iflet.els = els;
+            return n;
+        }
         if (!expect(p, TOK_LPAREN)) return NULL;
         Node *cond = parse_expression(p);
         if (!cond) return NULL;
@@ -184,6 +343,13 @@ Node *parse_statement(Parser *p) {
     }
     if (t.type == TOK_LET) {
         advance(p);
+        /* `let { a, b } = e;` — a `{` where the bound name would be is a
+         * destructuring pattern, not a variable (the name path requires an
+         * identifier). */
+        if (check(p, TOK_LBRACE))
+            return parse_let_pattern(p, t.line);
+        if (check(p, TOK_LPAREN))
+            return parse_tuple_pattern(p, t.line);
         if (!check(p, TOK_IDENT)) {
             perror_at(p, peek(p).line, "expected variable name after 'let'", NULL);
             return NULL;
@@ -198,6 +364,24 @@ Node *parse_statement(Parser *p) {
         if (!expect(p, TOK_EQ)) return NULL;
         Node *init = parse_expression(p);
         if (!init) return NULL;
+        if (match(p, TOK_IN)) {
+            /* `let x = e1 in e2;` — the expression form at statement
+             * position: the binding lives only in e2 and the whole thing
+             * is an expr-statement (its value is dropped). A plain `let
+             * x = e1;` binding never sees this: it ends with `;`, not
+             * `in`. */
+            Node *body = parse_expression(p);
+            if (!body) return NULL;
+            if (!expect(p, TOK_SEMI)) return NULL;
+            Node *le = nalloc(N_LET_EXPR, t.line);
+            le->as.letx.name = ident_name(p, name);
+            le->as.letx.annot = annot;
+            le->as.letx.init = init;
+            le->as.letx.body = body;
+            Node *wrap = nalloc(N_EXPR_STMT, t.line);
+            wrap->as.expr_stmt.expr = le;
+            return wrap;
+        }
         if (!expect(p, TOK_SEMI)) return NULL;
         Node *n = nalloc(N_LET, t.line);
         n->as.let.name = ident_name(p, name);
@@ -373,6 +557,85 @@ Node *parse_statement(Parser *p) {
             if (check(p, TOK_RBRACE)) break; /* trailing comma */
         }
         if (!expect(p, TOK_RBRACE)) return NULL;
+        return n;
+    }
+    if (t.type == TOK_ENUM) {
+        /* enum Name { V | V(f: type) | V(f: t, g: t) } — variant payloads are
+         * positional named fields; the `|` separators are required between
+         * variants and optional around a trailing newline. A trailing `;`
+         * is accepted like `type`'s. */
+        advance(p);
+        if (!check(p, TOK_IDENT)) {
+            perror_at(p, peek(p).line, "expected enum name after 'enum'", NULL);
+            return NULL;
+        }
+        Token name = peek(p);
+        advance(p);
+        if (!expect(p, TOK_LBRACE)) return NULL;
+        Node *n = nalloc(N_ENUM_DECL, t.line);
+        n->as.enum_decl.name = ident_name(p, name);
+        n->as.enum_decl.vnames = NULL;
+        n->as.enum_decl.vfields = NULL;
+        n->as.enum_decl.vfield_types = NULL;
+        n->as.enum_decl.vfield_counts = NULL;
+        n->as.enum_decl.vcount = 0;
+        if (check(p, TOK_RBRACE)) {
+            perror_at(p, peek(p).line, "enum needs at least one variant", NULL);
+            return NULL;
+        }
+        for (;;) {
+            if (!is_field_token(peek(p).type)) {
+                perror_at(p, peek(p).line, "expected variant name in enum", NULL);
+                return NULL;
+            }
+            Token v = peek(p);
+            advance(p);
+            int vi = n->as.enum_decl.vcount;
+            n->as.enum_decl.vnames = realloc(n->as.enum_decl.vnames,
+                    sizeof(char *) * ((size_t)vi + 1));
+            n->as.enum_decl.vfields = realloc(n->as.enum_decl.vfields,
+                    sizeof(char **) * ((size_t)vi + 1));
+            n->as.enum_decl.vfield_types = realloc(n->as.enum_decl.vfield_types,
+                    sizeof(Type **) * ((size_t)vi + 1));
+            n->as.enum_decl.vfield_counts = realloc(n->as.enum_decl.vfield_counts,
+                    sizeof(int) * ((size_t)vi + 1));
+            n->as.enum_decl.vnames[vi] = ident_name(p, v);
+            n->as.enum_decl.vfields[vi] = NULL;
+            n->as.enum_decl.vfield_types[vi] = NULL;
+            n->as.enum_decl.vfield_counts[vi] = 0;
+            if (match(p, TOK_LPAREN)) {
+                /* payload fields: `f: type, g: type` — commas between, and
+                 * each field is `name : type` exactly like a struct field */
+                do {
+                    if (!is_field_token(peek(p).type)) {
+                        perror_at(p, peek(p).line,
+                                  "expected field name in enum variant", NULL);
+                        return NULL;
+                    }
+                    Token f = peek(p);
+                    advance(p);
+                    if (!expect(p, TOK_COLON)) return NULL;
+                    Type *ft = parse_type(p);
+                    if (!ft) return NULL;
+                    int fc = n->as.enum_decl.vfield_counts[vi];
+                    n->as.enum_decl.vfields[vi] = realloc(
+                            n->as.enum_decl.vfields[vi],
+                            sizeof(char *) * ((size_t)fc + 1));
+                    n->as.enum_decl.vfield_types[vi] = realloc(
+                            n->as.enum_decl.vfield_types[vi],
+                            sizeof(Type *) * ((size_t)fc + 1));
+                    n->as.enum_decl.vfields[vi][fc] = ident_name(p, f);
+                    n->as.enum_decl.vfield_types[vi][fc] = ft;
+                    n->as.enum_decl.vfield_counts[vi] = fc + 1;
+                } while (match(p, TOK_COMMA));
+                if (!expect(p, TOK_RPAREN)) return NULL;
+            }
+            n->as.enum_decl.vcount++;
+            if (!match(p, TOK_PIPE)) break;
+            if (check(p, TOK_RBRACE)) break; /* trailing `|` before `}` */
+        }
+        if (!expect(p, TOK_RBRACE)) return NULL;
+        match(p, TOK_SEMI); /* optional trailing semicolon */
         return n;
     }
     if (t.type == TOK_FUNC) {
