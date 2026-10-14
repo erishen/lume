@@ -40,6 +40,39 @@ char *gc_strdup(VM *vm, const char *s, size_t n) {
 
 char *gc_cstr(VM *vm, const char *s) { return gc_strdup(vm, s, strlen(s)); }
 
+/* ---------- the one escape table ---------- */
+
+/* Shared by the interpreter (string literals) and the lexer (interpolated
+ * segments). The native backends call it too, before handing a literal to the
+ * IR emitters: irbuf_emit_ir_string only escapes for the IR's own syntax, so
+ * without this pass `"a\nb"` printed four characters natively while the
+ * interpreter printed a newline — a three-way split nobody had noticed because
+ * only builtins-test (interpreter-only) exercised escapes at all. */
+char *lume_unescape(const char *s, size_t n, size_t *out_len) {
+    char *buf = malloc(n + 1);
+    size_t w = 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = s[i];
+        if (c == '\\' && i + 1 < n) {
+            i++;
+            switch (s[i]) {
+                case 'n': buf[w++] = '\n'; break;
+                case 't': buf[w++] = '\t'; break;
+                case 'r': buf[w++] = '\r'; break;
+                case '0': buf[w++] = '\0'; break;
+                case '\\': buf[w++] = '\\'; break;
+                case '"': buf[w++] = '"'; break;
+                default: buf[w++] = s[i]; break;
+            }
+        } else {
+            buf[w++] = c;
+        }
+    }
+    buf[w] = '\0';
+    if (out_len) *out_len = w;
+    return buf;
+}
+
 /* ---------- marking ---------- */
 
 static void mark_value(Value v);
@@ -227,10 +260,35 @@ Value make_env(VM *vm, Env *parent) {
     Env *e = (Env *)gc_alloc(vm, OBJ_ENV, sizeof(Env) - sizeof(Obj));
     e->parent = parent;
     e->next_active = NULL;
+    e->is_boundary = false;
     return val_obj((Obj *)e);
 }
 
 /* ---------- map / env access ---------- */
+
+/* A fresh map with the same keys (copied) and values (shared). The copy is
+ * shallow on purpose: `{ p with y := 3 }` replaces one slot, and nested
+ * containers stay shared exactly as they do in Lean — and the mark-sweep GC
+ * keeps a shared child alive through either map, so no refcount is needed.
+ * The caller must have `src` rooted when calling: the single gc_alloc below
+ * may collect, and everything after it is plain malloc (no GC trigger). */
+Obj *map_shallow_copy(VM *vm, Obj *src) {
+    Obj *dst = gc_alloc(vm, OBJ_MAP, 0);
+    dst->as.map.count = 0;
+    dst->as.map.cap = src->as.map.count;
+    dst->as.map.keys = NULL;
+    dst->as.map.vals = NULL;
+    if (dst->as.map.cap) {
+        dst->as.map.keys = malloc(sizeof(char *) * (size_t)dst->as.map.cap);
+        dst->as.map.vals = malloc(sizeof(Value) * (size_t)dst->as.map.cap);
+    }
+    for (int i = 0; i < src->as.map.count; i++) {
+        dst->as.map.keys[i] = strdup(src->as.map.keys[i]);
+        dst->as.map.vals[i] = src->as.map.vals[i];
+    }
+    dst->as.map.count = src->as.map.count;
+    return dst;
+}
 
 static int map_find(Obj *map, const char *key) {
     for (int i = 0; i < map->as.map.count; i++)
@@ -339,14 +397,41 @@ static bool value_eq(Value a, Value b) {
         case VAL_BOOL: return AS_BOOL(a) == AS_BOOL(b);
         case VAL_INT: return AS_INT(a) == AS_INT(b);
         case VAL_FLOAT: return AS_NUM(a) == AS_NUM(b);
-        case VAL_OBJ:
-            if (AS_OBJ(a) == AS_OBJ(b)) return true;
-            if (AS_OBJ(a)->type == OBJ_STRING && AS_OBJ(b)->type == OBJ_STRING) {
-                Obj *x = AS_OBJ(a), *y = AS_OBJ(b);
+        case VAL_OBJ: {
+            Obj *x = AS_OBJ(a), *y = AS_OBJ(b);
+            if (x == y) return true;   /* identity covers func/native/env */
+            if (x->type != y->type) return false;
+            if (x->type == OBJ_STRING) {
                 return x->as.str.len == y->as.str.len &&
                        memcmp(obj_string(x), obj_string(y), x->as.str.len) == 0;
             }
+            /* Structural equality for containers (SPEC 1.8). Lists compare
+             * length then element-wise; maps compare key count then every key
+             * of one side against the other — order-independent, the way map
+             * membership works. Enums are maps with a "$" key, so tag and
+             * payload all fall out of the map case; structs are named maps
+             * and the name does not participate. Recursion depth is bounded
+             * only by the data: cyclic structures are not buildable through
+             * the language, same caveat as print(). */
+            if (x->type == OBJ_LIST) {
+                if (x->as.list.count != y->as.list.count) return false;
+                for (int i = 0; i < x->as.list.count; i++)
+                    if (!value_eq(x->as.list.items[i], y->as.list.items[i]))
+                        return false;
+                return true;
+            }
+            if (x->type == OBJ_MAP) {
+                if (x->as.map.count != y->as.map.count) return false;
+                for (int i = 0; i < x->as.map.count; i++) {
+                    int j = map_find(y, x->as.map.keys[i]);
+                    if (j < 0) return false;
+                    if (!value_eq(x->as.map.vals[i], y->as.map.vals[j]))
+                        return false;
+                }
+                return true;
+            }
             return false;
+        }
     }
     return false;
 }

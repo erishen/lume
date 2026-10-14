@@ -4,6 +4,28 @@
 
 #include "typecheck_internal.h"
 
+/* Equality classes for `==` / `!=` (SPEC 1.8). Two operands in different
+ * classes are never comparable: natively that shape is invalid IR (icmp i64
+ * against a ptr), and in the interpreter it was a quiet false. `null` gets
+ * its own class because it is an i8* natively — comparable with the other
+ * i8*-lowered kinds, never with a scalar. TY_ANY (and anything unknown)
+ * returns -1: the wildcard stays permissive, the runtime decides. */
+enum { EQ_NUM, EQ_STR, EQ_BOOL, EQ_CTR, EQ_FUNC, EQ_NULL, EQ_CLASSES };
+
+static int eq_class(Type *t) {
+    if (!t) return -1;
+    switch (t->kind) {
+    case TY_INT: case TY_FLOAT:                   return EQ_NUM;
+    case TY_STRING:                               return EQ_STR;
+    case TY_BOOL:                                 return EQ_BOOL;
+    case TY_LIST: case TY_STRUCT:
+    case TY_ENUM: case TY_RESULT:                 return EQ_CTR;
+    case TY_FUNC:                                 return EQ_FUNC;
+    case TY_NULL:                                 return EQ_NULL;
+    default:                                      return -1;  /* any / unknown */
+    }
+}
+
 static Type *ck_list(Checker *c, Node *n, Type *expected) {
     if (n->as.list.count == 0) {
         /* `[]` — type comes from the expected annotation, else any[] */
@@ -131,6 +153,68 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
             for (int i = 0; i < n->as.map.count; i++) {
                 Type *vt = ck_expr(c, n->as.map.vals[i], NULL);
                 type_add_member(at, n->as.map.keys[i], vt);
+            }
+            return at;
+        }
+
+        case N_STRUCT_UPDATE: {
+            /* `{ base with k: v, ... }` — a fresh map/struct. The base keeps
+             * its declared shape: a named struct has a fixed field set (Lean's
+             * rule too — `with` overrides values, never the schema), an
+             * anonymous map may gain keys. Anything that is not a map/struct
+             * (scalar, list, func, enum, Result) is refused here rather than
+             * at runtime. */
+            Type *bt = ck_expr(c, n->as.supd.base, expected);
+            if (bt->kind != TY_STRUCT && bt->kind != TY_ANY) {
+                ck_fail(c, n->line,
+                        "'with' update requires a map or struct base, got %s",
+                        ty_str(bt));
+                for (int i = 0; i < n->as.supd.count; i++)
+                    ck_expr(c, n->as.supd.vals[i], NULL);
+                return any_type();
+            }
+            if (bt->kind == TY_ANY) {
+                for (int i = 0; i < n->as.supd.count; i++)
+                    ck_expr(c, n->as.supd.vals[i], NULL);
+                return any_type();
+            }
+            if (bt->name) {
+                /* named struct: every key must be a declared field */
+                for (int i = 0; i < n->as.supd.count; i++) {
+                    int idx = -1;
+                    for (int j = 0; j < bt->count; j++)
+                        if (strcmp(n->as.supd.keys[i], bt->names[j]) == 0) {
+                            idx = j;
+                            break;
+                        }
+                    if (idx < 0) {
+                        ck_fail(c, n->line,
+                                "unknown field '%s' in struct update (%s)",
+                                n->as.supd.keys[i], bt->name);
+                        ck_expr(c, n->as.supd.vals[i], NULL);
+                        continue;
+                    }
+                    expect_compat(c,
+                                  ck_expr(c, n->as.supd.vals[i],
+                                           bt->types[idx]),
+                                  bt->types[idx], n->line, "struct field");
+                }
+                return bt;
+            }
+            /* anonymous map: the base's members plus the with-overrides */
+            Type *at = type_anon_struct();
+            for (int j = 0; j < bt->count; j++)
+                type_add_member(at, bt->names[j], bt->types[j]);
+            for (int i = 0; i < n->as.supd.count; i++) {
+                Type *vt = ck_expr(c, n->as.supd.vals[i], NULL);
+                bool found = false;
+                for (int j = 0; j < at->count; j++)
+                    if (strcmp(n->as.supd.keys[i], at->names[j]) == 0) {
+                        at->types[j] = vt;
+                        found = true;
+                        break;
+                    }
+                if (!found) type_add_member(at, n->as.supd.keys[i], vt);
             }
             return at;
         }
@@ -278,8 +362,30 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
                 return type_prim(TY_BOOL);
             }
             if (op == OP_EQ || op == OP_NE) {
-                ck_expr(c, n->as.binary.left, NULL);
-                ck_expr(c, n->as.binary.right, NULL);
+                Type *lt = ck_expr(c, n->as.binary.left, NULL);
+                Type *rt = ck_expr(c, n->as.binary.right, NULL);
+                /* `==` used to accept any two operands and let the runtime
+                 * answer — which for mixed classes meant "invalid IR" natively
+                 * (icmp i64 against a ptr) and a quiet false in the
+                 * interpreter. Structural equality (SPEC 1.8) needs a static
+                 * gate: values in different equality classes are never
+                 * comparable, and `null` — an i8* natively — only compares
+                 * against other i8*-lowered kinds (an int is never null: the
+                 * native backends already refuse to build one). */
+                int lc = eq_class(lt), rc = eq_class(rt);
+                bool ok = true;
+                if (lc >= 0 && rc >= 0) {
+                    if (lc == EQ_NULL || rc == EQ_NULL) {
+                        int other = lc == EQ_NULL ? rc : lc;
+                        ok = other != EQ_NUM && other != EQ_BOOL;
+                    } else {
+                        ok = lc == rc;
+                    }
+                }
+                if (!ok)
+                    ck_fail(c, n->line, "'%s' does not apply to %s and %s",
+                            op == OP_EQ ? "==" : "!=",
+                            ty_str(lt), ty_str(rt));
                 return type_prim(TY_BOOL);
             }
             if (op == OP_LT || op == OP_LE || op == OP_GT || op == OP_GE) {
@@ -312,6 +418,211 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
                 !type_compat(c, lt, type_prim(TY_FLOAT), n->line))
                 ck_fail(c, n->line, "arithmetic needs numbers");
             return arith_result(lt, rt);
+        }
+
+        case N_TERNARY: {
+            /* 条件要 bool-ok；两分支各自检查后统一：同型→它，int/float
+             * 混合→float（与算术提升一致），任一 any→any，其余报错。 */
+            Type *ct = ck_expr(c, n->as.ternary.cond, NULL);
+            is_bool_ok(c, ct, n->line);
+            Type *tt = ck_expr(c, n->as.ternary.then, NULL);
+            Type *et = ck_expr(c, n->as.ternary.els, NULL);
+            if (!tt || !et || tt->kind == TY_ANY || et->kind == TY_ANY)
+                return any_type();
+            if (tt->kind == et->kind)
+                return tt;
+            bool t_num = tt->kind == TY_INT || tt->kind == TY_FLOAT;
+            bool e_num = et->kind == TY_INT || et->kind == TY_FLOAT;
+            if (t_num && e_num)
+                return type_prim(TY_FLOAT);
+            ck_fail(c, n->line,
+                    "ternary branches have different types ('%s' vs '%s')",
+                    ty_str(tt), ty_str(et));
+            return any_type();
+        }
+
+        case N_LET_EXPR: {
+            /* `let x = e1 in e2` — e1 checks against the annotation (if
+             * any) and its type (or the annotation) becomes x's type in a
+             * child scope that lives exactly as long as e2; the whole
+             * expression's type is e2's. The child scope is created fresh
+             * on every walk (pass D walks statements twice), so re-declaring
+             * into it can never trip scope_decl's same-scope duplicate
+             * check — unlike a statement `let`, no collecting branch is
+             * needed here. */
+            ck_ctor_shadow(c, n->as.letx.name, n->line);
+            Type *annot = n->as.letx.annot
+                              ? resolve(c, n->as.letx.annot, n->line) : NULL;
+            /* Write the resolved annotation back for the native emitters,
+             * same write-back a statement let does. */
+            if (n->as.letx.annot) n->as.letx.annot = annot;
+            Type *it = ck_expr(c, n->as.letx.init, annot);
+            if (annot && it && !type_compat(c, it, annot, n->line)) {
+                ck_fail(c, n->line,
+                        "'%s' is not assignable to the declared type '%s' of '%s'",
+                        ty_str(it), ty_str(annot), n->as.letx.name);
+            }
+            CScope *saved = c->scope;
+            c->scope = scope_new(saved);
+            scope_decl(c, c->scope, n->as.letx.name,
+                       annot ? annot : (it ? it : any_type()), n->line);
+            Type *bt = ck_expr(c, n->as.letx.body, expected);
+            c->scope = saved;
+            /* An assignment body yields the assigned value, but ck_expr has
+             * no N_ASSIGN/N_ASSIGN_MEMBER case — the default answers any,
+             * which would mistype the whole expression as opaque i8* storage.
+             * Both emitters coerce an assignment's result to the target
+             * slot's type (the binding's own), so that is the honest type
+             * here. A genuinely-any body keeps its any: the binding's type
+             * is derived from the same init, so the fallback can only narrow
+             * the checker's non-answer, never a real one. */
+            if (bt && bt->kind == TY_ANY && n->as.letx.body &&
+                (n->as.letx.body->type == N_ASSIGN ||
+                 n->as.letx.body->type == N_ASSIGN_MEMBER))
+                bt = (annot ? annot : it);
+            /* Stamp the result for the native backends' infer_node_type: the
+             * emitters' tables have no child scope, so a scan-time infer that
+             * descended into the body would resolve the binding's name
+             * against the OUTER scope — an outer same-name binding of a
+             * different type would then disagree with what the emitter
+             * stores (the resolve-vs-infer split this stamp closes). */
+            n->as.letx.ty = bt;
+            return bt ? bt : (annot ? annot : (it ? it : any_type()));
+        }
+
+        case N_CTOR: {
+            /* A rewritten constructor application (parser.c). Arity and
+             * payload types come from the enum table; the result is the
+             * enum's own type. */
+            int vi = -1;
+            EnumDef *ed = find_ctor(c, n->as.ctor.name, &vi);
+            if (!ed) {
+                ck_fail(c, n->line, "unknown constructor '%s'",
+                        n->as.ctor.name);
+                for (int i = 0; i < n->as.ctor.argc; i++)
+                    ck_expr(c, n->as.ctor.args[i], NULL);
+                return any_type();
+            }
+            if (ed->vfield_counts[vi] != n->as.ctor.argc) {
+                ck_fail(c, n->line,
+                        "constructor '%s' expects %d argument(s), got %d",
+                        n->as.ctor.name, ed->vfield_counts[vi],
+                        n->as.ctor.argc);
+                for (int i = 0; i < n->as.ctor.argc; i++)
+                    ck_expr(c, n->as.ctor.args[i], NULL);
+                return any_type();
+            }
+            for (int i = 0; i < n->as.ctor.argc; i++) {
+                Type *pt = ed->vfield_types[vi]
+                             ? ed->vfield_types[vi][i] : any_type();
+                expect_compat(c, ck_expr(c, n->as.ctor.args[i], pt), pt,
+                              n->line, "constructor argument");
+            }
+            return ed->type;
+        }
+
+        case N_MATCH: {
+            /* The scrutinee must be a declared enum (or any, in which case
+             * arm names cannot be validated and exhaustiveness is skipped —
+             * the runtime tag dispatch is still exact). Arm bodies unify
+             * with the ternary rules. */
+            Type *st = ck_expr(c, n->as.matchn.scrutinee, NULL);
+            st = resolve(c, st, n->line);
+            EnumDef *ed = NULL;
+            if (st && st->kind == TY_ENUM)
+                ed = find_enum(c, st->name);
+            else if (st && st->kind != TY_ANY) {
+                ck_fail(c, n->line, "match needs an enum value (got %s)",
+                        ty_str(st));
+            }
+
+            Type *result = NULL;
+            bool any_arm = false;
+            for (int i = 0; i < n->as.matchn.armc; i++) {
+                MatchArm *arm = &n->as.matchn.arms[i];
+                int bindc = ck_pat_list(c, arm->pats, arm->patc, ed,
+                                        arm->line);
+                /* Cross-arm conflicts: only an UNCONDITIONAL earlier arm
+                 * shadows. A guarded arm may fall through at runtime, so
+                 * `A if g => .., A => ..` is the legal guard idiom, not a
+                 * duplicate. */
+                if (!arm->guard) {
+                    for (int j = 0; j < i; j++) {
+                        MatchArm *prev = &n->as.matchn.arms[j];
+                        if (prev->guard) continue;
+                        bool dead = false;
+                        for (int pj = 0; pj < prev->patc && !dead; pj++) {
+                            if (strcmp(prev->pats[pj].vname, "_") == 0) {
+                                ck_fail(c, arm->line,
+                                        "match arm is unreachable: an "
+                                        "earlier '_' arm catches every "
+                                        "variant");
+                                dead = true;
+                                break;
+                            }
+                            for (int pi = 0; pi < arm->patc; pi++)
+                                if (strcmp(prev->pats[pj].vname,
+                                           arm->pats[pi].vname) == 0) {
+                                    ck_fail(c, arm->line,
+                                            "duplicate match arm '%s'",
+                                            arm->pats[pi].vname);
+                                    dead = true;
+                                    break;
+                                }
+                        }
+                    }
+                }
+                /* Bindings (and the guard, which may read them) live in a
+                 * fresh scope, exactly like a block. The first (collecting)
+                 * walk uses scope_put for the same reason top-level lets
+                 * do: the second walk re-declares. */
+                CScope *saved = c->scope;
+                c->scope = scope_new(saved);
+                ck_put_pat_binds(c, arm->pats, bindc, arm->line);
+                if (arm->guard) {
+                    Type *gt = ck_expr(c, arm->guard, NULL);
+                    is_bool_ok(c, gt, arm->line);
+                }
+                Type *bt = ck_expr(c, arm->body, NULL);
+                c->scope = saved;
+                if (!bt || bt->kind == TY_ANY) { any_arm = true; continue; }
+                if (!result) { result = bt; continue; }
+                if (result->kind == bt->kind) continue;
+                bool r_num = result->kind == TY_INT || result->kind == TY_FLOAT;
+                bool b_num = bt->kind == TY_INT || bt->kind == TY_FLOAT;
+                if (r_num && b_num) { result = type_prim(TY_FLOAT); continue; }
+                ck_fail(c, n->line,
+                        "match arms have different types ('%s' vs '%s')",
+                        ty_str(result), ty_str(bt));
+            }
+            /* Exhaustiveness: every variant covered by an UNCONDITIONAL
+             * arm (or a `_` one) — a guard can fail at runtime, so guarded
+             * arms do not count (Lean's rule). Skipped when the scrutinee
+             * is untyped and when the check already failed. */
+            if (ed && !c->failed) {
+                for (int j = 0; j < ed->vcount; j++) {
+                    bool covered = false;
+                    for (int i = 0; i < n->as.matchn.armc && !covered; i++) {
+                        MatchArm *arm = &n->as.matchn.arms[i];
+                        if (arm->guard) continue;
+                        for (int pi = 0; pi < arm->patc; pi++)
+                            if (strcmp(arm->pats[pi].vname, "_") == 0 ||
+                                strcmp(arm->pats[pi].vname,
+                                       ed->vnames[j]) == 0) {
+                                covered = true;
+                                break;
+                            }
+                    }
+                    if (!covered) {
+                        ck_fail(c, n->line,
+                                "match on '%s' does not cover variant '%s' "
+                                "(add an arm or '_')", ed->name, ed->vnames[j]);
+                        break;
+                    }
+                }
+            }
+            (void)any_arm;
+            return (result && !any_arm) ? result : any_type();
         }
 
         case N_CALL: {
