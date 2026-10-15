@@ -1,6 +1,6 @@
 /* Windows stand-ins for the builtins that live in slices this build excludes.
  *
- * The Makefile's $(IS_WINDOWS) branch drops three slices because their
+ * The Makefile's Windows branch drops three slices because their
  * implementations need agent-httpd (which has no Windows support) or raw
  * BSD sockets:
  *
@@ -10,14 +10,20 @@
  *   lang/iquest.c         - registers product API routes via agenthttpd_route and
  *                           parses them back with minijson's reader half.
  *
- * But lang/builtins.c still *registers* sql_query/sql_write/http_get/http_post/
- * http_put/http_patch/http_delete unconditionally, so the symbols have to
- * exist. Deleting the registrations would fork the language surface between
- * platforms — a script that type-checks on Windows would then fail on macOS
- * for a reason that has nothing to do with the script.
+ * lang/builtins.c still *registers* sql_query/sql_write unconditionally, so
+ * those two symbols have to exist: deleting the registrations would fork the
+ * language surface between platforms — a script that type-checks on Windows
+ * would then fail on macOS for a reason that has nothing to do with the
+ * script. The names stay, and calling one is an explicit runtime error
+ * naming the reason.
  *
- * So the names stay, and calling one is an explicit runtime error naming the
- * reason. Error wording follows builtins_http.c's existing style ("%s(): ...").
+ * The five native_http_* names used to be stubbed here too, but upstream
+ * builtins.c now defines its own unavailable fallbacks under
+ * `#if !LUME_HAS_HTTP` (the Windows build forces LUME_HAS_HTTP=0), so this
+ * file defining them again is a multiple-definition link error. That block
+ * in builtins.c is the single source of the http stubs now; only the sql
+ * stand-ins remain here because builtins.c has no sql fallback (the real
+ * implementations live behind libagenthttpd, not behind LUME_HAS_HTTP).
  */
 
 #include "builtins_internal.h"
@@ -39,24 +45,3 @@ void native_sql_write(VM *vm, int argc, Value *args, Value *out) {
     sql_unavailable(vm, "sql_write");
     *out = val_null();
 }
-
-/* http_get / http_post / http_put / http_patch / http_delete need sockets.
- * LUME_HAS_HTTP is forced to 0 on Windows, so builtins_http.c is not compiled
- * and there is no transport at all here — not even a cleartext one. */
-static void http_unavailable(VM *vm, const char *name) {
-    vm_set_error(vm, "%s(): outbound HTTP is not available in the Windows build "
-                     "(no Winsock transport; LUME_HAS_HTTP=0)", name);
-}
-
-#define HTTP_STUB(fn, label)                                  \
-    void fn(VM *vm, int argc, Value *args, Value *out) {     \
-        (void)argc; (void)args;                               \
-        http_unavailable(vm, label);                          \
-        *out = val_null();                                    \
-    }
-
-HTTP_STUB(native_http_get,    "http_get")
-HTTP_STUB(native_http_post,   "http_post")
-HTTP_STUB(native_http_put,    "http_put")
-HTTP_STUB(native_http_patch,  "http_patch")
-HTTP_STUB(native_http_delete, "http_delete")

@@ -103,6 +103,12 @@ ifneq ($(strip $(IS_WINDOWS)),)
     # MINGW64_NT-<ver>(不匹配 Linux), 但不把正确性押在这个假设上: mingw 的
     # sysroot 也没有 libcrypt, 一旦命中就链接失败。
     LDFLAGS := $(filter-out -lcrypt,$(LDFLAGS))
+    # POSIX regex for str_match: mingw 的 C runtime 没有 regcomp/regexec/
+    # regfree, 原 -lregex(libgnurx) 已从 MSYS2 源消失。vendor 进
+    # lang/compat/regex(musl/TRE, BSD 许可, 与 lume-core 的 src/compat/regex
+    # 同一份), include 路径让 <regex.h> 解析到 vendor 头; 源文件在下面
+    # Windows SRCS 分支里加进编译。
+    CFLAGS += -I lang/compat/regex
 endif
 
 # --- 出站 TLS(可选): http_get() 的 https:// (builtins_http.c, 源自 lume-core) ---
@@ -187,7 +193,9 @@ ifneq ($(strip $(IS_WINDOWS)),)
             lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/loader.c lang/vdom.c \
             lang/bridge_stub.c lang/token.c lang/os_win32.c \
             lang/builtins_stub.c lang/catalog_stub.c \
-            lang/localfns.c
+            lang/localfns.c \
+            lang/compat/regex/regcomp.c lang/compat/regex/regexec.c \
+            lang/compat/regex/regerror.c lang/compat/regex/tre-mem.c
 endif
 OBJS     := $(SRCS:lang/%.c=build/%.o)
 
@@ -214,7 +222,9 @@ endif
 # mkdir has no -p and errors on existing directories (and the SHELL env var
 # is unreliable - Git Bash injects sh paths even when cmd runs the recipe),
 # so the Windows branch creates build/ and bin/ at parse time via a plain
-# `$(shell mkdir -p build bin 2>/dev/null)`. The previous form used
+# `$(shell mkdir -p build bin 2>/dev/null)`. build/compat/regex is created
+# alongside for the vendored regex objects (see the Windows SRCS branch).
+# The previous form used
 # `$(shell cmd /c "if not exist build mkdir build & if not exist bin mkdir
 # bin")`, whose `cmd`/`&`/quoting confused the CI make/SHELL into
 # "/bin/sh: --: invalid option" + "missing separator" at parse time. CI's
@@ -227,7 +237,7 @@ build:
 bin:
 	mkdir -p bin
 else
-$(shell mkdir -p build bin 2>/dev/null)
+$(shell mkdir -p build bin build/compat/regex 2>/dev/null)
 build: ;
 bin: ;
 endif
