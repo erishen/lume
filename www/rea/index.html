@@ -60,8 +60,13 @@
       <p class="muted">数据来自 <code>/discovery</code>（agent-httpd 注册表实况）。<a href="/discovery.html" style="color:var(--color-accent)">查看完整数据 →</a></p>
 
       <h2>试试（在 Agent Chat 里粘贴）</h2>
-      <div class="prompt-card">先调用 rea__open_binary 打开 /bin/ls（ELF，provider_id=ghidra），用 rea__binary_session 等到 Ghidra 分析完成，再调用 rea__binary_overview 和 rea__get_call_graph 分析它，总结文件类型、架构和调用图特征</div>
+      <div class="prompt-card">先调用 rea__open_binary 打开 /bin/ls（ELF，provider_id=ghidra），用 rea__binary_session 等到 Ghidra 分析完成，再调用 rea__binary_overview 分析它，总结文件类型、架构和格式特征</div>
       <div class="prompt-card">分析 /bin/ls（ELF）的动态库依赖：rea__open_binary 打开后先 rea__binary_session 等到分析完成，再调用 rea__get_call_graph 和 rea__list_names 查看调用图与导入符号，据此推断它依赖的动态库（容器内无 ldd/readelf，需要明确标注这是推断）</div>
+      <div class="prompt-card">用 rea__open_binary 打开 /bin/ls 后，调用 rea__list_strings 列出其中可读的字符串，找出与路径或错误消息相关的几条</div>
+      <div class="prompt-card">用 rea__open_binary 打开 /bin/ls 后，调用 rea__list_segments 查看它的段布局和权限标志，再调用 rea__list_architectures 看看 rea 支持哪些架构</div>
+      <div class="prompt-card">用 rea__open_binary 打开 /bin/ls 后，调用 rea__list_procedures 列出函数，选 main 用 rea__analyze_function 深入分析它的逻辑</div>
+      <div class="prompt-card">先用 rea__binary_session 查看当前会话状态，再 rea__open_binary 打开 /bin/ls，之后再查一次 rea__binary_session，说明会话状态发生了什么变化</div>
+      <div class="prompt-card">用 rea__open_binary 打开 /bin/ls 后，先用 rea__list_strings 找到与 /usr 相关的字符串，再用 rea__find_xrefs_to_name 找到引用它的代码位置</div>
       <div class="prompt-card">rea 里没有打开目标时报 target_unavailable —— 请演示一次完整的 open_binary → binary_session → 分析流程</div>
       <br />
       <a class="cta" href="/chat">进入 Agent Chat →</a>
