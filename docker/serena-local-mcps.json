@@ -1,0 +1,9 @@
+[
+  {
+    "id": "serena",
+    "transport": "stdio",
+    "command": "/usr/local/bin/serena",
+    "args": "start-mcp-server --project /app/projects/lume --transport stdio",
+    "approval": false
+  }
+]

@@ -39,6 +39,10 @@ editor/lume-vscode/dist/*.vsix
 /www/rea/*
 !/www/rea/*.html
 !/www/rea/*.js
+# serena 演示页例外: 同 rea 模式, www/serena/ 下的 .js 是手写页面脚本。
+/www/serena/*
+!/www/serena/*.html
+!/www/serena/*.js
 
 # --- 运行时状态 -------------------------------------------------------------
 # 含对话内容、会话 id 与本机绝对路径,一律不入库:
@@ -58,6 +62,12 @@ skills/router/
 docker/ghidra-deps/
 docker/ghidra/
 docker/jdk/
+
+# --- serena-demo 构建输入 --------------------------------------------------
+# docker/serena-src/ 是构建前从宿主 /Users/<user>/Github/serena 复制进
+# build context 的 Serena 源码(GPL-3.0, 仅本地演示用), 镜像内安装后即删,
+# 不入库; 换机重构建时重新复制即可。
+docker/serena-src/
 
 # --- 宿主私有调试 wrapper ------------------------------------------------
 # tools/rea-mcp-wrapper.sh 硬编码本机绝对路径(/Users/<user>/.nvm、.npm/_npx),

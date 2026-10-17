@@ -1,0 +1,46 @@
+// ============================================================================
+// serena-demo.lume —— Serena 源码分析接入演示服务器（docker compose serena-demo 专用）。
+//
+// 用途:在 Docker 环境里查看 Serena（oraios/serena，源码符号级语义 MCP）的接入使用。
+//   页面: /  （serena 概览 + 实时工具统计,静态 www/serena/index.html）
+//         /chat（Agent Chat,复用共享 chat bundle /invest/app.js）
+//         /discovery（agent-httpd 注册表实况:skills/tools/mcps）
+//
+// 启动: docker compose -f docker/docker-compose.yml up serena-demo
+//   compose 注入 MCP_ALLOW="serena" + MCP_SERVERS(容器内
+//   /usr/local/bin/serena start-mcp-server --project /app/projects/lume),
+//   HTPASSWD_FILE=/app/auth/htpasswd(entrypoint 从 .env 的 LUME_AUTH_PASSWORD
+//   现场生成, 无密码则认证关闭), 并挂载宿主 www/ 与 examples/ 以便热改页面
+//   (重编镜像则用镜像内 COPY 版本)。分析目标 /app/projects/lume 由 compose
+//   只读挂载宿主 lume 仓库根（lang/*.c/h 等 C 源码, 容器内 clangd 分析）。
+//
+// 说明:与 rea-demo 互补 —— rea 是无源码时的二进制逆向, serena 是有源码时的
+//   LSP 符号级语义（find_symbol/find_referencing_symbols/insert_after_symbol
+//   /safe_delete 等, config 已切 agent_interface: tools 暴露独立工具）。
+// ============================================================================
+
+server {
+  port = 8083;         // compose 映射 127.0.0.1:18085
+  workers = 2;
+  docroot = "./www";   // 共享静态层(make ui 产物)
+  views = "serena";    // 页面子目录:/ → www/serena/index.html, /chat → www/serena/chat.html
+  // 访问控制: 与 invest/hub 同款 —— htpasswd 走 env, 未设即认证关闭(本机
+  // make 场景); 容器内由 compose 注入 HTPASSWD_FILE 才启用 Basic Auth
+  // (entrypoint 从 .env 的 LUME_AUTH_PASSWORD 现场生成 /app/auth/htpasswd)。
+  htpasswd   = env("HTPASSWD_FILE");
+}
+
+// ------------------------------------------------ /discovery
+// agent-httpd 注册表实况(GET only, 跑在 master VM)。
+get "/discovery", (req) => {
+  return {
+    endpoints: discovery_endpoints(),   // 只报配置状态与模型名, 不暴露内网 URL,
+    skills: skills(),                   // 技能名清单
+    tools: tools(),                     // 工具名清单(含全部 serena__*)
+    // catalog().mcps = llm-router 同步的网关服务器(gateway) + 本地配置
+    // (.data/mcp-servers.json, 经 compose 挂载注入 serena 条目) 合并, 带 source 标签。
+    mcps: catalog().mcps,
+  };
+};
+
+run();   // start the server and block

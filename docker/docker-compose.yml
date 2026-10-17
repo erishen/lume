@@ -224,3 +224,73 @@ services:
       # 认证开启 → 401 也算健康, 理由同 x-lume-common 的 healthcheck 注释
       test: ["CMD-SHELL", "c=$(/bin/curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8082/health 2>&1); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]
     restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # serena-demo —— 查看 Serena（Oraios AI, 源码符号级语义 MCP）接入的演示服务。
+  # 与 rea-demo 互补: rea 是二进制逆向(无源码), serena 是 LSP 符号级源码分析
+  # (有源码), lume 里并排 = "有源码 / 无源码" 两种函数分析。
+  # 专用镜像 docker/serena-demo.Dockerfile（ubuntu:24.04 + python3 + clangd +
+  # 本机 serena 源码 pip 安装）, 与 scratch 最小化镜像隔离 —— python 运行时
+  # 会扩大安全面, 独立成镜像（同 rea-demo 理由）。
+  #
+  # 接入方式（agent-httpd MCP 机制）:
+  #   MCP_ALLOW="serena"        —— 白名单放行（invest/hub 的 fs,think,memory
+  #                                 均不含 serena, 只有本 service 能看到）
+  #   MCP_SERVERS=JSON          —— stdio 注入 /usr/local/bin/serena
+  #                                start-mcp-server --project /app/projects/lume
+  #                                （容器内路径; .dockerignore 排除 .data/,
+  #                                镜像内无宿主机绝对路径配置, env 是唯一来源）
+  #   SERENA_HOME=/app/.serena  —— config 目录(agent_interface: tools,
+  #                                独立工具接口; v2 默认 REPL 单工具)
+  #   SERENA_DOCKER=1           —— 容器环境信号
+  #   分析目标 /app/projects/lume 只读挂载宿主 lume 仓库根（lang/*.c/h 等,
+  #   容器内 clangd 做 C/C++ 符号分析）; 要分析别的代码库, 换挂载 + 改
+  #   MCP_SERVERS 的 --project 即可。
+  # 访问控制: 与 rea-demo 同款 Basic Auth —— HTPASSWD_FILE 指向镜像 entrypoint
+  #   现场生成的 /app/auth/htpasswd（.env LUME_AUTH_PASSWORD 唯一来源）;
+  #   端口绑回环 + 认证双层防护。
+  # 端口: 127.0.0.1:18085 → 容器 8083 (serena-demo.lume, Basic Auth)。
+  # ---------------------------------------------------------------------------
+  serena-demo:
+    image: lume-serena-demo:latest
+    build:
+      context: ..               # lume/(仓库根), 与主镜像同 context
+      dockerfile: docker/serena-demo.Dockerfile
+    # 独立 build（不用 x-lume-common 锚点）→ 必须显式带 env_file,
+    # 否则 .env 的 LLM_API_KEY/LLM_MODEL 不注入, llm-router 同步无认证 → 401,
+    # .data/mcp-servers-router.json 不生成 → /discovery 的 mcps 为空。
+    env_file:
+      - path: ../.env            # lume/.env (可选)
+        required: false
+    command: ["./bin/lume", "examples/serena-demo.lume"]
+    # 开发期挂载宿主 www/examples(只读): 页面与 .lume 热改免重编镜像;
+    # 生产再按镜像内 COPY 版本走(rebuild 时带上)。
+    volumes:
+      - ../www:/app/www:ro
+      - ../examples:/app/examples:ro
+      # local 配置源: 容器专用文件(仅 serena 条目) 注入容器, 供 catalog().mcps
+      # 显示 "local" 来源; agent-httpd 同 id 去重, 与 env MCP_SERVERS 不重复
+      # 注册。.data 被 .dockerignore 排除, 镜像无此文件。
+      - ../docker/serena-local-mcps.json:/app/.data/mcp-servers.json:ro
+      # 分析目标: lume 仓库根（只读, serena 只做语义检索/分析演示, 编辑类
+      # 工具在只读挂载下会失败 —— 演示/查看场景刻意如此, 避免容器内改动
+      # 宿主源码; 要演示编辑再换可写挂载）。
+      - ..:/app/projects/lume:ro
+    environment:
+      # 服务级 environment 整块替换锚点 → LLM/ROUTER 覆盖必须重复（同 invest/hub）
+      LLM_API_URL: "${LLM_API_URL:-http://host.docker.internal:19070/v1}"
+      ROUTER_API_URL: "${ROUTER_API_URL:-http://host.docker.internal:19070/v1}"
+      MCP_ALLOW: "serena"
+      MCP_SERVERS: '[{"id":"serena","transport":"stdio","command":"/usr/local/bin/serena","args":"start-mcp-server --project /app/projects/lume --transport stdio","approval":false}]'
+      SERENA_HOME: "/app/.serena"
+      SERENA_DOCKER: "1"
+      # Basic Auth: 指向 entrypoint 在容器内生成的 htpasswd（.env 的
+      # LUME_AUTH_PASSWORD 唯一来源）。与 rea-demo 对齐, 端口绑回环之上
+      # 再加一层认证; 删掉这一行即回到无认证。
+      HTPASSWD_FILE: "/app/auth/htpasswd"
+    ports:
+      - "127.0.0.1:18085:8083"   # 绑回环 + Basic Auth, 见 serena-demo 注释
+    healthcheck:
+      # 认证开启 → 401 也算健康, 理由同 x-lume-common 的 healthcheck 注释
+      test: ["CMD-SHELL", "c=$(/bin/curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8083/health 2>&1); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]
+    restart: unless-stopped

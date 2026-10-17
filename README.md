@@ -127,11 +127,11 @@ Quick start and Containers sections.
 | Path | Contents |
 |---|---|
 | `lang/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, ~11.3k lines of C11 across 36 files. A **pinned copy** of the sibling lume-core language tree - see `lang/PIN`. Three buckets: 21 *synced* (byte-identical to upstream), 14 *host-owned* (never overwritten, deliberately kept here - the host's own bridge/build layer), 6 *host-only* (never existed upstream). `make sync-lang` bumps the pin, `make check-sync` fails on a synced-file drift; host-owned files that fall behind upstream are only *reported*, not failed (CI runs `check-sync`, so it always has a baseline to compare against via `lang/PIN.manifest`) |
-| `examples/` | 11 `.lume` entry files (the rest of the 16 are reusable libs they `import`): `hello` / `lang-basics` / `demo` / `react-ssr` / `invest` / `abac` / `modules-server` / `query-demo` / `hub` / `sqlite-write` / `rea-demo`, plus libs `invest/ledger.lume` (portfolio tools), `abac/policy.lume` (ABAC policy engine), `demo/ui.lume` (SSR page components), `modules/app.lume`, `modules/tax.lume` |
+| `examples/` | 12 `.lume` entry files (plus 5 reusable libs they `import`; the test entry `http-live-test` is not counted above): `hello` / `lang-basics` / `demo` / `react-ssr` / `invest` / `abac` / `modules-server` / `query-demo` / `hub` / `sqlite-write` / `rea-demo` / `serena-demo`, plus libs `invest/ledger.lume` (portfolio tools), `abac/policy.lume` (ABAC policy engine), `demo/ui.lume` (SSR page components), `modules/app.lume`, `modules/tax.lume` |
 | `frontend/` | React 18 + TS + Tailwind 4 client (`src/`, esbuild `--splitting`) + React SSR page sources (`react-ssr/`, built by `scripts/build-react-ssr.sh`) |
 | `www/` | docroot: hand-written HTML shells + build artifacts (mixed; don't delete wholesale) |
 | `tests/` | C unit tests (`smoke.c`) + tool dispatch (`tools_driver.c`) + end-to-end (`run_all.sh`) |
-| `docker/` | Two-stage Dockerfile (C rebuilt in-container) + compose (invest / hub services) + a dedicated `rea-demo` image (ubuntu:24.04 + node 24 + rea-agents + Ghidra, `docker/rea-demo.Dockerfile`) |
+| `docker/` | Two-stage Dockerfile (C rebuilt in-container) + compose (invest / hub services) + dedicated `rea-demo` (ubuntu:24.04 + node 24 + rea-agents + Ghidra) and `serena-demo` (ubuntu:24.04 + python3 + clangd + serena-agent) images — `docker/rea-demo.Dockerfile`, `docker/serena-demo.Dockerfile` |
 | `editor/lume-vscode/` | VS Code extension — search "Lume DSL" (`erishen.lume`) in the Extensions view |
 | `docs/` | Full docs, see below |
 
@@ -181,6 +181,17 @@ because rea needs a node runtime — see `examples/rea-demo.lume` and the
 Dockerfile header for the wiring and build notes (incl. the source-built
 arm64 Ghidra decompiler).
 
+Complementing it, a `serena-demo` service (`127.0.0.1:18085`) built from
+`docker/serena-demo.Dockerfile` (ubuntu:24.04 + python3 + clangd +
+serena-agent from the host checkout at `docker/serena-src/`) shows Serena
+(oraios/serena, Oraios AI) — the LSP/symbol-level *source* MCP
+(`serena__*` tools, `agent_interface: tools`) — plugged in the same way.
+The two demos cover both sides of "function analysis": **rea = binaries
+without source, Serena = source with symbols**. The analysis target is the
+lume repo itself, mounted read-only at `/app/projects/lume` (editing tools
+fail by design there). See `examples/serena-demo.lume` and the Dockerfile
+header for wiring notes.
+
 The image carries no `.env` (injected by compose `env_file`) and no `.data/`
 sessions; the `skills/router/` sync copy **does** ship in the image — it is a
 fallback cache written by `llm-router` at startup so the container keeps the
@@ -193,8 +204,8 @@ stays git-ignored.
   `/api/reports`, `/react/api/chat`, `/discovery` are all plain endpoints, and
   chat can read/write files via the `fs` tool. So (1) compose binds host ports
   to `127.0.0.1` rather than `0.0.0.0` to keep the service off the LAN, and
-  (2) containers (invest / hub / rea-demo alike) enable Basic Auth — the
-  password lives only in `.env`
+  (2) containers (invest / hub / rea-demo / serena-demo alike) enable Basic
+  Auth — the password lives only in `.env`
   (`LUME_AUTH_USER` / `LUME_AUTH_PASSWORD`, git-ignored); the image entrypoint
   converts it to `/app/auth/htpasswd` (bcrypt) at startup and `server{}`
   reads it via `htpasswd = env("HTPASSWD_FILE")`. Verified: no credentials →
