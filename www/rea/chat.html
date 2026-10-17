@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Agent · Lume × REA</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body data-page="chat">
+    <nav>
+      <a href="/" class="brand">Lume × REA</a>
+      <a href="/">概览</a>
+      <a href="/discovery.html">实时数据</a>
+      <a href="/chat" class="active">Agent Chat</a>
+    </nav>
+    <main class="chat-page">
+      <header class="hero chat-hero">
+        <h1>REA 逆向分析 Agent</h1>
+        <p>
+          连接本地模型与 rea 的 170 个逆向工具：open_binary 注入目标 →
+          架构 / 符号 / 段 / 签名 / 调用图 / 证据溯源分析。
+          先让它 open_binary，再让它分析；rea 免商业引擎即可处理 Go/Rust 二进制、
+          JS/Electron/.NET/SQLite、APK、网站等。
+        </p>
+      </header>
+      <section class="chat shell" id="chat-root">
+        <p class="muted">loading agent…</p>
+      </section>
+    </main>
+    <script type="module" src="/invest/app.js"></script>
+    <script src="/rea/chat-task.js"></script>
+  </body>
+</html>

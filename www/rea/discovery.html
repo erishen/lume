@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REA · 实时接入数据</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  /* 暗色主题: 与 app.css 设计语言一致 */
+  main { padding-top: calc(var(--spacing) * 8); }
+  .page-head { margin-bottom: 6px; }
+  .page-head h1 { font-size: 26px; font-weight: 700; color: var(--color-ink); }
+  .page-head p { color: var(--color-muted); font-size: 13.5px; margin-top: 6px; }
+  section { margin: 26px 0; }
+  section > h2 { font-size: 16px; font-weight: 700; color: var(--color-ink); margin-bottom: 12px; letter-spacing: .02em; }
+  section > h2 .count { color: var(--color-muted); font-weight: 500; font-size: 13px; margin-left: 8px; }
+
+  /* 接入状态徽章 */
+  .ep-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .ep-badge { background: var(--color-panel); border: 1px solid var(--color-line); border-radius: 8px; padding: 10px 14px; min-width: 150px; }
+  .ep-badge .k { font-size: 12px; color: var(--color-muted); text-transform: uppercase; letter-spacing: .06em; }
+  .ep-badge .v { font-size: 14px; font-weight: 600; color: var(--color-ink); margin-top: 3px; word-break: break-all; }
+  .ep-badge .v.ok { color: var(--color-accent); }
+  .ep-badge .v.na { color: var(--color-muted); }
+
+  /* MCP 服务器表 */
+  table { width: 100%; border-collapse: collapse; background: var(--color-panel); border: 1px solid var(--color-line); border-radius: 10px; overflow: hidden; }
+  th { text-align: left; font-size: 12px; color: var(--color-muted); font-weight: 600; padding: 10px 14px; border-bottom: 1px solid var(--color-line); }
+  td { padding: 10px 14px; font-size: 13px; color: var(--color-ink); border-bottom: 1px solid var(--color-line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td code { color: var(--color-sky-300); font-size: 12px; word-break: break-all; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 5px; font-size: 11.5px; font-weight: 600; }
+  .tag.local { background: rgba(56, 189, 248, .15); color: var(--color-accent); }
+  .tag.gateway { background: rgba(163, 230, 53, .13); color: #a3e635; }
+  .tag.rea { background: rgba(167, 139, 250, .16); color: #c4b5fd; }
+
+  /* 技能卡片 */
+  .skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .skill-card { background: var(--color-panel); border: 1px solid var(--color-line); border-radius: 10px; padding: 13px 16px; }
+  .skill-card h3 { margin: 0 0 6px; font-size: 14px; font-weight: 700; color: var(--color-ink); }
+  .skill-card p { margin: 0; font-size: 12.5px; color: var(--color-muted); line-height: 1.55; }
+
+  /* 工具列表 */
+  .tool-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .tool-bar input { flex: 1; min-width: 200px; background: var(--color-panel); border: 1px solid var(--color-line); color: var(--color-ink); border-radius: 8px; padding: 9px 12px; font-size: 13px; }
+  .tool-bar input:focus { outline: none; border-color: var(--color-accent); }
+  .tool-group { margin: 16px 0; }
+  .tool-group h3 { font-size: 13px; font-weight: 700; color: var(--color-muted); text-transform: uppercase; letter-spacing: .05em; margin: 0 0 8px; }
+  .tool-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { background: var(--color-panel); border: 1px solid var(--color-line); border-radius: 6px; padding: 4px 9px; font-size: 12px; color: var(--color-ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .chip.rea { color: #c4b5fd; border-color: rgba(167, 139, 250, .25); }
+  .chip.hidden { display: none; }
+  .empty { color: var(--color-muted); font-size: 13px; padding: 14px; }
+  .muted { color: var(--color-muted); font-size: 12.5px; }
+  .refresh { background: var(--color-accent); color: var(--color-accent-ink); border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .refresh:active { opacity: .8; }
+</style>
+</head>
+<body>
+  <nav class="nav">
+    <a class="brand" href="/">Lume × REA</a>
+    <a href="/">概览</a>
+    <a href="/discovery.html" class="active">实时数据</a>
+    <a href="/chat">Agent Chat</a>
+  </nav>
+  <main>
+    <header class="page-head">
+      <h1>实时接入数据</h1>
+      <p>数据来自 <code>/discovery</code>（agent-httpd 注册表实况），每次进入自动刷新，也可手动刷新。</p>
+    </header>
+
+    <section>
+      <h2>接入状态</h2>
+      <div class="ep-grid" id="ep-grid"><div class="ep-badge"><div class="k">加载中…</div></div></div>
+    </section>
+
+    <section>
+      <h2>MCP 服务器 <span class="count" id="mcp-count"></span></h2>
+      <div id="mcp-table"><div class="empty">加载中…</div></div>
+    </section>
+
+    <section>
+      <h2>技能 <span class="count" id="skill-count"></span></h2>
+      <div class="skill-grid" id="skill-grid"><div class="empty">加载中…</div></div>
+    </section>
+
+    <section>
+      <h2>工具 <span class="count" id="tool-count"></span></h2>
+      <div class="tool-bar">
+        <input id="tool-q" type="search" placeholder="过滤工具，如 open_binary / compare / 架构">
+        <button class="refresh" id="btn-refresh">刷新</button>
+      </div>
+      <div id="tool-list"><div class="empty">加载中…</div></div>
+    </section>
+  </main>
+  <script src="/rea/discovery.js"></script>
+</body>
+</html>

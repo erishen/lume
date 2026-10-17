@@ -1,0 +1,9 @@
+[
+  {
+    "id": "rea",
+    "transport": "stdio",
+    "command": "/opt/node/bin/node",
+    "args": "/app/rea/node_modules/rea-agents/scripts/rea.mjs mcp",
+    "approval": false
+  }
+]

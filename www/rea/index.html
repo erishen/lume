@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Lume × REA · 逆向分析台</title>
+    <link rel="stylesheet" href="/app.css" />
+    <style>
+      /* 暗色主题: 与 app.css 设计语言一致(--color-bg/panel/ink/muted/accent) */
+      main h2 { font-size: 17px; font-weight: 700; color: var(--color-ink); margin-top: 28px; letter-spacing: .02em; }
+      .hero p code { color: var(--color-sky-300); }
+      .rea-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 18px 0; }
+      .rea-card { background: var(--color-panel); border: 1px solid var(--color-line); border-radius: 12px; padding: 16px 18px; }
+      .rea-card h3 { margin: 0 0 8px; font-size: 15px; font-weight: 700; color: var(--color-ink); }
+      .rea-card p { margin: 0; font-size: 13px; color: var(--color-muted); line-height: 1.6; }
+      .rea-card code { color: var(--color-sky-300); background: var(--color-bg); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+      .rea-stats { display: flex; gap: 28px; margin: 14px 0 6px; }
+      .rea-stats div { font-size: 13px; color: var(--color-muted); }
+      .rea-stats b { font-size: 22px; color: var(--color-ink); display: block; margin-top: 2px; font-variant-numeric: tabular-nums; }
+      .prompt-card { background: var(--color-panel); border: 1px dashed var(--color-line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; font-size: 13.5px; color: var(--color-ink); line-height: 1.6; cursor: pointer; }
+      .prompt-card:hover { background: #1a2440; }
+      .cta { display: inline-block; margin-top: 18px; padding: 11px 26px; background: var(--color-accent); color: var(--color-accent-ink); border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; }
+      .muted { color: var(--color-muted); font-size: 12.5px; }
+    </style>
+  </head>
+  <body data-page="home">
+    <nav>
+      <a href="/" class="brand">Lume × REA</a>
+      <a href="/" class="active">概览</a>
+      <a href="/discovery.html">实时数据</a>
+      <a href="/chat">Agent Chat</a>
+    </nav>
+    <main class="page">
+      <header class="hero">
+        <h1>REA 逆向工程接入台</h1>
+        <p>
+          <b>rea</b>（Reverse Engineer Anything，morluto/rea）以 MCP server 形式常驻接入
+          lume 的 agent-httpd 客户端 —— 容器内 <code>node + rea-agents@6.4.0</code> 运行，
+          全部 <code>rea__*</code> 工具对聊天模型可见，resident 复用管道，无需每次握手。
+        </p>
+      </header>
+
+      <h2>能力分类</h2>
+      <div class="rea-grid">
+        <div class="rea-card"><h3>Native 二进制</h3><p>Mach-O / ELF / PE：先 <code>rea__open_binary</code> 注入目标，再分析架构、段、符号、签名、依赖、调用图（深度分析需装 Ghidra / IDA / Hopper）</p></div>
+        <div class="rea-card"><h3>Go / Rust</h3><p>内置静态解析：无需商业引擎即可读类型、函数、数据布局、指令</p></div>
+        <div class="rea-card"><h3>JS / Electron / .NET / SQLite</h3><p>免商业引擎：JS bundle 分析、Electron 应用、.NET 程序集、SQLite 取证</p></div>
+        <div class="rea-card"><h3>Android</h3><p>APK / ADB / JADX：清单、资源解码、apktool 客户端、WebView 脚本</p></div>
+        <div class="rea-card"><h3>Web</h3><p>Chrome 系 CDP / Playwright：页面脚本导出、bundle 分析、会话观察</p></div>
+        <div class="rea-card"><h3>WASM / EVM / 固件 / pcap</h3><p>字节码与合约接口、固件契约、网络包场景捕获</p></div>
+      </div>
+
+      <h2>实时接入状态</h2>
+      <div class="rea-stats" id="rea-stats">
+        <div>工具总数<b id="s-tools">–</b></div>
+        <div>rea 工具<b id="s-rea">–</b></div>
+        <div>MCP 服务器<b id="s-mcps">–</b></div>
+      </div>
+      <p class="muted">数据来自 <code>/discovery</code>（agent-httpd 注册表实况）。<a href="/discovery.html" style="color:var(--color-accent)">查看完整数据 →</a></p>
+
+      <h2>试试（在 Agent Chat 里粘贴）</h2>
+      <div class="prompt-card">先调用 rea__open_binary 打开 /bin/ls（ELF，绝对路径），再调用 rea__list_architectures 和 rea__binary_overview 分析它，总结文件类型、架构和格式特征</div>
+      <div class="prompt-card">用 rea 工具读取 /bin/ls 的导入表/调用图，列出它依赖的动态库</div>
+      <div class="prompt-card">rea 里没有打开目标时报 target_unavailable —— 请演示一次完整的 open_binary → 分析流程</div>
+      <br />
+      <a class="cta" href="/chat">进入 Agent Chat →</a>
+      <p class="muted" style="margin-top:20px">提示：rea 默认无目标，先 <code>open_binary</code> 注入；容器内可分析 /bin/* 等 Linux 二进制（ELF）。</p>
+    </main>
+    <script src="/rea/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,43 @@
+// ============================================================================
+// rea-demo.lume —— REA 逆向工程接入演示服务器（docker compose rea-demo 专用）。
+//
+// 用途:在 Docker 环境里查看 rea（morluto/rea，逆向工程 MCP）的接入使用。
+//   页面: /  （rea 概览 + 实时工具统计,静态 www/rea/index.html）
+//         /chat（Agent Chat,复用共享 chat bundle /invest/app.js）
+//         /discovery（agent-httpd 注册表实况:skills/tools/mcps）
+//
+// 启动: docker compose -f docker/docker-compose.yml up rea-demo
+//   compose 注入 MCP_ALLOW="rea" + MCP_SERVERS(容器内 node + rea.mjs 路径),
+//   HTPASSWD_FILE=/app/auth/htpasswd(entrypoint 从 .env 的 LUME_AUTH_PASSWORD
+//   现场生成, 无密码则认证关闭), 并挂载宿主 www/ 与 examples/ 以便热改页面
+//   (重编镜像则用镜像内 COPY 版本)。
+//
+// 说明:rea 默认无打开目标, 聊天时先让它 open_binary 注入 /bin/* 等目标;
+//   免商业引擎可解析 Go/Rust 二进制、JS/Electron/.NET/SQLite、APK、网站。
+// ============================================================================
+
+server {
+  port = 8082;         // compose 映射 127.0.0.1:18084
+  workers = 2;
+  docroot = "./www";   // 共享静态层(make ui 产物)
+  views = "rea";       // 页面子目录:/ → www/rea/index.html, /chat → www/rea/chat.html
+  // 访问控制: 与 invest/hub 同款 —— htpasswd 走 env, 未设即认证关闭(本机
+  // make 场景); 容器内由 compose 注入 HTPASSWD_FILE 才启用 Basic Auth
+  // (entrypoint 从 .env 的 LUME_AUTH_PASSWORD 现场生成 /app/auth/htpasswd)。
+  htpasswd   = env("HTPASSWD_FILE");
+}
+
+// ------------------------------------------------ /discovery
+// agent-httpd 注册表实况(GET only, 跑在 master VM)。
+get "/discovery", (req) => {
+  return {
+    endpoints: discovery_endpoints(),   // 只报配置状态与模型名, 不暴露内网 URL,
+    skills: skills(),                   // 技能名清单
+    tools: tools(),                     // 工具名清单(含全部 rea__*)
+    // catalog().mcps = llm-router 同步的网关服务器(gateway) + 本地配置
+    // (.data/mcp-servers.json, 经 compose 挂载注入 rea 条目) 合并, 带 source 标签。
+    mcps: catalog().mcps,
+  };
+};
+
+run();   // start the server and block
