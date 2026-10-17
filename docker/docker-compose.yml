@@ -150,3 +150,63 @@ services:
     healthcheck:
       # 认证开启 → 401 也算健康, 理由见 x-lume-common 的 healthcheck 注释
       test: ["CMD-SHELL", "c=$(/bin/wget -S -q -O /dev/null http://127.0.0.1:8083/health 2>&1 | sed -n 's/.*HTTP\\/[^ ]* \\([0-9]\\{3\\}\\).*/\\1/p' | sed -n '1p'); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]
+
+  # ---------------------------------------------------------------------------
+  # rea-demo —— 查看 rea（Reverse Engineer Anything 逆向 MCP）接入的演示服务。
+  # 专用镜像 docker/rea-demo.Dockerfile（ubuntu:24.04 + node 24 + rea-agents），
+  # 与 invest/hub 的 scratch 最小化镜像隔离 —— rea 需要 node 运行时，加进
+  # scratch 会把安全面整体扩大, 故独立成镜像。
+  #
+  # 接入方式（agent-httpd MCP 机制）:
+  #   MCP_ALLOW="rea"          —— 白名单放行（compose 的 invest/hub 是
+  #                               fs,think,memory, 均不含 rea, 所以只有
+  #                               本 service 能看到 rea）
+  #   MCP_SERVERS=JSON         —— 注入 MCP 服务器配置（容器内路径）;
+  #                               .dockerignore 已排除 .data/, 镜像内没有
+  #                               宿主机绝对路径配置, env 是唯一来源
+  #   rea 冷启动 40–90s        —— agent-httpd MCP_BOOT_TIMEOUT 已改 120s
+  #   rea 默认无目标            —— 先 open_binary 注入目标再分析
+  # 访问控制: 与 invest/hub 同款 Basic Auth —— HTPASSWD_FILE 指向镜像
+  #   entrypoint 现场生成的 /app/auth/htpasswd（从 .env LUME_AUTH_PASSWORD
+  #   生成, $6$ 强哈希; 无密码则不生成 → 认证关闭）。因此 rea-demo 同样
+  #   只有 .env 一个凭据来源, 端口绑回环 + 认证双层防护。
+  # 端口: 127.0.0.1:18084 → 容器 8082 (rea-demo.lume, Basic Auth)。
+  # ---------------------------------------------------------------------------
+  rea-demo:
+    image: lume-rea-demo:latest
+    build:
+      context: ..               # lume/(仓库根), 与主镜像同 context
+      dockerfile: docker/rea-demo.Dockerfile
+    # 独立 build（不用 x-lume-common 锚点）→ 必须显式带 env_file,
+    # 否则 .env 的 LLM_API_KEY/LLM_MODEL 不注入, llm-router 同步无认证 → 401,
+    # .data/mcp-servers-router.json 不生成 → /discovery 的 mcps 为空。
+    env_file:
+      - path: ../.env            # lume/.env (可选)
+        required: false
+    command: ["./bin/lume", "examples/rea-demo.lume"]
+    # 开发期挂载宿主 www/examples(只读): 页面与 .lume 热改免重编镜像;
+    # 生产再按镜像内 COPY 版本走(rebuild 时带上)。
+    volumes:
+      - ../www:/app/www:ro
+      - ../examples:/app/examples:ro
+      # local 配置源: 容器专用文件(仅 rea 条目) 注入容器, 供 catalog().mcps
+      # 显示 "local" 来源; agent-httpd 同 id 去重, 与 env MCP_SERVERS 不重复
+      # 注册。.data 被 .dockerignore 排除, 镜像无此文件; 不用宿主 .data 全量
+      # 配置以免把 invest 的 portfolio-check/pse-review 也带进显示。
+      - ../docker/rea-local-mcps.json:/app/.data/mcp-servers.json:ro
+    environment:
+      # 服务级 environment 整块替换锚点 → LLM/ROUTER 覆盖必须重复（同 invest/hub）
+      LLM_API_URL: "${LLM_API_URL:-http://host.docker.internal:19070/v1}"
+      ROUTER_API_URL: "${ROUTER_API_URL:-http://host.docker.internal:19070/v1}"
+      MCP_ALLOW: "rea"
+      MCP_SERVERS: '[{"id":"rea","transport":"stdio","command":"/opt/node/bin/node","args":"/app/rea/node_modules/rea-agents/scripts/rea.mjs mcp","approval":false}]'
+      # Basic Auth: 指向 entrypoint 在容器内生成的 htpasswd（.env 的
+      # LUME_AUTH_PASSWORD 唯一来源）。与 invest/hub 对齐, 端口绑回环之上
+      # 再加一层认证; 删掉这一行即回到无认证（与本机 make 语义一致）。
+      HTPASSWD_FILE: "/app/auth/htpasswd"
+    ports:
+      - "127.0.0.1:18084:8082"   # 绑回环 + Basic Auth, 见 rea-demo 注释
+    healthcheck:
+      # 认证开启 → 401 也算健康, 理由同 x-lume-common 的 healthcheck 注释
+      test: ["CMD-SHELL", "c=$(/bin/curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8082/health 2>&1); [ \"$$c\" = 200 ] || [ \"$$c\" = 401 ]"]
+    restart: unless-stopped

@@ -66,7 +66,7 @@ void native_sql_write(VM *vm, int argc, Value *args, Value *out);
  * builtins_catalog.c compiles unchanged against either header.
  * SKILL_DESC_MAX is the /discovery description cap; catalog() carries full text. */
 #ifndef TOOL_MAX
-#define TOOL_MAX   96
+#define TOOL_MAX   256               /* 96→256: 对齐 agent-httpd, 容纳 rea 170 工具 */
 #endif
 #ifndef SKILL_DESC_MAX
 #define SKILL_DESC_MAX 160

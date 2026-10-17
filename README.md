@@ -127,11 +127,11 @@ Quick start and Containers sections.
 | Path | Contents |
 |---|---|
 | `lang/` | Lexer / parser / type-checker / tree-walking interpreter + agent-httpd bridge, ~11.3k lines of C11 across 36 files. A **pinned copy** of the sibling lume-core language tree - see `lang/PIN`. Three buckets: 21 *synced* (byte-identical to upstream), 14 *host-owned* (never overwritten, deliberately kept here - the host's own bridge/build layer), 6 *host-only* (never existed upstream). `make sync-lang` bumps the pin, `make check-sync` fails on a synced-file drift; host-owned files that fall behind upstream are only *reported*, not failed (CI runs `check-sync`, so it always has a baseline to compare against via `lang/PIN.manifest`) |
-| `examples/` | 10 `.lume` entry files (the rest of the 15 are reusable libs they `import`): `hello` / `lang-basics` / `demo` / `react-ssr` / `invest` / `abac` / `modules-server` / `query-demo` / `hub` / `sqlite-write`, plus libs `invest/ledger.lume` (portfolio tools), `abac/policy.lume` (ABAC policy engine), `demo/ui.lume` (SSR page components), `modules/app.lume`, `modules/tax.lume` |
+| `examples/` | 11 `.lume` entry files (the rest of the 16 are reusable libs they `import`): `hello` / `lang-basics` / `demo` / `react-ssr` / `invest` / `abac` / `modules-server` / `query-demo` / `hub` / `sqlite-write` / `rea-demo`, plus libs `invest/ledger.lume` (portfolio tools), `abac/policy.lume` (ABAC policy engine), `demo/ui.lume` (SSR page components), `modules/app.lume`, `modules/tax.lume` |
 | `frontend/` | React 18 + TS + Tailwind 4 client (`src/`, esbuild `--splitting`) + React SSR page sources (`react-ssr/`, built by `scripts/build-react-ssr.sh`) |
 | `www/` | docroot: hand-written HTML shells + build artifacts (mixed; don't delete wholesale) |
 | `tests/` | C unit tests (`smoke.c`) + tool dispatch (`tools_driver.c`) + end-to-end (`run_all.sh`) |
-| `docker/` | Two-stage Dockerfile (C rebuilt in-container) + compose (invest / hub services) |
+| `docker/` | Two-stage Dockerfile (C rebuilt in-container) + compose (invest / hub services) + a dedicated `rea-demo` image (ubuntu:24.04 + node 24 + rea-agents + Ghidra, `docker/rea-demo.Dockerfile`) |
 | `editor/lume-vscode/` | VS Code extension — search "Lume DSL" (`erishen.lume`) in the Extensions view |
 | `docs/` | Full docs, see below |
 
@@ -172,6 +172,15 @@ repo), so `cd lume && docker build -f docker/Dockerfile` works — Lume
 statically links agent-httpd's `libagenthttpd.a`, and the host-built archive
 is Mach-O, so it must be rebuilt inside the Linux container.
 
+There is also a `rea-demo` service (`127.0.0.1:18084`) built from a dedicated
+image (`docker/rea-demo.Dockerfile`, ubuntu:24.04 + node 24 +
+`rea-agents@6.4.0` + Ghidra 12.1.4) that shows the REA reverse-engineering
+MCP (`rea__*` tools, 170 of them) plugged into agent-httpd as a resident
+stdio server. It is kept separate from the scratch-minimized main image
+because rea needs a node runtime — see `examples/rea-demo.lume` and the
+Dockerfile header for the wiring and build notes (incl. the source-built
+arm64 Ghidra decompiler).
+
 The image carries no `.env` (injected by compose `env_file`) and no `.data/`
 sessions; the `skills/router/` sync copy **does** ship in the image — it is a
 fallback cache written by `llm-router` at startup so the container keeps the
@@ -184,7 +193,8 @@ stays git-ignored.
   `/api/reports`, `/react/api/chat`, `/discovery` are all plain endpoints, and
   chat can read/write files via the `fs` tool. So (1) compose binds host ports
   to `127.0.0.1` rather than `0.0.0.0` to keep the service off the LAN, and
-  (2) containers enable Basic Auth — the password lives only in `.env`
+  (2) containers (invest / hub / rea-demo alike) enable Basic Auth — the
+  password lives only in `.env`
   (`LUME_AUTH_USER` / `LUME_AUTH_PASSWORD`, git-ignored); the image entrypoint
   converts it to `/app/auth/htpasswd` (bcrypt) at startup and `server{}`
   reads it via `htpasswd = env("HTPASSWD_FILE")`. Verified: no credentials →

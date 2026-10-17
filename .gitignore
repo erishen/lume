@@ -34,6 +34,11 @@ editor/lume-vscode/dist/*.vsix
 # 客户端参数回显脚本(无后端时降级页用),非可重编产物,显式放行入库。
 /www/js/*
 !/www/js/home.js
+# rea 演示页例外: www/rea/ 下的 .js 是手写的页面脚本(CSP script-src 'self'
+# 要求独立文件, 非 esbuild 可重编产物), 与 .html 一起入库。
+/www/rea/*
+!/www/rea/*.html
+!/www/rea/*.js
 
 # --- 运行时状态 -------------------------------------------------------------
 # 含对话内容、会话 id 与本机绝对路径,一律不入库:
@@ -44,6 +49,15 @@ editor/lume-vscode/dist/*.vsix
 .data/
 .sandbox/
 skills/router/
+
+# --- rea-demo 构建辅助下载物 -------------------------------------------------
+# docker/ghidra-deps/(Ghidra 源码 zip + gradle + maven 依赖)、docker/ghidra/
+# (Ghidra 发行包)、docker/jdk/ 都是宿主预下载的大体积构建依赖(单个 0.2-0.7GB,
+# 共 ~1.4GB),不入库;clone 后重新构建时按 docker/ghidra-fetch-deps.sh 重新
+# 获取。构建 context 需要它们,故仅 .gitignore 排除,不进 .dockerignore。
+docker/ghidra-deps/
+docker/ghidra/
+docker/jdk/
 
 # --- 运行日志 ---------------------------------------------------------------
 # 访问日志由 agent-httpd 直接写 ./logs/access.log,是纯流量记录。
