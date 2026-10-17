@@ -95,11 +95,11 @@ cd ~/.local/share/lume && ~/.local/bin/lume examples/sqlite-write.lume
 | 路径 | 内容 |
 |---|---|
 | `lang/` | 词法/语法/类型检查/树遍历解释器 + agent-httpd 桥接,36 个文件共 ~11.3k 行 C11。**钉住**自兄弟项目 lume-core 的语言树(见 `lang/PIN`),分三桶:21 个 *synced* 与上游逐字节同、14 个 *host_owned* 宿主自持永不覆盖(桥接与构建层的自有代码)、6 个 *host-only* 上游从未有。升级 pin 用 `make sync-lang`;漂移检查 `make check-sync`,synced 文件一改就失败;host_owned 落后上游**只报告不失败**(CI 跑的就是这条,上游不可达时退到 `lang/PIN.manifest` 基线比对) |
-| `examples/` | 11 个 `.lume` 入口文件(全部 16 个里其余 5 个是它们 `import` 的复用库):hello / lang-basics / demo / react-ssr / invest / abac / modules-server / query-demo / hub / sqlite-write / rea-demo,另有库文件 invest/ledger.lume(组合工具)、abac/policy.lume(ABAC 策略引擎)、demo/ui.lume(SSR 页面组件)、modules/app.lume、modules/tax.lume |
+| `examples/` | 12 个 `.lume` 入口文件(另有 5 个它们 `import` 的复用库;测试入口 http-live-test 未计入):hello / lang-basics / demo / react-ssr / invest / abac / modules-server / query-demo / hub / sqlite-write / rea-demo / serena-demo,另有库文件 invest/ledger.lume(组合工具)、abac/policy.lume(ABAC 策略引擎)、demo/ui.lume(SSR 页面组件)、modules/app.lume、modules/tax.lume |
 | `frontend/` | React 18 + TS + Tailwind 4 客户端,esbuild `--splitting` 打包 |
 | `www/` | docroot:手写 HTML 壳 + 构建产物(混合,勿整体删) |
 | `tests/` | C 单测(`smoke.c`) + 工具派发(`tools_driver.c`) + 端到端(`run_all.sh`) |
-| `docker/` | 两阶段 Dockerfile(容器内重编 C)+ compose(invest / hub 两个 service)+ 专用 `rea-demo` 镜像(ubuntu:24.04 + node 24 + rea-agents + Ghidra,见 `docker/rea-demo.Dockerfile`) |
+| `docker/` | 两阶段 Dockerfile(容器内重编 C)+ compose(invest / hub 两个 service)+ 专用 `rea-demo` 镜像(ubuntu:24.04 + node 24 + rea-agents + Ghidra,见 `docker/rea-demo.Dockerfile`)与 `serena-demo` 镜像(ubuntu:24.04 + python3 + clangd + serena-agent,见 `docker/serena-demo.Dockerfile`) |
 | `editor/lume-vscode/` | VS Code 语法高亮扩展——扩展市场搜「Lume DSL」(ID `erishen.lume`) |
 | `docs/` | 完整文档,见下 |
 
@@ -134,6 +134,15 @@ resident stdio 形式接入 agent-httpd。rea 需要 node 运行时,与 scratch 
 主镜像刻意隔离,接线与构建说明(含 arm64 Ghidra decompiler 源码构建)见
 `examples/rea-demo.lume` 与 Dockerfile 头部注释。
 
+与之互补的 `serena-demo` service(`127.0.0.1:18085`),由
+`docker/serena-demo.Dockerfile`(ubuntu:24.04 + python3 + clangd +
+serena-agent,源码取自宿主 checkout 复制进 `docker/serena-src/`)构建,演示
+Serena(oraios/serena,Oraios AI)——LSP 符号级**源码** MCP(`serena__*`
+工具,config 切 `agent_interface: tools`)同款接入。两者覆盖"函数分析"的
+两侧:**rea = 无源码的二进制逆向,serena = 有源码的符号语义**。分析目标
+是 lume 自身,只读挂载在 `/app/projects/lume`(编辑类工具刻意失败)。
+接线说明见 `examples/serena-demo.lume` 与 Dockerfile 头部注释。
+
 镜像不带 `.env`(由 compose `env_file` 注入),也不带 `.data/` 会话;
 `skills/router/` 的同步副本**会**进镜像——它是启动时 `llm-router` 同步的
 降级缓存:同步失败时容器仍能用上一次的技能定义,不是可再生产物。git 里仍
@@ -144,7 +153,7 @@ resident stdio 形式接入 agent-httpd。rea 需要 node 运行时,与 scratch 
 - **访问控制(两层)**:Lume 服务端本身没有鉴权模块,`/api/reports`、
   `/react/api/chat`、`/discovery` 都是端点,聊天里还能经 `fs` 工具读写文件。
   因此:(1) compose 宿主端口绑 `127.0.0.1` 而非 `0.0.0.0`,服务不进 LAN;
-  (2) 容器(invest / hub / rea-demo 同款)开 Basic Auth —— 密码只写 `.env`(`LUME_AUTH_USER` /
+  (2) 容器(invest / hub / rea-demo / serena-demo 同款)开 Basic Auth —— 密码只写 `.env`(`LUME_AUTH_USER` /
   `LUME_AUTH_PASSWORD`,`.env` 已 gitignore),镜像 entrypoint 在容器启动时
   把它换成 `/app/auth/htpasswd`(bcrypt),`server{}` 里的
   `htpasswd = env("HTPASSWD_FILE")` 读到。实测无凭证

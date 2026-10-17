@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Agent · Lume × Serena</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body data-page="chat">
+    <nav>
+      <a href="/" class="brand">Lume × Serena</a>
+      <a href="/">概览</a>
+      <a href="/discovery.html">实时数据</a>
+      <a href="/chat" class="active">Agent Chat</a>
+    </nav>
+    <main class="chat-page">
+      <header class="hero chat-hero">
+        <h1>Serena 源码分析 Agent</h1>
+        <p>
+          连接本地模型与 Serena 的 LSP 符号级语义工具：find_symbol 定位函数 /
+          find_referencing_symbols 查引用 / insert_after_symbol 精确编辑。
+          分析目标是容器内只读挂载的 lume 源码（lang/*.c/h 等 C 代码，clangd
+          提供符号语义）——有源码时用它，无源码时用 rea-demo 做二进制逆向。
+        </p>
+      </header>
+      <section class="chat shell" id="chat-root">
+        <p class="muted">loading agent…</p>
+      </section>
+    </main>
+    <script type="module" src="/invest/app.js"></script>
+    <script src="/serena/chat-task.js"></script>
+  </body>
+</html>

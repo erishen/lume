@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Lume × Serena · 源码分析台</title>
+    <link rel="stylesheet" href="/app.css" />
+    <style>
+      /* 暗色主题: 与 app.css 设计语言一致(--color-bg/panel/ink/muted/accent) */
+      main h2 { font-size: 17px; font-weight: 700; color: var(--color-ink); margin-top: 28px; letter-spacing: .02em; }
+      .hero p code { color: var(--color-sky-300); }
+      .serena-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 18px 0; }
+      .serena-card { background: var(--color-panel); border: 1px solid var(--color-line); border-radius: 12px; padding: 16px 18px; }
+      .serena-card h3 { margin: 0 0 8px; font-size: 15px; font-weight: 700; color: var(--color-ink); }
+      .serena-card p { margin: 0; font-size: 13px; color: var(--color-muted); line-height: 1.6; }
+      .serena-card code { color: var(--color-sky-300); background: var(--color-bg); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+      .serena-stats { display: flex; gap: 28px; margin: 14px 0 6px; }
+      .serena-stats div { font-size: 13px; color: var(--color-muted); }
+      .serena-stats b { font-size: 22px; color: var(--color-ink); display: block; margin-top: 2px; font-variant-numeric: tabular-nums; }
+      .prompt-card { background: var(--color-panel); border: 1px dashed var(--color-line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; font-size: 13.5px; color: var(--color-ink); line-height: 1.6; cursor: pointer; }
+      .prompt-card:hover { background: #1a2440; }
+      .cta { display: inline-block; margin-top: 18px; padding: 11px 26px; background: var(--color-accent); color: var(--color-accent-ink); border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; }
+      .muted { color: var(--color-muted); font-size: 12.5px; }
+    </style>
+  </head>
+  <body data-page="home">
+    <nav>
+      <a href="/" class="brand">Lume × Serena</a>
+      <a href="/" class="active">概览</a>
+      <a href="/discovery.html">实时数据</a>
+      <a href="/chat">Agent Chat</a>
+    </nav>
+    <main class="page">
+      <header class="hero">
+        <h1>Serena 源码语义接入台</h1>
+        <p>
+          <b>Serena</b>（oraios/serena，Oraios AI）以 MCP server 形式常驻接入
+          lume 的 agent-httpd 客户端 —— 容器内 <code>python + serena-agent</code>
+          （LSP 后端）运行，全部 <code>serena__*</code> 工具对聊天模型可见。
+          与 rea-demo 互补：<b>rea 是无源码时的二进制逆向，serena 是有源码时的
+          符号级语义分析</b>（分析目标：容器内只读挂载的 lume 源码，clangd 提供
+          C/C++ 符号语义）。
+        </p>
+      </header>
+
+      <h2>能力分类</h2>
+      <div class="serena-grid">
+        <div class="serena-card"><h3>符号检索</h3><p><code>serena__find_symbol</code> / <code>serena__get_symbols_overview</code>：按名字或模糊匹配定位函数、类、变量、类型，拿定义位置与源码片段</p></div>
+        <div class="serena-card"><h3>引用与调用</h3><p><code>serena__find_referencing_symbols</code>：找出一个符号在所有文件里的引用；<code>find_implementations</code> / <code>find_declaration</code> 区分声明与实现</p></div>
+        <div class="serena-card"><h3>诊断</h3><p><code>serena__get_diagnostics_for_file</code> / <code>get_diagnostics_for_symbol</code>：语言服务器级别的编译诊断（错误/警告）</p></div>
+        <div class="serena-card"><h3>精确编辑</h3><p><code>serena__insert_after_symbol</code> / <code>insert_before_symbol</code> / <code>rename_symbol</code> / <code>safe_delete_symbol</code>：符号级原子编辑（本演示挂载只读，编辑预期失败，仅展示安全边界）</p></div>
+        <div class="serena-card"><h3>工程管理</h3><p><code>serena__list_queryable_projects</code> / <code>serena__query_project</code>：多项目切换；<code>restart_language_server</code> 兜底 LSP 卡死</p></div>
+        <div class="serena-card"><h3>语言覆盖</h3><p>30+ 语言经 LSP：本容器装 clangd（C/C++ 主演示目标），可按需加 Python/TS 等语言服务器</p></div>
+      </div>
+
+      <h2>实时接入状态</h2>
+      <div class="serena-stats" id="serena-stats">
+        <div>工具总数<b id="s-tools">–</b></div>
+        <div>serena 工具<b id="s-rea">–</b></div>
+        <div>MCP 服务器<b id="s-mcps">–</b></div>
+      </div>
+      <p class="muted">数据来自 <code>/discovery</code>（agent-httpd 注册表实况）。<a href="/discovery.html" style="color:var(--color-accent)">查看完整数据 →</a></p>
+
+      <h2>试试（在 Agent Chat 里粘贴）</h2>
+      <div class="prompt-card">用 serena__get_symbols_overview 查看 lume 源码 lang/builtins_internal.h 里定义了哪些符号（函数/类型），给出概览</div>
+      <div class="prompt-card">用 serena__find_symbol 在 lume 源码里找到 arg_string 函数的定义位置和签名（文件、行号、源码片段）</div>
+      <div class="prompt-card">用 serena__find_referencing_symbols 找出 arg_string 函数在哪些文件被引用，分别列出引用位置</div>
+      <div class="prompt-card">用 serena__find_declaration 和 serena__find_implementations 找到 native_env 函数的声明与实现，对比两者的差异</div>
+      <div class="prompt-card">对 lang/builtins_internal.h 的 list_push 函数做深入分析：先 find_symbol 拿定义，再 find_referencing_symbols 看调用方，最后总结它的职责和调用关系</div>
+      <div class="prompt-card">用 serena__get_diagnostics_for_file 查看 lang/builtins.c 有没有编译诊断（错误/警告），列出发现的问题</div>
+      <div class="prompt-card">演示 insert_after_symbol：在 lang/builtins_internal.h 的 arg_string 声明后面插入一行注释 —— 注意分析目标是只读挂载，编辑类工具预期会失败，请说明失败原因</div>
+      <br />
+      <a class="cta" href="/chat">进入 Agent Chat →</a>
+      <p class="muted" style="margin-top:20px">提示：serena 的分析目标固定在容器内只读挂载的 lume 源码（<code>lang/</code>、<code>www/</code> 等 C/JS 文件），clangd 提供符号语义；只读挂载下检索/诊断类工具可用，编辑类工具会失败（刻意如此）。</p>
+    </main>
+    <script src="/serena/app.js"></script>
+  </body>
+</html>
