@@ -60,12 +60,12 @@
       <p class="muted">数据来自 <code>/discovery</code>（agent-httpd 注册表实况）。<a href="/discovery.html" style="color:var(--color-accent)">查看完整数据 →</a></p>
 
       <h2>试试（在 Agent Chat 里粘贴）</h2>
-      <div class="prompt-card">先调用 rea__open_binary 打开 /bin/ls（ELF，绝对路径），再调用 rea__list_architectures 和 rea__binary_overview 分析它，总结文件类型、架构和格式特征</div>
-      <div class="prompt-card">用 rea 工具读取 /bin/ls 的导入表/调用图，列出它依赖的动态库</div>
-      <div class="prompt-card">rea 里没有打开目标时报 target_unavailable —— 请演示一次完整的 open_binary → 分析流程</div>
+      <div class="prompt-card">先调用 rea__open_binary 打开 /bin/ls（ELF，provider_id=ghidra），用 rea__binary_session 等到 Ghidra 分析完成，再调用 rea__binary_overview 和 rea__get_call_graph 分析它，总结文件类型、架构和调用图特征</div>
+      <div class="prompt-card">分析 /bin/ls（ELF）的动态库依赖：rea__open_binary 打开后先 rea__binary_session 等到分析完成，再调用 rea__get_call_graph 和 rea__list_names 查看调用图与导入符号，据此推断它依赖的动态库（容器内无 ldd/readelf，需要明确标注这是推断）</div>
+      <div class="prompt-card">rea 里没有打开目标时报 target_unavailable —— 请演示一次完整的 open_binary → binary_session → 分析流程</div>
       <br />
       <a class="cta" href="/chat">进入 Agent Chat →</a>
-      <p class="muted" style="margin-top:20px">提示：rea 默认无目标，先 <code>open_binary</code> 注入；容器内可分析 /bin/* 等 Linux 二进制（ELF）。</p>
+      <p class="muted" style="margin-top:20px">提示：rea 默认无目标，先 <code>open_binary</code> 注入；open_binary 返回空是正常的（Ghidra 异步分析），用 <code>binary_session</code> 等到"分析完成"再继续；<code>inspect_macho</code> 只用于 Mach-O，ELF 请用 Ghidra provider；容器内可分析 /bin/* 等 Linux 二进制（ELF）。</p>
     </main>
     <script src="/rea/app.js"></script>
   </body>
