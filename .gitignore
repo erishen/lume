@@ -59,6 +59,12 @@ docker/ghidra-deps/
 docker/ghidra/
 docker/jdk/
 
+# --- 宿主私有调试 wrapper ------------------------------------------------
+# tools/rea-mcp-wrapper.sh 硬编码本机绝对路径(/Users/<user>/.nvm、.npm/_npx),
+# 只对本机有效且暴露宿主环境信息, 不入库; 本机调试需要时保留工作区文件,
+# 换机重装 rea 后路径会变, 该文件无法复用。
+tools/rea-mcp-wrapper.sh
+
 # --- 运行日志 ---------------------------------------------------------------
 # 访问日志由 agent-httpd 直接写 ./logs/access.log,是纯流量记录。
 logs/
