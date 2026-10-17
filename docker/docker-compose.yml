@@ -204,6 +204,20 @@ services:
       # LUME_AUTH_PASSWORD 唯一来源）。与 invest/hub 对齐, 端口绑回环之上
       # 再加一层认证; 删掉这一行即回到无认证（与本机 make 语义一致）。
       HTPASSWD_FILE: "/app/auth/htpasswd"
+      # REA 使用引导: 注入聊天系统提示, 避免模型在 170 个工具里裸奔乱试
+      # （实测会话教训: open_binary 空响应被误读为错误、inspect_macho 误用于
+      # ELF、list_documents/fetch_url/calc 等无关调用兜底）。值与 agent-httpd
+      # 的 LLM_SYSTEM_EXTRA 拼接进模型系统提示。
+      LLM_SYSTEM_EXTRA: |-
+        REA 使用引导（每次分析前必读）:
+        1. rea 是逆向 MCP, 先用 open_binary 注入目标; Linux 二进制(如 /bin/ls, ELF)用 provider_id="ghidra"。
+        2. open_binary 返回空结果是正常的: Ghidra 异步自动分析, 用 binary_session 查状态, 提示"分析完成前不提供结果"时稍等重试, 不要反复 open_binary 同一文件。
+        3. inspect_macho 只用于 Mach-O(macOS 格式); /bin/ls 是 ELF, 不要调用它。
+        4. list_documents / analyze_web_bundle / capture_web_* 是 Web 工具, 与本地二进制分析无关, 不要用。
+        5. fetch_url 是 HTTP 工具, 不支持 file://; 读本地文件用 read_file。不要请求无关外网。
+        6. ELF 调用图/依赖的正确路径: open_binary → binary_session(等分析完成) → binary_overview(格式/架构) → get_call_graph(调用图) → list_names / list_procedures(符号)。
+        7. 容器内没有 ldd/readelf: 拿不到 DT_NEEDED 时, 基于调用图与导入符号给出推断, 并明确标注是推断。
+        8. 工具异常时先查 binary_session 状态, 不要用 get_time / calc 等无关工具兜底。
     ports:
       - "127.0.0.1:18084:8082"   # 绑回环 + Basic Auth, 见 rea-demo 注释
     healthcheck:
