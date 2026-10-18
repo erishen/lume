@@ -140,7 +140,7 @@ serena-agent,源码取自宿主 checkout 复制进 `docker/serena-src/`)构建,�
 Serena(oraios/serena,Oraios AI)——LSP 符号级**源码** MCP(`serena__*`
 工具,config 切 `agent_interface: tools`)同款接入。两者覆盖"函数分析"的
 两侧:**rea = 无源码的二进制逆向,serena = 有源码的符号语义**。分析目标
-是 lume 自身,只读挂载在 `/app/projects/lume`(编辑类工具刻意失败)。
+是 lume 的 C 核心 `lang/`,只读挂载在 `/app/projects/lume`(编辑类工具刻意失败)。
 接线说明见 `examples/serena-demo.lume` 与 Dockerfile 头部注释。
 
 镜像不带 `.env`(由 compose `env_file` 注入),也不带 `.data/` 会话;

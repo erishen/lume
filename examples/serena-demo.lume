@@ -12,7 +12,10 @@
 //   HTPASSWD_FILE=/app/auth/htpasswd(entrypoint 从 .env 的 LUME_AUTH_PASSWORD
 //   现场生成, 无密码则认证关闭), 并挂载宿主 www/ 与 examples/ 以便热改页面
 //   (重编镜像则用镜像内 COPY 版本)。分析目标 /app/projects/lume 由 compose
-//   只读挂载宿主 lume 仓库根（lang/*.c/h 等 C 源码, 容器内 clangd 分析）。
+//   只读挂载宿主 lang/ 目录（lume 的 C 核心, 36 个 .c/.h 源码; 只挂 C 是
+//   刻意为之: 若挂整个仓库根, www/frontend/editor 的 JS/TS 占比 97%, serena
+//   语言检测会选 typescript LS, 容器无 node 无法启动; 只挂 lang/ 则 100% C,
+//   自动选中 clangd, 符号工具可用）。
 //
 // 说明:与 rea-demo 互补 —— rea 是无源码时的二进制逆向, serena 是有源码时的
 //   LSP 符号级语义（find_symbol/find_referencing_symbols/insert_after_symbol

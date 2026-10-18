@@ -272,10 +272,13 @@ services:
       # 显示 "local" 来源; agent-httpd 同 id 去重, 与 env MCP_SERVERS 不重复
       # 注册。.data 被 .dockerignore 排除, 镜像无此文件。
       - ../docker/serena-local-mcps.json:/app/.data/mcp-servers.json:ro
-      # 分析目标: lume 仓库根（只读, serena 只做语义检索/分析演示, 编辑类
-      # 工具在只读挂载下会失败 —— 演示/查看场景刻意如此, 避免容器内改动
-      # 宿主源码; 要演示编辑再换可写挂载）。
-      - ..:/app/projects/lume:ro
+      # 分析目标: 只挂载 lang/（lume 的 C 语言核心, 36 个 .c/.h）——serena
+      # 语言检测只看 C 源码 → 选 clangd。若挂载整个仓库根, www/frontend/
+      # editor 的 JS/TS 占检测占比 97%, serena 会选 typescript LS（需 node,
+      # 容器未装, LSP 初始化失败 → 符号工具不可用）。只读挂载: serena 只做
+      # 语义检索/分析演示, 编辑类工具在只读挂载下会失败 —— 刻意如此, 避免
+      # 容器内改动宿主源码; 要演示编辑再换可写挂载。
+      - ../lang:/app/projects/lume:ro
     environment:
       # 服务级 environment 整块替换锚点 → LLM/ROUTER 覆盖必须重复（同 invest/hub）
       LLM_API_URL: "${LLM_API_URL:-http://host.docker.internal:19070/v1}"
