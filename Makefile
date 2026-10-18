@@ -551,6 +551,16 @@ tests/tools-bin: tests/tools_driver.c $(CORE_OBJS) build/tests | $(AH_LIB)
 test: all ui tests/smoke-bin tests/tools-bin
 	chmod +x tests/run_all.sh && ./tests/run_all.sh
 
+# --- 仓库隐私闸门 (make treecheck) ----------------------------------------
+# 从姊妹树 lume-core 移植: 扫 HEAD 全部 blob, 拦 /Users|/home/<name> 形态的
+# 构建机真实路径(注释也不放过, 占位写法 /Users/<user> 不误报)。2026-10-18
+# serena 提交把宿主家目录全路径写进了 .gitignore 与 Dockerfile 注释, 本仓
+# 又无此闸门, 一路滑进了公开仓 —— packcheck 式的事后清洗不如事前拦截。
+treecheck:
+	@chmod +x scripts/check-tree-privacy.sh
+	@./scripts/check-tree-privacy.sh
+	@echo "==> treecheck passed: no build-machine path tracked in HEAD"
+
 clean:
 	rm -rf build bin build-asan
 
@@ -594,7 +604,7 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 	@ASAN_OPTIONS=detect_leaks=0 ./tests/tools-bin-asan || exit 1
 	@echo "ok   ASan/UBSan all passed"
 
-.PHONY: all check dump dev dev-minimal invest hub demo-sqlite demo-sqlite-watch invest-watch hub-watch run ui ui-items vsix image image-push test clean asan sync-lang sync-lang-force check-sync
+.PHONY: all check dump dev dev-minimal invest hub demo-sqlite demo-sqlite-watch invest-watch hub-watch run ui ui-items vsix image image-push test clean asan sync-lang sync-lang-force check-sync treecheck
 # lang/ is a pinned copy of the lume-core language tree (see lang/PIN).
 # Bump the pin with `make sync-lang`; watch for drift with `make check-sync`.
 # Files listed as host_owned in lang/PIN are never overwritten.
