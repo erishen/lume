@@ -64,7 +64,7 @@ docker/ghidra/
 docker/jdk/
 
 # --- serena-demo 构建输入 --------------------------------------------------
-# docker/serena-src/ 是构建前从宿主 /home/builder/Github/serena 复制进
+# docker/serena-src/ 是构建前从宿主 /Users/<user>/Github/serena 复制进
 # build context 的 Serena 源码(GPL-3.0, 仅本地演示用), 镜像内安装后即删,
 # 不入库; 换机重构建时重新复制即可。
 docker/serena-src/

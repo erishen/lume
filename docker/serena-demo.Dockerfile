@@ -14,7 +14,7 @@
 #   * clangd（apt 默认 18）—— 演示分析目标为 lume 的 C 核心（compose 只读
 #     挂载 lang/ 目录, 36 个 .c/.h; 刻意只挂 C, 避免整仓库根下 JS/TS 占检测
 #     占比导致 serena 选 typescript LS——容器无 node 无法启动）
-#   * serena 源码来自宿主 /home/builder/Github/serena（用户提供; GPL-3.0,
+#   * serena 源码来自宿主 /Users/<user>/Github/serena（用户提供; GPL-3.0,
 #     本地演示用途）。构建前由宿主脚本复制到 docker/serena-src/（build
 #     context 内, .gitignore 排除不入库——与 ghidra-deps 同模式）, 安装后
 #     镜像内删除源码, 只留 pip 安装成品。
