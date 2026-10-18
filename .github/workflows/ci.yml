@@ -8,6 +8,16 @@ on:
 # agent-httpd 是 lume 的 git submodule(见 .gitmodules),版本由 gitlink 锁定;
 # checkout 带 submodules: recursive 自动按 gitlink 拉取,无需手动 checkout。
 jobs:
+  # 隐私闸门独立成腿: 只扫 HEAD 的 blob, 不碰构建, 秒级完成。
+  # 防的就是 2026-10-18 那次 —— serena 提交把 /Users/<真实用户> 全路径写进
+  # .gitignore/Dockerfile 注释, 当时本仓无闸门, 一路滑进公开仓。
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: treecheck (no build-machine paths in HEAD)
+        run: make treecheck
+
   test:
     runs-on: ubuntu-latest
     steps:
