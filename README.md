@@ -187,10 +187,10 @@ serena-agent from the host checkout at `docker/serena-src/`) shows Serena
 (oraios/serena, Oraios AI) — the LSP/symbol-level *source* MCP
 (`serena__*` tools, `agent_interface: tools`) — plugged in the same way.
 The two demos cover both sides of "function analysis": **rea = binaries
-without source, Serena = source with symbols**. The analysis target is the
-lume repo itself, mounted read-only at `/app/projects/lume` (editing tools
-fail by design there). See `examples/serena-demo.lume` and the Dockerfile
-header for wiring notes.
+without source, Serena = source with symbols**. The analysis target is
+lume's C core (`lang/`), mounted read-only at `/app/projects/lume` (editing
+tools fail by design there). See `examples/serena-demo.lume` and the
+Dockerfile header for wiring notes.
 
 The image carries no `.env` (injected by compose `env_file`) and no `.data/`
 sessions; the `skills/router/` sync copy **does** ship in the image — it is a

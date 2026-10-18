@@ -11,7 +11,9 @@
 # （serena-agent, requires-python >=3.11,<3.15）, 需要 python 运行时 + 目标
 # 代码语言的语言服务器（LSP, serena 经 SolidLSP 从 PATH 探测）。本镜像:
 #   * ubuntu:24.04 的 python3 = 3.12（满足版本区间）
-#   * clangd（apt 默认 18）—— 演示分析目标为 lume 自身 C 源码（lang/*.c/h）
+#   * clangd（apt 默认 18）—— 演示分析目标为 lume 的 C 核心（compose 只读
+#     挂载 lang/ 目录, 36 个 .c/.h; 刻意只挂 C, 避免整仓库根下 JS/TS 占检测
+#     占比导致 serena 选 typescript LS——容器无 node 无法启动）
 #   * serena 源码来自宿主 /home/builder/Github/serena（用户提供; GPL-3.0,
 #     本地演示用途）。构建前由宿主脚本复制到 docker/serena-src/（build
 #     context 内, .gitignore 排除不入库——与 ghidra-deps 同模式）, 安装后
@@ -66,7 +68,8 @@ RUN mkdir -p /app/.serena \
     && sed -i 's/^gui_log_window: .*/gui_log_window: False/' /app/.serena/serena_config.yml \
     && sed -i 's/^web_dashboard_listen_address: .*/web_dashboard_listen_address: 127.0.0.1/' /app/.serena/serena_config.yml \
     && sed -i 's/^web_dashboard_open_on_launch: .*/web_dashboard_open_on_launch: False/' /app/.serena/serena_config.yml \
-    && sed -i 's/^agent_interface: REPL/agent_interface: tools/' /app/.serena/serena_config.yml
+    && sed -i 's/^agent_interface: REPL/agent_interface: tools/' /app/.serena/serena_config.yml \
+    && sed -i 's|^project_serena_folder_location: .*|project_serena_folder_location: "/app/.serena/projects/$projectFolderName"|' /app/.serena/serena_config.yml
 # ---------- 阶段 2: bin/lume（静态 glibc, 与主 Dockerfile 同款） ----------
 FROM debian:bookworm-slim AS lume-build
 RUN apt-get update \
