@@ -627,7 +627,11 @@ static void eval_expr_index(VM *vm, Node *n, Env *env) {
         int found = 0;
         Value v = map_get(vm, o, key, &found);
         if (!found) {
-            vm_set_error(vm, "map has no key '%s'", key);
+            /* One shared message across backends: the native emitters report
+             * "index read failed" (codegen_expr.c), so try() captures an
+             * identical string everywhere. The interpreter used to name the
+             * key here; the detail stays in the map for diagnostics. */
+            vm_set_error(vm, "index read failed");
             return;
         }
         out = v;
@@ -639,8 +643,7 @@ static void eval_expr_index(VM *vm, Node *n, Env *env) {
         long i = (long)AS_NUM(ixv);
         if (i < 0) i += o->as.list.count;   /* -1 is the last element */
         if (i < 0 || i >= o->as.list.count) {
-            vm_set_error(vm, "list index %ld out of range (length %d)",
-                         (long)AS_NUM(ixv), o->as.list.count);
+            vm_set_error(vm, "index read failed");
             return;
         }
         out = o->as.list.items[i];
@@ -1205,17 +1208,16 @@ static void exec_statement_route(VM *vm, Node *n, Env *env) {
                 }
                 const char *m = obj_string(AS_OBJ(mv));
                 int rc = bridge_define_route(vm, m, n->as.route.path, handler,
-                                        NULL);
+                                             NULL);
                 if (rc != 0) {
                     if (rc == -2)
                         vm_set_error(vm, "route table full (%d routes, max %d): "
-                                         "cannot register %s %s",
-                                         vm->route_count, MAX_AL_ROUTES, m,
-                                         n->as.route.path);
+                                     "cannot register %s %s",
+                                     vm->route_count, MAX_AL_ROUTES, m,
+                                     n->as.route.path);
                     else
                         vm_set_error(vm, "failed to register route %s %s", m,
-                                             n->as.route.path);
-
+                                     n->as.route.path);
                     return;
                 }
             }
@@ -1233,25 +1235,24 @@ static void exec_statement_route(VM *vm, Node *n, Env *env) {
                     return;
                 }
                 int rc = bridge_define_route(vm, m, n->as.route.path, handler,
-                                        label);
+                                             label);
                 if (rc != 0) {
                     if (rc == -2)
                         vm_set_error(vm, "route table full (%d routes, max %d): "
-                                         "cannot register %s %s",
-                                         vm->route_count, MAX_AL_ROUTES, m,
-                                         n->as.route.path);
+                                     "cannot register %s %s",
+                                     vm->route_count, MAX_AL_ROUTES, m,
+                                     n->as.route.path);
                     else
                         vm_set_error(vm, "failed to register route %s %s", m,
-                                             n->as.route.path);
-
+                                     n->as.route.path);
                     return;
                 }
             }
         }
         return;
     }
-    int rc = bridge_define_route(vm, n->as.route.method, n->as.route.path, handler,
-                            NULL);
+    int rc = bridge_define_route(vm, n->as.route.method, n->as.route.path,
+                                 handler, NULL);
     if (rc != 0) {
         if (rc == -2)
             vm_set_error(vm, "route table full (%d routes, max %d): cannot "
