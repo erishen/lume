@@ -6,6 +6,19 @@ All notable changes to Lume are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-19
+
+### Changed
+
+- `agent-httpd` submodule pinned to `ee18006` — adds a `.gitattributes`
+  (`* text=auto eol=lf` plus an explicit binary list: `*.gz *.class
+  *.jar *.png *.jpg *.jpeg *.gif *.ico *.woff *.woff2 *.ttf *.eot *.db
+  *.sqlite *.sqlite3 *.pem *.crt *.key *.pdf`). The vendored agent service
+  now keeps LF line endings on every platform; the Windows default
+  `core.autocrlf=true` would otherwise CRLF the sources on clone. Pure
+  cross-platform hygiene for the embedded tree — no runtime or binary
+  change.
+
 ## [0.7.1] - 2026-10-19
 
 ### Fixed — fold in the two upstream memory-safety fixes (lume-core 59ac8a4)
