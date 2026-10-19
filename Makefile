@@ -176,6 +176,7 @@ define KILL_SERVER
 	done
 endef
 SRCS     := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parser_expr.c \
+            lang/arena.c \
             lang/value.c lang/typecheck.c lang/typecheck_expr.c lang/typecheck_stmt.c \
             lang/interp.c lang/builtins.c lang/builtins_sql.c lang/builtins_fs.c \
             lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/loader.c lang/vdom.c \
@@ -189,6 +190,7 @@ SRCS     := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parse
 # lume.h 的 TokenType 类型撞名)。
 ifneq ($(strip $(IS_WINDOWS)),)
     SRCS := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parser_expr.c \
+            lang/arena.c \
             lang/value.c lang/typecheck.c lang/typecheck_expr.c lang/typecheck_stmt.c \
             lang/interp.c lang/builtins.c lang/builtins_fs.c \
             lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/loader.c lang/vdom.c \
