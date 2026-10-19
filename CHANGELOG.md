@@ -6,6 +6,18 @@ All notable changes to Lume are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-10-19
+
+### Changed
+
+- `lang/` synced to lume-core `v0.9.3` (`sha 4f24037`) — `lang/lexer.c`
+  now supports scientific notation (`e`/`E` exponent) in numeric literals,
+  matching `1e5` / `2.3E-4` style constants. `lang/PIN` and
+  `lang/PIN.manifest` refreshed accordingly.
+- `LUME_VERSION` bumped `0.7.2` → `0.7.3` (Makefile line 29, single source
+  for `lume --version`); the machine-readable version now self-reports
+  `0.7.3`.
+
 ## [0.7.2] - 2026-10-19
 
 ### Changed
