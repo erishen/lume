@@ -19,6 +19,11 @@ All notable changes to Lume are documented here. The format follows
 
 ### Fixed
 
+- `ty_str`'s diagnostic spelling sized its `snprintf` calls with the ring
+  pointer (`sizeof buf`, 8) instead of the ring slot (`sizeof bufs[0]`,
+  128), so type names longer than 7 characters were silently truncated in
+  checker messages (`%s[]` / `<%s>` spellings). Hand-merged from lume-core
+  @ `98ceb48` alongside the v0.8.0 pin bump.
 - READMEs (en/zh) no longer claim the DSL has no outbound HTTP builtin —
   `http_get`/`http_post`/`http_put`/`http_patch`/`http_delete` are compiled
   in (via the pinned lume-core `lang/builtins_http.c`), so an untrusted
