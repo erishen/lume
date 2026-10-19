@@ -6,7 +6,7 @@ builtins_crypt.c 884d203eb09faa1be941f20f27b240f5
 builtins_hof.c 6eaac3ed7eb2d23806ed1ac7f15b8c0e
 builtins_math.c a45b287acec804f92b8aa1f374016025
 builtins_str.c d96f5834e11b2b15f3f2150d6152cfc1
-lexer.c 82d44d5e86df9e50633d972a080f73a1
+lexer.c 2cb4e078859525d504690850af1258aa
 loader.c 646f58ae736b65c2e17bb544c43ea4b5
 os_win32.c be70b1a072cca491a96899bcecc155e8
 parser.c de979b918123c532c56260b84da66bee
