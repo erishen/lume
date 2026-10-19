@@ -197,15 +197,15 @@ Node *parse_statement(Parser *p) {
             MatchPat *pats = NULL;
             int patc = 0;
             if (!parse_patterns(p, &pats, &patc)) return NULL;
-            if (!expect(p, TOK_EQ)) return NULL;
+            if (!expect(p, TOK_EQ)) { free_pat_array(pats, patc); return NULL; }
             Node *value = parse_expression(p);
-            if (!value) return NULL;
+            if (!value) { free_pat_array(pats, patc); return NULL; }
             Node *then = parse_statement(p);
-            if (!then) return NULL;
+            if (!then) { free_pat_array(pats, patc); return NULL; }
             Node *els = NULL;
             if (match(p, TOK_ELSE)) {
                 els = parse_statement(p);
-                if (!els) return NULL;
+                if (!els) { free_pat_array(pats, patc); return NULL; }
             }
             Node *n = nalloc(N_IF_LET, pline);
             n->as.iflet.pats = pats;
@@ -603,6 +603,14 @@ Node *parse_statement(Parser *p) {
             n->as.enum_decl.vfields[vi] = NULL;
             n->as.enum_decl.vfield_types[vi] = NULL;
             n->as.enum_decl.vfield_counts[vi] = 0;
+            /* Publish the slot BEFORE the payload loop: any failure below
+             * leaves a journaled node whose node_free_own walks [0,vcount)
+             * — the in-flight variant's half-built vfields/vfield_types
+             * arrays (and the field names counted by vfield_counts[vi])
+             * are otherwise orphaned (libFuzzer leak-5904f81: 2x8B). The
+             * the loop tail no longer re-increments: vi+1 IS the count
+             * until the next variant publishes its own slot. */
+            n->as.enum_decl.vcount = vi + 1;
             if (match(p, TOK_LPAREN)) {
                 /* payload fields: `f: type, g: type` — commas between, and
                  * each field is `name : type` exactly like a struct field */
@@ -630,7 +638,6 @@ Node *parse_statement(Parser *p) {
                 } while (match(p, TOK_COMMA));
                 if (!expect(p, TOK_RPAREN)) return NULL;
             }
-            n->as.enum_decl.vcount++;
             if (!match(p, TOK_PIPE)) break;
             if (check(p, TOK_RBRACE)) break; /* trailing `|` before `}` */
         }

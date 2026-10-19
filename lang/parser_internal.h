@@ -12,7 +12,16 @@ typedef struct {
     int count;
     int pos;
     char errbuf[256];
+    /* Left-recursive-descent nesting counter: the expression chain and
+     * parse_block bump it at every level (a 12-frame cycle per source
+     * paren), so a pathological input cannot run the thread stack out
+     * (libFuzzer crash-eb4ae2: ~500 `(` pairs -> stack-overflow). */
+    int depth;
 } Parser;
+
+/* Ceiling in chain levels (≈12 C frames each): 200 ≈ 2.4k frames, a
+ * rounding error on the 8 MB main stack and safe on a 2 MB fuzz thread. */
+#define PARSER_MAX_DEPTH 200
 
 /* ---- 基础工具(parser.c) ---- */
 void perror_at(Parser *p, size_t line, const char *fmt, ...);
@@ -59,5 +68,9 @@ Node *parse_expression(Parser *p);
 /* `V(b, ...)` / bare `V` / `_`, `|`-separated into alternatives (parser.c).
  * Shared by match arms and if-let; the caller owns the array. */
 bool parse_patterns(Parser *p, MatchPat **out, int *outc);
+
+/* Release a parse_patterns result no node will own (mid-construction
+ * failure in match / if-let); see parser.c's definition. */
+void free_pat_array(MatchPat *pats, int patc);
 
 #endif /* LUME_PARSER_INTERNAL_H */

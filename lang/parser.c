@@ -186,6 +186,33 @@ Type *parse_type(Parser *p) {
         case TOK_KW_STRING: advance(p); ty = type_prim(TY_STRING); break;
         case TOK_BOOL:   advance(p); ty = type_prim(TY_BOOL); break;
         case TOK_RESULT: advance(p); ty = type_result(); break;
+        case TOK_KW_FN: {
+            /* `fn (t1, t2) -> ret` — a closure-variable type annotation
+             * (SPEC §4.8). `let f: fn(int) -> int = (x) => x * 2;` — the
+             * annotation spells the lambda's param/ret types so the checker
+             * can verify the literal against them and native backends have a
+             * spelled type even before inference pins one. */
+            advance(p);
+            if (!expect(p, TOK_LPAREN)) return NULL;
+            Type **params = NULL;
+            int arity = 0;
+            if (!check(p, TOK_RPAREN)) {
+                do {
+                    Type *pt = parse_type(p);
+                    if (!pt) { free(params); return NULL; }
+                    params = realloc(params, sizeof(Type *) * ((size_t)arity + 1));
+                    params[arity++] = pt;
+                } while (match(p, TOK_COMMA));
+            }
+            if (!expect(p, TOK_RPAREN)) { free(params); return NULL; }
+            Type *ret = NULL;
+            if (match(p, TOK_ARROW)) {
+                ret = parse_type(p);
+                if (!ret) { free(params); return NULL; }
+            }
+            ty = type_func(arity, params, ret);
+            break;
+        }
         case TOK_IDENT: {
             advance(p);
             /* ident_name() allocates the name, type_struct() copies it into
@@ -223,7 +250,17 @@ Type *parse_type(Parser *p) {
 
 /* ---------- blocks & statements ---------- */
 
+static Node *parse_block_impl(Parser *p);
+
 Node *parse_block(Parser *p) {
+    if (++p->depth > PARSER_MAX_DEPTH) { p->depth--; perror_at(p, peek(p).line,
+                              "expression nests too deeply", NULL); return NULL; }
+    Node *n = parse_block_impl(p);
+    p->depth--;
+    return n;
+}
+
+static Node *parse_block_impl(Parser *p) {
     size_t line = peek(p).line;
     if (!expect(p, TOK_LBRACE)) return NULL;
     Node *n = nalloc(N_BLOCK, line);
@@ -251,6 +288,11 @@ bool parse_params(Parser *p, char ***names_out, Type ***types_out,
     if (!check(p, TOK_RPAREN)) {
         do {
             if (!check(p, TOK_IDENT)) {
+                /* Reached by the comma continuation with arity ≥ 1 live
+                 * names (`(http_,` hits it with "http_" pushed): the arrays
+                 * go and every strdup'd name with them — the libFuzzer
+                 * leak-3188fd7 finding. */
+                for (int i = 0; i < arity; i++) free(names[i]);
                 perror_at(p, peek(p).line, "expected parameter name", NULL);
                 free(names);
                 free(types);
@@ -278,12 +320,12 @@ bool parse_params(Parser *p, char ***names_out, Type ***types_out,
         } while (match(p, TOK_COMMA));
     }
     if (!expect(p, TOK_RPAREN)) {
-        /* Same hole as above, minus the off-by-one: arity() has run past the
-         * parameter just parsed, and names[] was sized for `arity + 1` slots
-         * back when arity was still the previous count — so the live name is
-         * names[arity - 1]. When arity is 0 names is NULL (the
-         * !check(TOK_IDENT) branch above returned first). */
-        if (names && arity > 0) free(names[arity - 1]);
+        /* All arity pushed names are live (the old comment's off-by-one
+         * reasoning only held for arity == 1; `(a, b` leaked "a" through
+         * it). types[] holds at most parse_type'd entries that the caller
+         * drops with the probe — the Type graph itself belongs to
+         * type_release_all, so free the array shell only. */
+        for (int i = 0; i < arity; i++) free(names[i]);
         free(names);
         free(types);
         return false;
@@ -355,6 +397,12 @@ static void free_name_array(char **a, int n); /* defined with node_free_own */
 bool parse_patterns(Parser *p, MatchPat **out, int *outc) {
     MatchPat *pats = NULL;
     int patc = 0;
+    /* Slots actually present in the allocation — patc only advances once a
+     * variant completes, and a FAILED realloc leaves pats at the old size
+     * with patc already past it, so the cleanup below walks this instead
+     * (libFuzzer crash-ed0e12: heap-buffer-overflow reading slot patc
+     * after the realloc that would have created it gave up). */
+    int claimed = 0;
     for (;;) {
         Token pt = peek(p);
         if (pt.type != TOK_IDENT) {
@@ -362,8 +410,10 @@ bool parse_patterns(Parser *p, MatchPat **out, int *outc) {
             goto fail;
         }
         advance(p);
-        pats = realloc(pats, sizeof(MatchPat) * ((size_t)patc + 1));
-        if (!pats) goto fail;
+        MatchPat *np = realloc(pats, sizeof(MatchPat) * ((size_t)patc + 1));
+        if (!np) goto fail;
+        pats = np;
+        claimed = patc + 1;
         MatchPat *pat = &pats[patc];
         memset(pat, 0, sizeof *pat);
         pat->vname = ident_name(p, pt);
@@ -391,12 +441,30 @@ bool parse_patterns(Parser *p, MatchPat **out, int *outc) {
     *outc = patc;
     return true;
 fail:
-    for (int i = 0; i < patc; i++) {
+    /* The in-flight variant (slot patc) is claimed before its vname/binds
+     * are filled, so every failure after the realloc must release it too:
+     * the `)`- and binding-name exits leak through here (libFuzzer
+     * leak-8c01: vname, bind string and binds shell, 28B total).
+     * A fresh slot is memset-zeroed, so NULL arrays are skip-safe. */
+    for (int i = 0; pats && i < claimed; i++) {
         free(pats[i].vname);
         free_name_array(pats[i].binds, pats[i].bindc);
     }
     free(pats);
     return false;
+}
+
+/* Release a parse_patterns result the caller can no longer attach to a
+ * node: ownership transfers to MatchArm/iflet (freed by node_free_own)
+ * only when the constructor completes; every `return NULL` between here
+ * and there must pass through this first (libFuzzer leak-036b5e7: 48B =
+ * one MatchPat stranded by a failed match arm). */
+void free_pat_array(MatchPat *pats, int patc) {
+    for (int i = 0; i < patc; i++) {
+        free(pats[i].vname);
+        free_name_array(pats[i].binds, pats[i].bindc);
+    }
+    free(pats);
 }
 
 /* ---------- program ---------- */
@@ -415,7 +483,7 @@ Node *parse_program(const char *source, char *errbuf, size_t errbuf_size) {
 
     Parser p;
     memset(&p, 0, sizeof(p));
-    p.toks = toks;
+    p.toks = toks;   /* depth rides the memset-zero */
     p.count = count;
 
     Node *prog = nalloc(N_PROGRAM, 1);
@@ -731,7 +799,22 @@ static void node_free_kids(Node *n) {
         for (int i = 0; i < c; i++) node_free(s[i]);
         break;
     }
-    case N_LET:  node_free(n->as.let.init); break;
+    case N_LET: {
+        node_free(n->as.let.init);
+        /* A `fn(...) -> ret` annotation's param vector is the parser's own
+         * realloc'd array (parse_type). Once a scan pass stamps t->func on
+         * the annotation Type, type_release_all's exception skips t->types
+         * expecting this sweep to free it (the comment names N_FUNC_LIT
+         * only) — and the plain path freed the Type shell but never this
+         * vector: the CI asan leg's 40-bytes-in-4 LSan report. The Type
+         * elements stay with type_release_all; only the vector goes here.
+         * NULL it so the sweep that runs after cannot reach it again. */
+        if (n->as.let.annot && n->as.let.annot->kind == TY_FUNC) {
+            free(n->as.let.annot->types);
+            n->as.let.annot->types = NULL;
+        }
+        break;
+    }
     case N_LET_PAT: node_free(n->as.letpat.init); break;
     case N_LET_EXPR:
         node_free(n->as.letx.init);
@@ -869,6 +952,14 @@ static void node_free_own(Node *n) {
         /* The mangled name the signature pass stamped on (NULL for a route
          * handler, which never goes through that pass). */
         free(n->as.funclit.cname);
+        /* Captured names are xstrdup'd by the capture pass; the types are
+         * borrowed from the enclosing scope and not owned here. */
+        if (n->as.funclit.cap_names) {
+            for (int i = 0; i < n->as.funclit.cap_count; i++)
+                free(n->as.funclit.cap_names[i]);
+            free(n->as.funclit.cap_names);
+        }
+        free(n->as.funclit.cap_types);
         break;
     case N_TYPE_DECL:
         free(n->as.type_decl.name);

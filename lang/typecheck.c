@@ -411,6 +411,8 @@ const char *const LUME_BUILTIN_NAMES[] = {
     "upper", "lower", "capitalize", "trim", "contains", "split", "join",
     "substr", /* string tools (2026-10-08, P4a codegen) */
     "crypt_sha512", /* sha512 crypt hash (2026-09-29) */
+    "sha256", "hmac_sha256", /* message digests, hex out (2026-10-15, payment signing) */
+    "base64_encode", "base64_decode", /* RFC 4648, binary-safe (2026-10-16, PayPal OAuth2 Basic) */
     /* math builtins (2026-09-28, builtins_math.c) */
     "abs", "sqrt", "exp", "log", "ln", "pow", "floor", "ceil", "round",
     "min", "max", "pi", "e",
@@ -573,6 +575,16 @@ int ck_pat_list(Checker *c, MatchPat *pats, int patc, EnumDef *ed,
  * variant degrades to any. The first (collecting) walk uses scope_put —
  * the second walk re-declares. */
 void ck_put_pat_binds(Checker *c, MatchPat *pats, int bindc, size_t line) {
+    /* bindc is only an upper bound: both validators that could correct it
+     * (ck_pat_list's arity clamp, the or-pattern same-names check) merely
+     * record their complaint, so on error paths it can exceed pats[0]'s
+     * stamped arrays — binds[] is exactly pats[0].bindc long and
+     * vfield_types[] is the resolve_ctors full-variant stamp (vfieldc).
+     * Skipping the excess is sound: every path that lands here has already
+     * failed the run with a precise diagnostic. */
+    if (bindc > pats[0].bindc) bindc = pats[0].bindc;
+    if (pats[0].vfield_types && bindc > pats[0].vfieldc)
+        bindc = pats[0].vfieldc;
     for (int k = 0; k < bindc; k++) {
         Type *pt = pats[0].vfield_types ? pats[0].vfield_types[k]
                                         : any_type();
