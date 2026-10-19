@@ -26,7 +26,7 @@ CFLAGS   += -I lang $(addprefix -I, $(AH_INC))
 
 # 版本号: lume --version 读这个宏(单一来源)。默认值取最近一次发布 tag;
 # 打 release 前在此递增值, 保证二进制自报与 GitHub Release tag 一致。
-LUME_VERSION ?= 0.6.2
+LUME_VERSION ?= 0.7.2
 CFLAGS   += -DLUME_VERSION=\"$(LUME_VERSION)\"
 # LUME_HAS_HTTP: 出站 HTTP 内建(http_get/post/put/patch/delete)的开关。
 # 实现已在 lang/builtins_http.c(2026-10-05 从 lume-core 移植, 裸 socket +
@@ -176,11 +176,13 @@ define KILL_SERVER
 	done
 endef
 SRCS     := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parser_expr.c \
+            lang/arena.c \
             lang/value.c lang/typecheck.c lang/typecheck_expr.c lang/typecheck_stmt.c \
             lang/interp.c lang/builtins.c lang/builtins_sql.c lang/builtins_fs.c \
             lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/loader.c lang/vdom.c \
             lang/builtins_http.c lang/bridge.c lang/token.c lang/iquest.c \
-            lang/localfns.c
+            lang/localfns.c \
+            lang/compat/sha256/sha256.c
 # Windows: 去掉吃 agent-httpd 的三片(iquest 走 minijson 读取半 + agenthttpd_route,
 # builtins_sql 走 AH 里的 db_query_json/db_write_exec, builtins_http 是裸 socket +
 # 可选 TLS), 换入 bridge_stub.c; 另加 os_win32.c 供 builtins_fs.c 的
@@ -188,12 +190,14 @@ SRCS     := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parse
 # lume.h 的 TokenType 类型撞名)。
 ifneq ($(strip $(IS_WINDOWS)),)
     SRCS := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parser_expr.c \
+            lang/arena.c \
             lang/value.c lang/typecheck.c lang/typecheck_expr.c lang/typecheck_stmt.c \
             lang/interp.c lang/builtins.c lang/builtins_fs.c \
             lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/loader.c lang/vdom.c \
             lang/bridge_stub.c lang/token.c lang/os_win32.c \
             lang/builtins_stub.c lang/catalog_stub.c \
             lang/localfns.c \
+            lang/compat/sha256/sha256.c \
             lang/compat/regex/regcomp.c lang/compat/regex/regexec.c \
             lang/compat/regex/regerror.c lang/compat/regex/tre-mem.c
 endif
@@ -237,12 +241,13 @@ build:
 bin:
 	mkdir -p bin
 else
-$(shell mkdir -p build bin build/compat/regex 2>/dev/null)
+$(shell mkdir -p build bin build/compat/regex build/compat/sha256 2>/dev/null)
 build: ;
 bin: ;
 endif
 
 build/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build $(AH_LIB)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJS) $(AH_LIB) | bin
@@ -581,6 +586,7 @@ build-asan/tests:
 	mkdir -p build-asan/tests
 
 build-asan/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build-asan $(AH_LIB)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -c $< -o $@
 
 $(ASAN_TARGET): $(ASAN_OBJS) $(AH_LIB) | build-asan bin

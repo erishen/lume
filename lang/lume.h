@@ -67,6 +67,7 @@ typedef enum {
     TOK_IMPORT, TOK_EXPORT, TOK_AS,
     TOK_TRUE, TOK_FALSE, TOK_NULL, TOK_AND, TOK_OR, TOK_NOT,
     TOK_TYPE, TOK_INT, TOK_FLOAT, TOK_KW_STRING, TOK_BOOL, TOK_RESULT,
+    TOK_KW_FN,
     TOK_GET, TOK_HEAD, TOK_POST, TOK_PUT, TOK_PATCH, TOK_DELETE, TOK_OPTIONS,
     TOK_VERBS,
     TOK_ENUM, TOK_MATCH, TOK_PIPE,
@@ -395,7 +396,12 @@ bool values_equal(Value a, Value b);
  * the server config map. Storing handler Values here keeps them alive —
  * an anonymous function object referenced only by the C callback table
  * would otherwise be collected between registrations. */
-#define MAX_AL_ROUTES 32
+/* Route table cap. Was 32, which a generated CRUD app outgrows the moment it
+ * carries more than two modules (product+order+pay+shop already sums to 31 in
+ * lume-nsgm's PayPal variant; a third module silently fails registration with
+ * a message that blames the last route, not the full table). 128 leaves room
+ * for several modules per app; RouteRec is ~40B, so the VM grows ~4KB. */
+#define MAX_AL_ROUTES 128
 #define MAX_AL_TOOLS 96
 
 typedef struct {
@@ -530,8 +536,8 @@ void loader_free(VM *vm);
 
 /* AST node. One struct, union-tagged; the tree is built once, before
  * agenthttpd_run forks workers, and per-request evaluation reuses the same
- * immutable tree. It used to live for the process lifetime — node_free() now
- * releases it, so a reload or a test case can drop a whole program. */
+ * immutable tree. It used to live for the process lifetime — arena_reset()
+ * now reclaims it, so a reload or a test case can drop a whole program. */
 typedef enum {
     N_PROGRAM, N_BLOCK, N_LET, N_IF, N_WHILE, N_FOR, N_BREAK, N_CONTINUE,
     N_RETURN, N_EXPR_STMT,
@@ -676,11 +682,11 @@ typedef struct Node {
         struct { struct Node *base; char **keys; struct Node **vals;
                  int count; } supd;
         /* lit.text: `char *`, NOT `const char *`. Only LIT_STR sets it
-         * (parser_expr.c:parse_primary mallocs a quote-including copy and
-         * reallocs it while merging adjacent literals), so the field owns
-         * heap memory and node_free_own() frees it — the `const` was a stale
-         * claim from when it borrowed into the source buffer, and it forced
-         * that free() site to lie with a cast. The other kinds leave it
+         * (parser_expr.c:parse_primary arena-strdups a quote-including copy
+         * and grows it while merging adjacent literals), so the field lives
+         * in the parse arena — the `const` was a stale claim from when it
+         * borrowed into the source buffer, and it forced the old free() site
+         * to lie with a cast. The other kinds leave it
          * unset; every reader is gated on `kind`. */
         /* LIT_NUM: `inum` is the value when is_float == 0 (int is i64 — see
          * docs/SPEC.md); `num` is the value when is_float == 1. Both are kept
@@ -706,6 +712,13 @@ typedef struct Node {
                  char *cname; /* synthetic mangled name for the closure's
                                * emitted `define`, assigned by the signature
                                * pass; NULL until then */
+                 /* Phase-2 free-variable capture: the outer locals (of the
+                  * enclosing function) the body reads, name + type each.
+                  * Filled by the capture pass in codegen_sig.c; NULL/0 when
+                  * the lambda captures nothing. Not owned: names are
+                  * arena_strdup'd by the pass; the Type pointers are
+                  * borrowed from the outer scope. */
+                 char **cap_names; Type **cap_types; int cap_count;
                } funclit;
         struct { struct Node *callee; struct Node **args; int argc;
                  bool propagate; } call; /* propagate: trailing `?` */
@@ -743,14 +756,13 @@ Token *al_lex(const char *source, char *errbuf, size_t errbuf_size,
               int *out_count);
 
 void node_print(Node *n, int indent);   /* debugging dump */
-/* Free a whole AST subtree. Reclaims the nodes themselves, every
- * ident_name()/path string inside them and the char**, Node** and Type**
- * array shells,
- * but NOT the Type objects behind those pointers — those belong to
- * type_release_all(). Safe to call only once nothing can walk the tree
- * again: ObjFunc.body keeps a Node*, so free the VM heap first if you free
- * the AST through it. */
-void node_free(Node *n);
+/* The AST is arena-allocated (TODO.md P2, docs/ARENA.md): nothing the
+ * parser builds is freed individually. Reclaim it with arena_reset() at
+ * the points where the tree dies today — the same call sites that used to
+ * run node_free() — after nothing can walk the tree anymore (ObjFunc.body
+ * keeps a Node*, so the VM heap must be gone first). The Type objects
+ * behind param_types/field_types/annot keep their own sweep,
+ * type_release_all(). */
 
 /* ===================== interpreter / bridge ===================== */
 

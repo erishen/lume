@@ -1,5 +1,6 @@
 #include "lume.h"
 #include "builtins_internal.h" /* list_push: vm.argv seeding */
+#include "arena.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -99,8 +100,9 @@ static void watch_signal(int sig) {
 }
 
 /* Hand a finished VM's whole object graph back. Order is deliberate:
- *   loader_free()  drops the modules and the AST (node_free recurses), which
- *                  is what ObjFunc/ObjNative bodies point into;
+ *   loader_free()  drops the modules; arena_reset() clears the parse arena
+ *                  (the AST), which is what ObjFunc/ObjNative bodies point
+ *                  into;
  *   vm_free()      empties the GC heap and the strdup'd route records;
  *   type_release_all() sweeps the Type graph shared by the AST, the checker
  *                  scopes and the module export tables.
@@ -413,7 +415,7 @@ int main(int argc, char **argv) {
             return 1;
         }
         node_print(prog, 0);
-        node_free(prog);        /* the dump is the parser's only consumer */
+        arena_reset();          /* the dump is the parser's only consumer */
         free(source);
         type_release_all();     /* the parser builds Type nodes of its own */
         return 0;

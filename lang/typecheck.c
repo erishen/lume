@@ -22,6 +22,7 @@
  */
 
 #include "typecheck_internal.h"
+#include "arena.h"
 
 /* ===================== type representation ===================== */
 
@@ -82,7 +83,14 @@ Type *type_enum(const char *name) {
 Type *type_func(int arity, Type **params, Type *ret) {
     Type *t = calloc(1, sizeof(Type));
     t->kind = TY_FUNC;
-    t->types = params;
+    /* Own the param vector: copy it out of the caller (the parser's and the
+     * emitters' vectors are arena memory, TODO.md P2 — storing the pointer
+     * made type_release_all's free depend on who handed the array in, which
+     * the arena deleted the way to tell). The Type graph stays malloc'd and
+     * type_release_all frees every t->types unconditionally. */
+    t->types = arity > 0 ? malloc((size_t)arity * sizeof(Type *)) : NULL;
+    if (t->types && params)
+        memcpy(t->types, params, (size_t)arity * sizeof(Type *));
     t->count = arity;
     t->ret = ret;
     ty_keep(t);
@@ -146,16 +154,12 @@ void type_release_all(void) {
             free(t->names);
         }
         /* types[] holds Type* (members or params) that are part of this same
-         * graph -- including the param vector calloc'd by the checker's Pass
-         * C -- so the whole shell goes here, not block by block.
-         *
-         * One exception: a TY_FUNC that carries the AST back-pointer (t->func)
-         * borrowed its param vector straight from the N_FUNC_LIT node — the
-         * parser owns that array and node_free_own frees it. The checker's
-         * own type_func vectors (Pass C, the N_FUNC_LIT case in
-         * typecheck_expr.c) are calloc'd here and stay reclaimed below. */
-        if (!(t->kind == TY_FUNC && t->func))
-            free(t->types);
+         * graph -- the param vector calloc'd by the checker's Pass C and the
+         * copies type_func() makes of caller vectors alike -- so the whole
+         * shell goes here, not block by block. Since type_func() copies the
+         * caller's array (TODO.md P2: the parser's vectors are arena memory
+         * now), every t->types is owned by this graph and freed here. */
+        free(t->types);
         free(t);
         t = next;
     }
@@ -252,9 +256,9 @@ const char *ty_str(Type *t) {
         if (t->elem && t->elem->kind != TY_ANY) {
             char eb[64];
             snprintf(eb, sizeof eb, "%s", ty_str(t->elem));
-            snprintf(buf, sizeof buf, "%s[]", eb);
+            snprintf(buf, sizeof bufs[0], "%s[]", eb);
         } else {
-            snprintf(buf, sizeof buf, "list");
+            snprintf(buf, sizeof bufs[0], "list");
         }
         return buf;
     }
@@ -262,7 +266,7 @@ const char *ty_str(Type *t) {
         return t->name ? t->name : "map";
     if (t->kind == TY_FUNC)
         return "func";
-    snprintf(buf, sizeof(buf), "<%s>", t->name ? t->name : "?");
+    snprintf(buf, sizeof bufs[0], "<%s>", t->name ? t->name : "?");
     return buf;
 }
 
@@ -353,8 +357,8 @@ static void ck_free(Checker *c) {
         EnumDef *en = e->next;
         for (int j = 0; j < e->vcount; j++) {
             free(e->vnames[j]);
-            /* vfields[j]/vfield_types[j] shells: the field-name strings are
-             * owned by the AST (freed with node_free); the Type* payloads
+            /* vfields[j]/vfield_types[j] shells: the field-name strings live
+             * in the parse arena; the Type* payloads
              * belong to type_release_all(). Only the shells die here. */
             free(e->vfields[j]);
             free(e->vfield_types[j]);
@@ -411,6 +415,8 @@ const char *const LUME_BUILTIN_NAMES[] = {
     "upper", "lower", "capitalize", "trim", "contains", "split", "join",
     "substr", /* string tools (2026-10-08, P4a codegen) */
     "crypt_sha512", /* sha512 crypt hash (2026-09-29) */
+    "sha256", "hmac_sha256", /* message digests, hex out (2026-10-15, payment signing) */
+    "base64_encode", "base64_decode", /* RFC 4648, binary-safe (2026-10-16, PayPal OAuth2 Basic) */
     /* math builtins (2026-09-28, builtins_math.c) */
     "abs", "sqrt", "exp", "log", "ln", "pow", "floor", "ceil", "round",
     "min", "max", "pi", "e",
@@ -573,6 +579,16 @@ int ck_pat_list(Checker *c, MatchPat *pats, int patc, EnumDef *ed,
  * variant degrades to any. The first (collecting) walk uses scope_put —
  * the second walk re-declares. */
 void ck_put_pat_binds(Checker *c, MatchPat *pats, int bindc, size_t line) {
+    /* bindc is only an upper bound: both validators that could correct it
+     * (ck_pat_list's arity clamp, the or-pattern same-names check) merely
+     * record their complaint, so on error paths it can exceed pats[0]'s
+     * stamped arrays — binds[] is exactly pats[0].bindc long and
+     * vfield_types[] is the resolve_ctors full-variant stamp (vfieldc).
+     * Skipping the excess is sound: every path that lands here has already
+     * failed the run with a precise diagnostic. */
+    if (bindc > pats[0].bindc) bindc = pats[0].bindc;
+    if (pats[0].vfield_types && bindc > pats[0].vfieldc)
+        bindc = pats[0].vfieldc;
     for (int k = 0; k < bindc; k++) {
         Type *pt = pats[0].vfield_types ? pats[0].vfield_types[k]
                                         : any_type();
@@ -848,7 +864,14 @@ bool type_check_module(struct Module *self, struct Module **mods, int mod_count,
             const char *fname = s->as.func.cname ? s->as.func.cname
                                                  : s->as.func.name;
             ck_ctor_shadow(&c, fname, s->line);
-            Type **params = calloc((size_t)s->as.func.arity + 1, sizeof(Type *));
+            /* Scratch resolved-param vector; type_func() copies it out, so
+             * it lives in the arena and is abandoned (TODO.md P2). A malloc
+             * here had no owner after the copy — LeakSanitizer on the fuzz
+             * seed replay caught the orphan. */
+            Type **params = arena_alloc(((size_t)s->as.func.arity + 1)
+                                        * sizeof(Type *));
+            memset(params, 0,
+                   ((size_t)s->as.func.arity + 1) * sizeof(Type *));
             for (int j = 0; j < s->as.func.arity; j++) {
                 params[j] = s->as.func.param_types[j]
                                 ? resolve(&c, s->as.func.param_types[j], s->line)

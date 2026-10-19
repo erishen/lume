@@ -17,6 +17,7 @@
  * host-only by design - so the obligation lives in this comment.
  */
 #include "lume.h"
+#include "arena.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -239,8 +240,10 @@ static void lf_rename_calls(Node *n, const char *from, const char *to)
     case N_CALL: {
         Node *ce = n->as.call.callee;
         if (ce && ce->type == N_VAR && strcmp(ce->as.var.name, from) == 0) {
-            free(ce->as.var.name);   /* drop the source name before stamping cname */
-            ce->as.var.name = lf_strdup(to);
+            /* The old name is arena memory (TODO.md P2) — dropping the free
+             * here mirrors codegen_sig.c: stamp the renamed callee straight
+             * over it, nothing to reclaim mid-walk. */
+            ce->as.var.name = arena_strdup(to);
         }
         lf_rename_calls(ce, from, to);
         for (int i = 0; i < n->as.call.argc; i++)

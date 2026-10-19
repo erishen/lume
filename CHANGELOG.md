@@ -6,6 +6,85 @@ All notable changes to Lume are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-19
+
+### Changed
+
+- `agent-httpd` submodule pinned to `ee18006` — adds a `.gitattributes`
+  (`* text=auto eol=lf` plus an explicit binary list: `*.gz *.class
+  *.jar *.png *.jpg *.jpeg *.gif *.ico *.woff *.woff2 *.ttf *.eot *.db
+  *.sqlite *.sqlite3 *.pem *.crt *.key *.pdf`). The vendored agent service
+  now keeps LF line endings on every platform; the Windows default
+  `core.autocrlf=true` would otherwise CRLF the sources on clone. Pure
+  cross-platform hygiene for the embedded tree — no runtime or binary
+  change.
+
+## [0.7.1] - 2026-10-19
+
+### Fixed — fold in the two upstream memory-safety fixes (lume-core 59ac8a4)
+
+- `lang/typecheck.c` (host-owned, hand-merged from core `de00906`): the
+  Pass-C `calloc`'d param scratch was orphaned after `type_func()` started
+  copying params (P2 Stage 1) — leaked 40 bytes per module that declares
+  functions, caught by CI LeakSanitizer. Now arena-owned, matching
+  `N_FUNC_LIT`.
+- `lang/lexer.c` (synced from core `59ac8a4`): `lex_istr`'s `EXPR_STR`
+  escape skip `p += 2` is now guarded so a trailing backslash at EOF no
+  longer reads one byte past the buffer (ASan heap-buffer-overflow).
+
+## [0.7.0] - 2026-10-19
+
+### Added
+
+- `sha256()` / `hmac_sha256()` / `base64_encode()` / `base64_decode()`
+  builtins, with the SHA-256 implementation vendored from lume-core
+  `compat/` and compiled into the host build — the DSL can now sign
+  requests and emit HTTP Basic credentials (accepted upstream from
+  lume-core v0.8.0; covered by `tests/test-crypto.lume`).
+- Type annotations for `fn` values (`fn(int, string) -> bool`) with
+  funclit capture fields, hand-merged from upstream.
+- Route table capacity raised 32 → 128 (`MAX_AL_ROUTES`, both definition
+  sites changed together).
+- `rea-demo` (reverse-engineering MCP service, with homepage examples and
+  agent steering away from the 170-tool guessing spiral) and
+  `serena-demo` (source-analysis MCP service, `lang/` mounted as the
+  analysis target; MCP responses anchored on the JSON-RPC frame).
+
+### Fixed
+
+- The typechecker validated only the LEFT operand of an arithmetic
+  expression, so `1 + "x"` passed `--check` and then blew up at runtime —
+  a `watch` hot-reload then "recovered" by restarting the child, killing
+  the served app. Both operands must now be numeric (`type_compat(FLOAT)`).
+- `ty_str`'s diagnostic spelling sized its `snprintf` calls with the ring
+  pointer (8 bytes) instead of the ring slot (128), truncating type names
+  longer than 7 characters in checker messages. Hand-merged from
+  lume-core @ `98ceb48`.
+- The interpreter's JSON parse errors now carry the same shape as the
+  native emitter's (5xx body matches what `--compile` runs produce).
+- `native_split` wraps its root list so the GC can no longer collect it
+  mid-call (use-after-free).
+- Windows build: duplicate http stubs dropped, the POSIX regex builtins
+  vendored (no more `-lgnurx` dependency).
+
+### Security
+
+- Privacy gate: `check-tree-privacy.sh` ported and wired as
+  `make treecheck`, with a CI leg that fails the build on any leak at
+  HEAD; the 2026-10-18 history scrub is documented in the script, and a
+  Dockerfile comment carrying a real build-machine path was replaced with
+  a `/Users/<user>` placeholder.
+
+### Sync
+
+- Pinned lume-core v0.8.0 (`436b744`) → v0.9.0 lineage (`c9271a6`): the
+  P2 bump-arena regime (parser + Asg/arm-scope strings) rides the synced
+  `lang/` files; pinned drift converged byte-for-byte along the way.
+- `agent-httpd` submodule bumped to `f1c0047` (v0.4.0): sqlite guard
+  mirror + portfolio-escape fix, auth hot-reload, MCP frame fixes.
+
+## [0.6.3] - 2026-10-11
+
 ### Added
 
 - `lang/` hand-merged upstream lume-core @ `1435930` (pin `6e7a691` →
@@ -28,6 +107,12 @@ All notable changes to Lume are documented here. The format follows
   all outbound sockets. `lang/` layout stats refreshed (36 files /
   ~11.3k lines; 21 synced / 14 host-owned / 6 host-only per
   `make check-sync`).
+
+### Build
+
+- `LUME_VERSION` bumped to 0.6.3 (landed just after the tag, together
+  with compiling the vendored SHA-256 — the binary now self-reports the
+  release version).
 
 ## [0.6.2] - 2026-10-09
 

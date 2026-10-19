@@ -30,10 +30,15 @@
 # [A-Za-z0-9._-]+ class the pattern matches, so `<user>` stays green.
 #
 # History matters more than it looks: a blob that leaves HEAD only via a
-# filter-repo run stays readable for the entire window before GitHub's GC.
-# While this repo is still unpushed that window is the only risk there is,
-# and it is why the cleanup below (`git rm --cached`) is enough *today* —
-# but -H is one flag away if it ever gets pushed.
+# filter-repo / force-push run stays readable for the entire window before
+# GitHub's GC. This repo was scrubbed on 2026-10-18 — main rewritten
+# (00106bd -> ebdd655) and force-pushed, then set private as a stop-bleed —
+# so the local tree is now clean at ebdd655 (no build-machine path; `make
+# treecheck` asserts it). The one residual risk is GitHub's pre-rewrite
+# objects, which stay readable until its GC runs (no API to trigger, no SLA).
+# `./scripts/check-tree-privacy.sh --remote <old-blob-sha>` is the gate
+# before flipping this repo back to public: every old blob gone => safe to
+# flip; any still present => stay private and poll again later.
 #
 # --remote <sha> [<sha>...] asks GitHub whether those blobs are *still in the
 # remote object database* — the question that decides "may I flip this repo back
@@ -55,10 +60,12 @@
 # Usage: scripts/check-tree-privacy.sh [--history]
 #        scripts/check-tree-privacy.sh --remote <blob-sha> [<blob-sha>...]
 #
-# --history is on-demand, not wired into any target: those two backup blobs
-# stay reachable until this repo is pushed somewhere and rewritten, so the
-# flag is red by design until someone actually scrubs. Default scope is the
-# honest day-to-day question ("is what's in the repo now clean?").
+# --history is on-demand, not wired into any target. After the 2026-10-18
+# scrub the pre-rewrite objects live only on GitHub until its GC; walk the
+# whole object database with -H only when auditing that residual window
+# (the local clone was already GC'd, so 00106bd no longer resolves here).
+# Default scope is the honest day-to-day question ("is what's in the repo
+# now clean?").
 #
 set -u
 

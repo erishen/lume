@@ -1,17 +1,19 @@
 # md5 of every synced lang/ file, written by `make sync-lang`.
 # check compares lang/ against this when lume-core is not reachable.
-builtins_crypt.c 14b4e2c53fe935a48995064c8ee8d752
+arena.c 25d7485323346879eef92af5797912ec
+arena.h d42029e399a3f8eb73dd9f455a4e3587
+builtins_crypt.c 884d203eb09faa1be941f20f27b240f5
 builtins_hof.c 6eaac3ed7eb2d23806ed1ac7f15b8c0e
 builtins_math.c a45b287acec804f92b8aa1f374016025
-builtins_str.c 88558d16601907be194c0dc2ff3298a9
-lexer.c d00c580ea1a44f3914533d8f58ac8204
-loader.c 7daeead56b771b7be96df29bb8bbd649
+builtins_str.c d96f5834e11b2b15f3f2150d6152cfc1
+lexer.c 2cb4e078859525d504690850af1258aa
+loader.c 646f58ae736b65c2e17bb544c43ea4b5
 os_win32.c be70b1a072cca491a96899bcecc155e8
-parser.c e137892a9368e78626502fbc00724396
-parser_expr.c 69b90759df2796be2f4c4e73f5fe79d1
-parser_internal.h 3fe88de69d530f874e2879cfbadaea21
-parser_stmt.c 3f210b861523a7e69bb2a03dd6d79c12
+parser.c de979b918123c532c56260b84da66bee
+parser_expr.c 99559619a26a8c4c10521d29233e7bf3
+parser_internal.h 99a6e5cd2a5fb0e4560cf5656162c6f5
+parser_stmt.c 541260c4e837d034d90885eb9014fed4
 sbuf.h a88370a85fe1236163292a7692f1e18c
-token.c 36563d1ced600411be910368f5b02ac2
+token.c fcecb5e906dc5fd4da7b50d3658f6be6
 typecheck_internal.h 7211b01b417e5d5701769695133d521c
-value.c b3f0515aa8b3d71a071e45e82b3778e1
+value.c d7b089274f9f56295e5f8504e571d679

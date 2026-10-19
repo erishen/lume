@@ -12,7 +12,16 @@ typedef struct {
     int count;
     int pos;
     char errbuf[256];
+    /* Left-recursive-descent nesting counter: the expression chain and
+     * parse_block bump it at every level (a 12-frame cycle per source
+     * paren), so a pathological input cannot run the thread stack out
+     * (libFuzzer crash-eb4ae2: ~500 `(` pairs -> stack-overflow). */
+    int depth;
 } Parser;
+
+/* Ceiling in chain levels (≈12 C frames each): 200 ≈ 2.4k frames, a
+ * rounding error on the 8 MB main stack and safe on a 2 MB fuzz thread. */
+#define PARSER_MAX_DEPTH 200
 
 /* ---- 基础工具(parser.c) ---- */
 void perror_at(Parser *p, size_t line, const char *fmt, ...);
@@ -26,21 +35,10 @@ bool advance(Parser *p);
 bool match(Parser *p, TokenType t);
 bool expect(Parser *p, TokenType t);
 char *ident_name(Parser *p, Token t);
-char *dupcstr(const char *s);   /* owned strdup, freed by free_name_array */
+char *dupcstr(const char *s);   /* arena-owned strdup (docs/ARENA.md) */
 bool is_method_keyword(TokenType t);
 const char *method_keyword_name(TokenType t);
 bool is_field_token(TokenType t);
-
-/* Release one node the parser abandoned mid-statement: children are NOT
- * walked (the caller frees every node of the batch itself). */
-void node_free_orphan(Node *n);
-
-/* Take a node back out of the orphan batch. Every nalloc() node sits in that
- * batch, so a parser file that discards a node of its own -- free()ing just
- * the shell, after moving whatever the node owned over to a node that outlives
- * it -- has to call this first: otherwise the sweep at the end of a failed
- * parse frees the same pointer a second time. */
-void node_unjournal(Node *n);
 
 /* ---- 类型 / 块 / 函数声明(parser.c) ---- */
 Type *any_type(void);          /* defined in typecheck.c; the "anything" type */

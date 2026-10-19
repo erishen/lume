@@ -3,6 +3,7 @@
  * 一元/二元运算与调用(含 Result `?` 传播规则)。 */
 
 #include "typecheck_internal.h"
+#include "arena.h"
 
 /* Equality classes for `==` / `!=` (SPEC 1.8). Two operands in different
  * classes are never comparable: natively that shape is invalid IR (icmp i64
@@ -223,17 +224,29 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
             return ck_list(c, n, expected);
 
         case N_FUNC_LIT: {
-            Type **params = calloc((size_t)n->as.funclit.arity + 1,
-                                   sizeof(Type *));
+            /* Scratch resolved-param vector; type_func() copies it out, so
+             * it lives in the arena and is abandoned (TODO.md P2). */
+            Type **params = arena_alloc(((size_t)n->as.funclit.arity + 1)
+                                        * sizeof(Type *));
+            memset(params, 0,
+                   ((size_t)n->as.funclit.arity + 1) * sizeof(Type *));
             Type *hint = c->param_hint;
             c->param_hint = NULL; /* one-shot */
+            /* A `fn (...) => ...` annotation on the binding (`let f: fn(int)
+             * => int = (x) => x * 2;`, SPEC §4.8) spells the lambda's
+             * parameter types: use them for every unannotated parameter, not
+             * just the map/filter/reduce one-shot hint. */
+            Type *exp_fn = (expected && expected->kind == TY_FUNC) ? expected : NULL;
             for (int i = 0; i < n->as.funclit.arity; i++)
-                params[i] = (hint && i == 0 && !n->as.funclit.param_types[i])
-                                ? hint
-                                : (n->as.funclit.param_types[i]
-                                       ? resolve(c, n->as.funclit.param_types[i],
-                                                 n->line)
-                                       : any_type());
+                params[i] = (!n->as.funclit.param_types[i] && exp_fn &&
+                             i < exp_fn->count)
+                                ? resolve(c, exp_fn->types[i], n->line)
+                                : (hint && i == 0 && !n->as.funclit.param_types[i])
+                                      ? hint
+                                      : (n->as.funclit.param_types[i]
+                                             ? resolve(c, n->as.funclit.param_types[i],
+                                                       n->line)
+                                             : any_type());
             Type *ret = n->as.funclit.ret ? resolve(c, n->as.funclit.ret,
                                                     n->line) : any_type();
             Type *ft = type_func(n->as.funclit.arity, params, ret);
@@ -414,8 +427,15 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
                     return lt->kind == TY_STRING ? type_prim(TY_STRING)
                                                  : any_type();
             }
+            /* Both sides must be numeric; the string-concat case is handled
+             * above. A mixed numeric/string operand (e.g. `1 + "x"`) is a type
+             * error, not string concat. The numeric check must inspect BOTH
+             * sides — the old code only looked at the left, so `1 + "x"`
+             * slipped through and later crashed `watch` hot-reload, which
+             * trusts --check to reject invalid edits. */
             if (lt && rt && lt->kind != TY_ANY && rt->kind != TY_ANY &&
-                !type_compat(c, lt, type_prim(TY_FLOAT), n->line))
+                (!type_compat(c, lt, type_prim(TY_FLOAT), n->line) ||
+                 !type_compat(c, rt, type_prim(TY_FLOAT), n->line)))
                 ck_fail(c, n->line, "arithmetic needs numbers");
             return arith_result(lt, rt);
         }
