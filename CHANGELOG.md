@@ -6,6 +6,19 @@ All notable changes to Lume are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-19
+
+### Fixed — fold in the two upstream memory-safety fixes (lume-core 59ac8a4)
+
+- `lang/typecheck.c` (host-owned, hand-merged from core `de00906`): the
+  Pass-C `calloc`'d param scratch was orphaned after `type_func()` started
+  copying params (P2 Stage 1) — leaked 40 bytes per module that declares
+  functions, caught by CI LeakSanitizer. Now arena-owned, matching
+  `N_FUNC_LIT`.
+- `lang/lexer.c` (synced from core `59ac8a4`): `lex_istr`'s `EXPR_STR`
+  escape skip `p += 2` is now guarded so a trailing backslash at EOF no
+  longer reads one byte past the buffer (ASan heap-buffer-overflow).
+
 ## [0.7.0] - 2026-10-19
 
 ### Added
