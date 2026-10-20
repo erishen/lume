@@ -59,6 +59,18 @@ make clean        # 删 build/ 与 bin/
 `make dev` 起的是 `examples/demo.lume`,浏览器看 `/`(首页)、`/counter`
 (服务器状态)、`/chat`(Agent 聊天)、`/hello`(纯 API)。
 
+### 核实"单二进制"这条主张
+
+核心卖点是一个 C11 二进制(语言运行时 + `agent-httpd`)同时提供静态资源、JSON API、SSE 聊天、LLM 工具与 SQLite——没有 Node 运行时、没有 nginx、没有独立后端。怎么核实:
+
+| 主张 | 怎么查 |
+|---|---|
+| 自包含、零动态依赖 | release tarball 是**静态链接**(`-static -Wl,--gc-sections`),丢进 `scratch`/`alpine` 就能跑——见「容器」 |
+| 这个二进制里的能力 | `make test`——C 单测 + 工具派发 + **真实 HTTP/SSE** + GC 压力(e2e 那条腿 `tests/run_all.sh` 会起真服务器跑) |
+| 生产部署里的体积 | `https://lume-crm.erishen.cn` 是已上线实例;"< 20 MB"以 release tarball(二进制 + `www/` + `examples/` + `docs/`)为准 |
+
+> 本机 dev 构建很小(`bin/lume` 约 0.4 MB,动态、带 `-g`)。简历里的 ~1.7 MB 指**静态 release 二进制**——用 tag 构建(`.github/workflows/release.yml`)或静态链接复现,再对照 release tarball / `lume-crm`。
+
 依赖:编译器(cc)、`node` + `pnpm`(只用于 `make ui` 打前端产物)。前端源码在
 `frontend/src/`,产物进 `www/`——`www/` 里的 `*.js` / `*.css` 是构建产物
 (已在 `.gitignore` 排除),手写的 HTML 壳 `www/*/index.html` 等才是源码。

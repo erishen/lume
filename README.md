@@ -76,6 +76,23 @@ make clean        # remove build/ and bin/
 `make dev` serves `examples/demo.lume`; open `/` (home), `/counter`
 (server state), `/chat` (agent chat) and `/hello` (pure API) in a browser.
 
+### Verifying the "single binary" claim
+
+The headline feature is that one C11 binary (language runtime + `agent-httpd`)
+serves static assets, JSON APIs, SSE chat, LLM tools and SQLite — no Node
+runtime, no nginx, no separate backend. How to check it:
+
+| Claim | How to check it |
+|---|---|
+| One self-contained binary, zero dynamic deps | release tarball is **statically linked** (`-static -Wl,--gc-sections`); drop it on `scratch`/`alpine` and it runs — see `Containers` |
+| Feature set in that binary | `make test` — C unit + tool dispatch + **real HTTP/SSE** + GC stress (the e2e leg `tests/run_all.sh` exercises the live server) |
+| Deployed size in production | `https://lume-crm.erishen.cn` — a live deployment; the release tarball (binary + `www/` + `examples/` + `docs/`) is the reference for the "< 20 MB" figure |
+
+> The dev build on this machine is small (`bin/lume` ~0.4 MB, dynamic, `-g`).
+> The ~1.7 MB figure in the resume refers to the **static release binary** —
+> reproduce it via a tag build (`.github/workflows/release.yml`) or a
+> static link, then compare against the release tarball / `lume-crm`.
+
 Dependencies: a C compiler (`cc`), plus `node` + `pnpm` (only for `make ui`
 which builds the frontend). Frontend source lives in `frontend/src/`, output
 goes to `www/` — `*.js` / `*.css` under `www/` are build artifacts (ignored
