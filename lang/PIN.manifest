@@ -4,7 +4,7 @@ arena.c 25d7485323346879eef92af5797912ec
 arena.h d42029e399a3f8eb73dd9f455a4e3587
 builtins_crypt.c 884d203eb09faa1be941f20f27b240f5
 builtins_hof.c 6eaac3ed7eb2d23806ed1ac7f15b8c0e
-builtins_math.c a45b287acec804f92b8aa1f374016025
+builtins_math.c 8d976fb86a54b61138fc6b94548ca1d9
 builtins_str.c d96f5834e11b2b15f3f2150d6152cfc1
 lexer.c c3236cb5a9f624a9a381496d0d69a0e3
 loader.c 646f58ae736b65c2e17bb544c43ea4b5
