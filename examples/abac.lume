@@ -23,7 +23,9 @@ import "abac/policy.lume" as policy;
 // PERMIT → 200 JSON(决策详情);DENY → 403 JSON
 func respond(d) {
   policy.audit_write(d);                // 每次决策都留痕(策略库负责写审计)
-  if (d.decision == "PERMIT") { return d; }
+  if (d.decision == "PERMIT") {
+    return { status: 200, type: "application/json", body: stringify(d) };
+  }
   return { status: 403, type: "application/json", body: stringify(d) };
 }
 
