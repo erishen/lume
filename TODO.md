@@ -44,3 +44,31 @@ Host-side items:
       agent-httpd: **never iterate an inline expression chain in
       for-in** — bind the iterable to a `let` first. Recorded in the
       chinese project memory and here until P9 is fixed.
+
+## P10 (agent-httpd) — request/response envelope limits surfaced by the life-dash migration
+
+`personal/life-dash` migrated from node `serve.mts` to a lume DSL
+service (2026-10-21, life-dash `848cea5`, 165MB → 21.4MB). Four
+framework limits were accepted as degradations; each is tracked here
+for a future agent-httpd pass:
+
+- [ ] **req map exposes no generic headers / origin**: the request map in
+      `lang/bridge.c` carries method/path/host/content_type/user_agent/
+      body/query_params/params, but no `headers` field — Origin-based
+      cross-site checks (node `serve.mts`'s `isLocalOrigin`) cannot be
+      ported 1:1. life-dash now relies on loopback bind (compose
+      `127.0.0.1`) + the framework emitting no CORS headers, so browser
+      SOP blocks cross-site reads anyway.
+- [ ] **route responses cannot set custom security headers**: the DSL
+      envelope supports `status`/`type`/`body`/`cache_control` only —
+      `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`
+      (all set by the node server) are unreachable from a script.
+- [ ] **static serving has no gzip**: `agent-httpd/src/http/static.c`
+      serves assets uncompressed — the >1KB gzip path of node
+      `serve.mts` ships raw (life-dash SPA JS ~396KB, ~142KB gzipped).
+- [ ] **outbound HTTP timeout caps at 60s**: `HTTP_MAX_TIMEOUT_MS`
+      (`lang/builtins_http.c`) is 60000ms — life-dash's
+      `/__devstats/refresh` reverse proxy to the host trigger needed
+      300s; refreshes over 60s now surface a 502. Consider raising the
+      cap or making it per-call configurable.
+
