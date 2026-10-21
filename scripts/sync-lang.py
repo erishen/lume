@@ -96,7 +96,17 @@ HOST_PINNED = {"lume.h", "main.c", "builtins_internal.h", "builtins.c",
                # called host business and left out. The two files share a name
                # and builtin names but not ownership; keep ours, let the lag
                # report track upstream's.
-               "builtins_sql.c"}
+               "builtins_sql.c",
+               # value.c: upstream's copy grew the OBJ_SQLTX transaction-handle
+               # object (P6 three-backend sql tx, builtins_sql.c is the only TU
+               # that knows sqlite3) which this host has never adopted - its sql
+               # surface is the app-specific port (see builtins_sql.c above)
+               # with sql_query/sql_write only and no tx objects, and lume.h
+               # here carries no OBJ_SQLTX kind. `sync` would overwrite
+               # value.c wholesale and break the build, so pin it and track the
+               # gap as BEHIND; the GC/mark logic beyond the OBJ_SQLTX block
+               # stays hand-merged with upstream when it changes.
+               "value.c"}
 
 # Upstream lines behind in a pinned file stop being news at about this many;
 # below it the file is just locally edited.

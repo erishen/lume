@@ -2,17 +2,18 @@
 # written by `sync-lang.py accept-lag`.  check reports growth
 # past this number, not the number itself.
 bridge_stub.c 1
-builtins.c 32
-builtins.h 2
+builtins.c 40
+builtins.h 6
 builtins_catalog.c 46
 builtins_fs.c 0
 builtins_http.c 4
-builtins_internal.h 39
-builtins_sql.c 333
-interp.c 0
-lume.h 9
-main.c 203
-typecheck.c 0
+builtins_internal.h 45
+builtins_sql.c 438
+interp.c 9
+lume.h 21
+main.c 320
+typecheck.c 12
 typecheck_expr.c 0
 typecheck_stmt.c 0
+value.c 26
 vdom.c 1
