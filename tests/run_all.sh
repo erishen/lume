@@ -234,6 +234,30 @@ sleep 1
 pkill -f "[b]in/lume /tmp/lume-watch-test" 2>/dev/null || true
 pass "watch: shutdown"
 
+# 4e. minimal server + for-in inline-temp GC regression ----------------------
+# examples/minimal-server-gc.lume pins the server-side shape of the for-in
+# GC-root bug (core 475e099): the route body runs for (x in range(60000))
+# with an inline-temp iterable (range(60)) allocated every round. Pre-fix
+# any allocation past the 2MiB GC threshold freed the iterable under the
+# interpreter's cursor (0xC0000005 on Windows, "crashes on a LATER request"
+# behind the old chinese/server.lume); the host interpreter carries the fix
+# (hand-merged 94b9b03), so the answer must arrive intact over real HTTP —
+# this exercises the HTTP-bracket / per-request arena side too.
+MIN_GC_PORT=8996
+sed -e "s|port = [0-9]*;|port = $MIN_GC_PORT; access_log = \"$ACCESS_LOG/min-gc.log\";|" \
+    examples/minimal-server-gc.lume > /tmp/lume-min-gc-test.lume
+./bin/lume /tmp/lume-min-gc-test.lume > "$SERVER_LOG" 2>&1 &
+MINGC_PID=$!
+trap 'kill $SERVER_PID 2>/dev/null; kill $MINGC_PID 2>/dev/null; lsof -ti tcp:$PORT 2>/dev/null | xargs kill -9 2>/dev/null; lsof -ti tcp:$MIN_GC_PORT 2>/dev/null | xargs kill -9 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
+for _ in $(seq 1 200); do
+    curl -s -m 1 http://127.0.0.1:$MIN_GC_PORT/gc > /dev/null 2>&1 && break
+    sleep 0.15
+done
+[ "$(curl -s -m 8 http://127.0.0.1:$MIN_GC_PORT/gc)" = "minimal gc ok: 1799970000" ] || fail "minimal-server-gc: route answer"
+pass "minimal-server-gc: inline-temp for-in over HTTP"
+kill $MINGC_PID 2>/dev/null; MINGC_PID=0
+pkill -f "[b]in/lume /tmp/lume-min-gc-test" 2>/dev/null || true
+
 echo
 echo "all tests passed"
 exit 0

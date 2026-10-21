@@ -1,0 +1,31 @@
+// examples/minimal-server-gc.lume — the server-side shape of the for-in
+// GC-root bug (core 475e099, TODO.md chinese/server.lume trace).
+//
+// A GET handler runs a for-in over range(60000) whose body allocates an
+// *inline-temp* iterable (range(60)) every iteration. Before the core fix
+// the temp was popped off the VM stack right after eval — the stack is a
+// GC root and the popped slot is no longer rooted — so any allocation in
+// the body that trips the 2MiB collection threshold freed the outer
+// iterable under the interpreter's cursor: use-after-free on the next
+// round (0xC0000005 on Windows; explains "crashes on a LATER request,
+// not the first" behind the old chinese/server.lume).
+//
+// The host interpreter carries the fix (hand-merged 94b9b03), so this
+// route must answer correctly over real HTTP on every push — the
+// HTTP-bracket side of the bug (per-request arena / reset) is what
+// tests/run_all.sh leg 4e exercises.
+server {
+  port = 8996;
+  access_log = "./logs/minimal-gc.log";
+}
+
+get "/gc", (req) => {
+  let total = 0;
+  for (x in range(60000)) {
+    let junk = range(60);       // inline-temp iterable, re-rooted per round
+    total = total + x;
+  }
+  return "minimal gc ok: " + str(total);
+};
+
+run();
