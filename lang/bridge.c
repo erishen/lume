@@ -659,6 +659,7 @@ void bridge_run(VM *vm) {
             {"auth_realm", &cfg.auth_realm},
             {"fcgi_socket", &cfg.fcgi_socket},
             {"react_socket", &cfg.react_socket},
+            {"react_prefix", &cfg.react_prefix},
         };
         for (size_t i = 0; i < sizeof(strs) / sizeof(strs[0]); i++) {
             v = map_get(vm, m, strs[i].key, &found);
