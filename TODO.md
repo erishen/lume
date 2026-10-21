@@ -21,11 +21,22 @@ boundary).
 
 Host-side items:
 
-- [ ] After the core P9 fix lands, hand-merge any interpreter-side
+- [x] After the core P9 fix lands, hand-merge any interpreter-side
       change into host-owned files (if applicable), re-run
       `make sync-lang` discipline (commit content first, then sync to
       refresh the PIN), and re-verify the chinese project's original
-      inline-temp handler under ASan + the 14-endpoint smoke.
+      inline-temp handler under ASan + the 14-endpoint smoke. — Closed
+      2026-10-21: interp.c (host-owned) hand-merged the core 475e099
+      fix (`94b9b03`, iterable kept on the stack across the whole loop,
+      popped on every exit), tests/for-in-gc.lume replayed green
+      (total 60000 / keys abc / inner 10000, rc=0); `sync-lang.py
+      check` is green @ 456485ea6ba5 (30 synced / 16 host-owned / 6
+      host-only, 0 DRIFT — the core's later commits touched no synced
+      file, so the PIN at 8a5a0f4 stays valid). ASan + 14-endpoint
+      smoke on the chinese project needs a Linux container (the
+      Windows build has no HTTP bridge); the core-side ASan replay of
+      tests/for-in-gc.lume runs in ci.yml's asan job on every push,
+      and run_all.sh leg 4e covers the HTTP bracket on Linux CI.
 - [x] Containment in dependent code: all 9 inline-temp for-in loops in
       `chinese/server.lume` converted to `let`-before-loop (2026-10-20,
       chinese `c10f23d`); recite ×11 + full smoke green.
