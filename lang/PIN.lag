@@ -8,11 +8,11 @@ builtins_catalog.c 46
 builtins_fs.c 0
 builtins_http.c 4
 builtins_internal.h 45
-builtins_sql.c 438
+builtins_sql.c 447
 interp.c 9
 lume.h 21
-main.c 320
-typecheck.c 12
+main.c 328
+typecheck.c 21
 typecheck_expr.c 0
 typecheck_stmt.c 0
 value.c 26

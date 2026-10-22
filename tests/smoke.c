@@ -780,7 +780,7 @@ check("skills: index enumeration includes the scratch skill",
     reject("missing struct field",
           "type P = { x: int, y: int };\nfunc p(): P { return { x: 1 }; }",
           "missing field");
-    reject("call arity mismatch", "func f(a: int) { }\nf(1, 2);", "arguments");
+    reject("call arity mismatch", "func f(a: int) { }\nf(1, 2);", "argument(s)");
     reject("map key not in struct",
           "type P = { x: int };\nfunc p(): P { return { x: 1, z: 2 }; }",
           "no field");
