@@ -117,11 +117,15 @@ exits cleanly). Details and open hardening items live in:
 - `agent-httpd/TODO.md` — "P1 — 2026-10-22 memory-safety audit
   follow-ups": strict-CRLF mode (**done 2026-10-22**: default strict CRLF
   with `AGENTHTTPD_LENIENT_CRLF=1` escape hatch, `tests/test_crlf.c`,
-  wired into `make test-unit`), `make test-asan`,
+  wired into `make test-unit`), `make test-asan` (**done 2026-10-22**:
+  SAN_FLAGS parameterized, whole suite under ASan+LSan, keep-alive leg
+  under ASan; in the ubuntu-fuzz CI job),
   `tests/fuzz_http.c` (**done 2026-10-22**: chunked framing factored out
   into a pure `http_chunk.c` state machine + libFuzzer target with a
   regression main in `make test-unit`, `make fuzz-http` + CI
-  `ubuntu-fuzz` job), session prune/worker write-contract check.
+  `ubuntu-fuzz` job), session prune/worker write-contract check
+  (**done 2026-10-22**: tmp+rename atomic save verified, prune immune to
+  in-flight tmp files; `tests/test_session_prune.c`). P1 fully closed.
 - `lume-core/TODO.md` — "P11": failed-VM-rerun ASAN test
   (interp GC, done 2026-10-22 → `make vm-reuse-test`), ASAN/LSAN targets
   for codegen + LSP bridge.
