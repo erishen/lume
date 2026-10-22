@@ -104,3 +104,22 @@ for a future agent-httpd pass:
       sitting on `win-local-chain`.)
 
 
+
+## P12 (audit mirror) — 2026-10-22 php2shell-class memory-safety review
+
+Status: filed 2026-10-22 after the CVE-2026-109618/109619 review;
+audit pass over the lume-core (arena/rt/codegen/interp) and
+agent-httpd request path found **no** php2shell-shaped stale
+global state or use-after-free (request state is stack-local,
+shared globals are fixed-size or PTHREAD_PROCESS_SHARED, OOM
+exits cleanly). Details and open hardening items live in:
+
+- `agent-httpd/TODO.md` — "P1 — 2026-10-22 memory-safety audit
+  follow-ups": strict-CRLF mode, `make test-asan`, `tests/fuzz_http.c`
+  (libFuzzer over `parse_headers` + chunked decoder), session
+  prune/worker write-contract check.
+- `lume-core/TODO.md` — "P11": failed-VM-rerun ASAN test
+  (interp GC), ASAN/LSAN targets for codegen + LSP bridge.
+
+Host action: keep the two sub-repo TODOs in sync when picking up
+those items (they file into the sub-repos directly, not the host).

@@ -115,6 +115,14 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
     map_set(vm, m, "body",
             req->body ? make_string(vm, req->body, strlen(req->body)) : val_null());
 
+    /* Authorization has a dedicated parser field (http_parse.c writes it;
+     * it is NOT captured in extra_headers), so expose it explicitly for
+     * DSL-side PIN / Bearer checks. Empty -> null, like the other optional
+     * header fields above. */
+    map_set(vm, m, "authorization",
+            req->authorization[0] ? make_string_cstr(vm, req->authorization)
+                                  : val_null());
+
     /* Query string: req->path may carry "?a=1&b=2" (route matching already
      * strips it). Expose the raw string (no '?') plus a decoded params map:
      * '+' -> space, %XX -> byte, a segment without '=' gets an empty value,
