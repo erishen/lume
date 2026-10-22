@@ -126,9 +126,17 @@ exits cleanly). Details and open hardening items live in:
   `ubuntu-fuzz` job), session prune/worker write-contract check
   (**done 2026-10-22**: tmp+rename atomic save verified, prune immune to
   in-flight tmp files; `tests/test_session_prune.c`). P1 fully closed.
+  C robustness body-OOM (**done 2026-10-22**: unchecked body malloc now
+  answers 500 + close instead of crashing in form_field(); LD_PRELOAD
+  fault-injection regression `make test-oom` in the ubuntu-fuzz CI job;
+  audit confirms fastcgi/cgi request-path buffers already check).
 - `lume-core/TODO.md` — "P11": failed-VM-rerun ASAN test
   (interp GC, done 2026-10-22 → `make vm-reuse-test`), ASAN/LSAN targets
-  for codegen + LSP bridge.
+  for codegen + LSP bridge (**done 2026-10-22**: codegen covered by
+  `asan-compile` — `--compile-text` / `--compile-llvm` /
+  `native_backends.sh` under ASan+LSan; LSP doc-lifetime fixed —
+  didClose + exit cleanup in `bridge_lsp.c`, `tests/lsp_smoke.sh` wired
+  into `make asan` under LSan). P11 fully closed.
 
 Host action: keep the two sub-repo TODOs in sync when picking up
 those items (they file into the sub-repos directly, not the host).
