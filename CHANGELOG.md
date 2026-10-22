@@ -6,6 +6,28 @@ All notable changes to Lume are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Request map (`lang/bridge.c`): `origin` and `referer` fields, plus a
+  generic `headers` map built from agent-httpd's new unknown-header
+  capture (submodule `08884f0`) — node `serve.mts`-style Origin checks
+  are now portable.
+- Response envelope: optional `headers` map (RFC 9110 token names,
+  CR/LF-free values, enforced with a loud 500) appended as response
+  headers; a name matching a framework default security header
+  suppresses that default (case-insensitive), so per-route
+  `X-Frame-Options` / CSP overrides are expressible.
+- `server { csp = "..." }`: server-wide Content-Security-Policy
+  replacing the built-in default (CR/LF rejected at ingest). Backed by
+  `agenthttpd_config.csp` (submodule `08884f0`) and mirrored on the
+  lume-core native serve path, so both serve paths behave alike.
+
+### Changed
+
+- Outbound HTTP timeout cap 60s → 600s (`lang/builtins_http.c`,
+  mirrored from lume-core `80ac91a`); `opts.timeout` still tightens
+  per call. Slow upstreams (300s refresh proxies) no longer 502.
+
 ## [0.8.0] - 2026-10-22
 
 ### Added

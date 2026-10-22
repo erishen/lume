@@ -4,6 +4,7 @@
 #include "llm.h"
 #include <stdlib.h> /* getenv(LUME_BIND) */
 #include <string.h> /* strchr/memchr/strlen */
+#include <ctype.h>  /* isalnum (envelope header-name validation) */
 
 /* from agent-httpd util.c (internal.h) — URL-decode a query segment */
 extern void url_decode(char *dst, const char *src);
@@ -100,6 +101,10 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
                 : val_null());
     map_set(vm, m, "host", req->host[0] ? make_string_cstr(vm, req->host)
                                         : val_null());
+    map_set(vm, m, "origin",
+            req->origin[0] ? make_string_cstr(vm, req->origin) : val_null());
+    map_set(vm, m, "referer",
+            req->referer[0] ? make_string_cstr(vm, req->referer) : val_null());
     map_set(vm, m, "content_type",
             req->content_type[0] ? make_string_cstr(vm, req->content_type)
                                  : val_null());
@@ -144,6 +149,42 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
         map_set(vm, m, "query", val_null());
     }
     map_set(vm, m, "query_params", val_obj((Obj *)pm));
+    vm_pop(vm);
+
+    /* Generic request headers. The framework parser keeps every header it
+     * has no dedicated field for verbatim ("Name: value\r\n" lines, 4KB
+     * cap); split them here so scripts can do Origin/CSRF-style checks
+     * against any header. Name: trimmed, value: leading spaces skipped,
+     * both as-is otherwise (header values are opaque bytes). Absent when
+     * the request carried no unknown headers. */
+    Obj *hm = AS_OBJ(make_map(vm));
+    vm_push(vm, val_obj((Obj *)hm)); /* root while filling */
+    {
+        char kbuf[256];
+        const char *p = req->extra_headers;
+        while (p && *p) {
+            const char *eol = strchr(p, '\n');
+            const char *colon = memchr(p, ':', eol ? (size_t)(eol - p) : strlen(p));
+            if (colon) {
+                const char *ks = p, *ke = colon;
+                while (ks < ke && (*ks == ' ' || *ks == '\t')) ks++;
+                while (ke > ks && (ke[-1] == ' ' || ke[-1] == '\t' || ke[-1] == '\r')) ke--;
+                const char *vs = colon + 1;
+                const char *ve = eol ? eol : p + strlen(p);
+                while (vs < ve && (*vs == ' ' || *vs == '\t')) vs++;
+                while (ve > vs && (ve[-1] == ' ' || ve[-1] == '\t' || ve[-1] == '\r')) ve--;
+                if (ke > ks && (size_t)(ke - ks) < sizeof kbuf) {
+                    memcpy(kbuf, ks, (size_t)(ke - ks));
+                    kbuf[ke - ks] = '\0';
+                    map_set(vm, hm, kbuf,
+                            make_string(vm, vs, (size_t)(ve - vs)));
+                }
+            }
+            if (!eol) break;
+            p = eol + 1;
+        }
+    }
+    map_set(vm, m, "headers", val_obj((Obj *)hm));
     vm_pop(vm);
 
     /* Path params from dynamic route segments (":name"), captured by the
@@ -224,6 +265,65 @@ static char *value_to_json(VM *vm, Value v, size_t *len) {
     return out;
 }
 
+/* Fill res->extra_headers from the envelope `headers` map. Validation is
+ * loud (500, like the other envelope fields): a name must be a header
+ * token, a value must not carry CR/LF (header injection). The lines are
+ * appended verbatim as "Name: value\r\n"; the framework serializer
+ * suppresses a default security header whose name appears here, so
+ * X-Frame-Options / CSP / Referrer-Policy are overridable per route.
+ * Returns false on the first invalid entry (error already set). */
+static bool envelope_headers(VM *vm, Obj *m, HttpResponse *res) {
+    int found = 0;
+    Value hv = map_get(vm, m, "headers", &found);
+    if (!found || IS_NULL(hv)) return true;
+    if (!IS_OBJ(hv) || AS_OBJ(hv)->type != OBJ_MAP) {
+        vm_set_error(vm, "route result field 'headers' must be a map");
+        return false;
+    }
+    Obj *hm = AS_OBJ(hv);
+    size_t used = 0;
+    for (int i = 0; i < hm->as.map.count; i++) {
+        const char *name = hm->as.map.keys[i];
+        Value val = hm->as.map.vals[i];
+        if (!IS_OBJ(val) || AS_OBJ(val)->type != OBJ_STRING) {
+            vm_set_error(vm, "route header '%s' must be a string", name);
+            return false;
+        }
+        const char *value = obj_string(AS_OBJ(val));
+        /* name: header token = letters/digits/!#$%&'*+-.^_`|~ (RFC 9110
+         * 5.6.2); being strict here costs nothing and blocks header
+         * splitting at the only place scripts can produce one. */
+        if (!name[0]) {
+            vm_set_error(vm, "route header name must not be empty");
+            return false;
+        }
+        for (const char *p = name; *p; p++) {
+            if (!(isalnum((unsigned char)*p) || strchr("!#$%&'*+-.^_`|~", *p))) {
+                vm_set_error(vm, "route header name '%s' has invalid characters", name);
+                return false;
+            }
+        }
+        if (strpbrk(value, "\r\n")) {
+            vm_set_error(vm, "route header '%s' value must not contain CR/LF", name);
+            return false;
+        }
+        size_t nl = strlen(name), vl = strlen(value);
+        if (used + nl + vl + 4 > sizeof(res->extra_headers)) {
+            vm_set_error(vm, "route headers exceed the %d-byte response budget",
+                         (int)sizeof(res->extra_headers));
+            return false;
+        }
+        memcpy(res->extra_headers + used, name, nl); used += nl;
+        res->extra_headers[used++] = ':';
+        res->extra_headers[used++] = ' ';
+        memcpy(res->extra_headers + used, value, vl); used += vl;
+        res->extra_headers[used++] = '\r';
+        res->extra_headers[used++] = '\n';
+        res->extra_headers[used] = '\0';
+    }
+    return true;
+}
+
 /* Translate a handler return value into an HttpResponse. Ergonomics:
  *   - a bare string            -> 200 text/html
  *   - { status?, type?, body } -> envelope; body auto-JSON if it isn't a string
@@ -281,6 +381,7 @@ static void result_to_response(VM *vm, Value result, HttpResponse *res,
              * shipped uses that shape, but it is the trap to watch for, and it
              * fails open (no header) rather than loudly. */
             if (!map_str(vm, m, "cache_control", &explicit_cc, NULL)) goto fail;
+            if (!envelope_headers(vm, m, res)) goto fail;
             if (IS_OBJ(bv) && AS_OBJ(bv)->type == OBJ_STRING) {
                 body = obj_string(AS_OBJ(bv));
                 body_len = obj_string_len(AS_OBJ(bv));
@@ -660,6 +761,7 @@ void bridge_run(VM *vm) {
             {"fcgi_socket", &cfg.fcgi_socket},
             {"react_socket", &cfg.react_socket},
             {"react_prefix", &cfg.react_prefix},
+            {"csp", &cfg.csp},
         };
         for (size_t i = 0; i < sizeof(strs) / sizeof(strs[0]); i++) {
             v = map_get(vm, m, strs[i].key, &found);

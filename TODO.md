@@ -52,33 +52,39 @@ service (2026-10-21, life-dash `848cea5`, 165MB → 21.4MB). Four
 framework limits were accepted as degradations; each is tracked here
 for a future agent-httpd pass:
 
-- [ ] **req map exposes no generic headers / origin**: the request map in
-      `lang/bridge.c` carries method/path/host/content_type/user_agent/
-      body/query_params/params, but no `headers` field — Origin-based
-      cross-site checks (node `serve.mts`'s `isLocalOrigin`) cannot be
-      ported 1:1. life-dash now relies on loopback bind (compose
-      `127.0.0.1`) + the framework emitting no CORS headers, so browser
-      SOP blocks cross-site reads anyway.
-- [ ] **route responses cannot set custom security headers**: the DSL
-      envelope supports `status`/`type`/`body`/`cache_control` only —
-      `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`
-      (all set by the node server) are unreachable from a script.
-- [ ] **static serving has no gzip**: `agent-httpd/src/http/static.c`
-      serves assets uncompressed — the >1KB gzip path of node
-      `serve.mts` ships raw (life-dash SPA JS ~396KB, ~142KB gzipped).
-- [ ] **outbound HTTP timeout caps at 60s**: `HTTP_MAX_TIMEOUT_MS`
-      (`lang/builtins_http.c`) is 60000ms — life-dash's
-      `/__devstats/refresh` reverse proxy to the host trigger needed
-      300s; refreshes over 60s now surface a 502. Consider raising the
-      cap or making it per-call configurable.
-- [ ] **server responses hardcode CSP `default-src 'self'`**: `bridge_serve.c`
-      `send_resp()` emits `Content-Security-Policy: default-src 'self'` +
-      `X-Frame-Options: DENY` on every response (no per-app config).
-      Cross-origin iframes are blocked — life-dash could not embed the
-      shared browser-desk noVNC desktop (127.0.0.1:16082) and had to switch
-      to open-in-new-tab. Source comment already flags a future
-      `server { csp = ... }` option to relax it per-app (e.g. allow
-      `frame-src` for a configured noVNC origin).
+- [x] **req map exposes no generic headers / origin**: CLOSED 2026-10-22.
+      `request_to_value` now carries `origin` and `referer` (both were
+      already dedicated HttpRequest fields), plus a generic `headers` map
+      built from the framework's new unknown-header capture
+      (agent-httpd `08884f0`: headers without a dedicated field are
+      retained verbatim in a bounded 4KB buffer). Origin-based cross-site
+      checks (node `serve.mts`'s `isLocalOrigin`) are now portable 1:1.
+- [x] **route responses cannot set custom security headers**: CLOSED
+      2026-10-22. The DSL envelope grows a `headers` map (string values
+      only; name validated as an RFC 9110 token, CR/LF rejected loudly
+      with a 500) serialized into `HttpResponse.extra_headers`, which
+      agent-httpd emits before the security block — and a default
+      security header whose name the handler set is suppressed
+      (case-insensitive), so `X-Frame-Options: SAMEORIGIN` overrides
+      instead of doubling (unit-tested in agent-httpd
+      `tests/test_resp_headers.c`).
+- [x] **static serving has no gzip**: already stale when inventoried —
+      `static.c` has full gzip-sibling negotiation (`.gz` sidecar served
+      with `Content-Encoding: gzip`, RFC 7231 Accept-Encoding q-values,
+      shared weak ETag, Range refused on the gzipped representation).
+      No code change needed; life-dash ships `.gz` siblings at build.
+- [x] **outbound HTTP timeout caps at 60s**: CLOSED 2026-10-22. The cap
+      moved 60000ms → 600000ms in both copies (lume-core `80ac91a` +
+      this tree's `lang/builtins_http.c`); `opts.timeout` still tightens
+      per call. life-dash's 300s reverse proxy fits again.
+- [x] **server responses hardcode CSP `default-src 'self'`**: CLOSED
+      2026-10-22 on both serve paths. `server { csp = "..."; }` (host
+      `bridge.c` → `agenthttpd_config.csp`; lume-core native serve
+      `bridge_serve.c` reads the same DSL field) replaces the default
+      policy, CR/LF rejected at ingest; a per-response envelope
+      `headers` CSP entry still wins over the server-wide one. Verified
+      end-to-end: `frame-ancestors http://10.0.0.1:16082` round-trips,
+      so life-dash can embed the noVNC desktop again.
 - [x] **agent-httpd submodule pinned before react_prefix existed**: 
       `lang/bridge.c` reads `cfg.react_prefix` (configurable SSR relay
       prefix — history `server.lume` uses `react_prefix = "/"`) but the
