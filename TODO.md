@@ -71,4 +71,12 @@ for a future agent-httpd pass:
       `/__devstats/refresh` reverse proxy to the host trigger needed
       300s; refreshes over 60s now surface a 502. Consider raising the
       cap or making it per-call configurable.
+- [ ] **server responses hardcode CSP `default-src 'self'`**: `bridge_serve.c`
+      `send_resp()` emits `Content-Security-Policy: default-src 'self'` +
+      `X-Frame-Options: DENY` on every response (no per-app config).
+      Cross-origin iframes are blocked — life-dash could not embed the
+      shared browser-desk noVNC desktop (127.0.0.1:16082) and had to switch
+      to open-in-new-tab. Source comment already flags a future
+      `server { csp = ... }` option to relax it per-app (e.g. allow
+      `frame-src` for a configured noVNC origin).
 
