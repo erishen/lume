@@ -566,6 +566,21 @@ treecheck:
 	@./scripts/check-tree-privacy.sh
 	@echo "==> treecheck passed: no build-machine path tracked in HEAD"
 
+# --- 全对象库隐私闸门 (make deepcheck) --------------------------------------
+# treecheck 只看 HEAD 面; deepcheck 走 batch-all-objects 扫整个对象库 ——
+# 连游离 blob(gc 前)与 git add 未提交的暂存 blob 一起拦, 这是 2026-10-21
+# 审计(PRIVACY-AUDIT-2026-10-21.md §5/§10)证实的第二个泄漏出口: 游离对象
+# 不被 push, 但整份 .git 被拷贝/打包时会一起走。
+# 2026-10-22 已 gc 清掉全部 17 个脏游离 blob(agent-httpd 16 + 本仓 1, 内容
+# 隔离在 ../privacy-quarantine-2026-10-22/)。现存 4 个命中是 main 历史
+# 可达的 3 处已知泄漏(6355094 rea-mcp-wrapper.sh / 4822e9f
+# serena-Dockerfile+gitignore, §4), 只能靠 force-push 历史重写清除 ——
+# 重写拍板落地前, 本目标预期为红; 故不并入 test 聚合。
+deepcheck:
+	@chmod +x scripts/check-tree-privacy.sh
+	@./scripts/check-tree-privacy.sh --history
+	@echo "==> deepcheck passed: no build-machine path in the whole object db"
+
 clean:
 	rm -rf build bin build-asan
 
