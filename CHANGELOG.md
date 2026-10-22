@@ -6,6 +6,51 @@ All notable changes to Lume are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-22
+
+### Added
+
+- Compile-time builtin arity contract hand-merged from core (`1a2aa80` +
+  `172fe01` current tree): the `LUME_BUILTIN_SIG` signature table
+  (exact / variadic / min-max) validates builtin call shapes at compile
+  time — `bool`/`json`/`stringify` are 1-arg, the `str/int/float(map, key)`
+  three-argument accessor forms included. `type_func` split into
+  `type_func_arity`; the host smoke suite covers the exact/variadic/
+  mismatch rejections.
+- `make deepcheck` privacy gate (`check-tree-privacy.sh --history`):
+  batch-all-objects blob set vs `rev-list --objects --all` reachability —
+  unreachable (loose) blobs must be zero, HEAD must survive. Not part of
+  the `make test` aggregate; run on demand before releases.
+- SSR relay `react_prefix` (`87e284f`): configurable relay prefix +
+  reserved-path exclusion, closing the `bridge.c` config-field contract
+  with agent-httpd `6bab252` — a fresh `clone --recurse-submodules` now
+  reproduces the React SSR relay end to end.
+
+### Fixed
+
+- P9 for-in inline-temp GC root loss, hand-merged from core `475e099`
+  (`effa2b2`): an inline iterable was popped off the VM stack before the
+  loop body ran, so GC only rooted the stack below it and any body
+  allocation past the 2 MiB threshold collected the iterable mid-iteration
+  (use-after-free — the `chinese/server.lume` crash chain). The iterable
+  now stays on the stack across the whole loop. Regression legs:
+  `tests/for-in-gc.lume` plus `examples/minimal-server-gc.lume` with
+  `run_all.sh` 4e (HTTP bracket side asserts `1799970000`); the HTTP leg
+  runs on Linux CI (Windows builds have no HTTP bridge).
+
+### Changed
+
+- `lang/` PIN bumped to lume-core `5bd5f04` (`v0.9.3-53`); statistical
+  builtins hand-merged (`dfdacf0`); `value.c` pinned host-owned with
+  upstream lag tracked (core's OBJ_SQLTX sql-tx mark+release must not
+  overwrite the host's sql surface — `fb9bff1`); abac `respond()` unified
+  to an anonymous 3-field map so native backends compile (`2b3b624`).
+- agent-httpd submodule gitlink bumped `b998e7f` → `23b1c4e` (react_prefix
+  /SSR relay on main, remote-reachable; clone verified).
+- `LUME_VERSION` bumped `0.7.3` → `0.8.0` (Makefile line 29, single source
+  for `lume --version`); the machine-readable version now self-reports
+  `0.8.0`.
+
 ## [0.7.3] - 2026-10-19
 
 ### Changed
