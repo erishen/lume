@@ -19,7 +19,7 @@ jobs:
         run: make treecheck
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # ubuntu-latest 自 2026-10-19 迁移 Ubuntu 26: test job 连续 6+ 笔在 "all tests passed" 后死于 make "wait: No child processes"(143), 新镜像 make/bash 组合的 jobserver 竞态; 钉回已知良好镜像
     steps:
       - uses: actions/checkout@v5
         with:
@@ -32,12 +32,7 @@ jobs:
         run: npm install -g pnpm@9.15.9
       - name: Build + full test suite
         working-directory: lume
-        run: |
-          # 并行只用于构建; run_all.sh 起停多个 HTTP 服务子进程, 套 GNU Make 4.3
-          # 在 -j 收割 job 状态时的 "wait: No child processes" 抖动 (runner 上
-          # 反复复现: 全部测试通过后 make 仍以 143 退出)。套件本身秒级, 串行跑。
-          make -j4 all ui tests/smoke-bin tests/tools-bin
-          make test
+        run: make -j4 test
       - name: Upload server log on failure
         if: failure()
         uses: actions/upload-artifact@v4
