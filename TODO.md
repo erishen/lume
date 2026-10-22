@@ -79,7 +79,7 @@ for a future agent-httpd pass:
       to open-in-new-tab. Source comment already flags a future
       `server { csp = ... }` option to relax it per-app (e.g. allow
       `frame-src` for a configured noVNC origin).
-- [ ] **agent-httpd submodule pinned before react_prefix existed**: 
+- [x] **agent-httpd submodule pinned before react_prefix existed**: 
       `lang/bridge.c` reads `cfg.react_prefix` (configurable SSR relay
       prefix — history `server.lume` uses `react_prefix = "/"`) but the
       submodule gitlink pointed at 195cfaf, whose `agenthttpd_config`
@@ -87,10 +87,14 @@ for a future agent-httpd pass:
       (`'agenthttpd_config' has no member named 'react_prefix'`). Fixed
       locally by checking out `win-local-chain` (47320af, includes
       0b43aa6) and rebuilding — verified SSR relay works (home + deep
-      `/dynasty/:id` paths return 200). **gitlink still uncommitted**
-      (`M agent-httpd`) because 0b43aa6/47320af are not on
-      agent-httpd's origin/main. To make SSR relay reproducible on other
-      machines / CI: cherry-pick or push the react_prefix commit to
-      agent-httpd main, then commit the updated submodule gitlink.
+      `/dynasty/:id` paths return 200). **Closed 2026-10-22**: the
+      react_prefix commits were cherry-picked onto agent-httpd main and
+      pushed (`b998e7f..23b1c4e`); the gitlink was bumped and committed
+      (`7e73e91`), host `make all` compiles against it, and a fresh
+      `clone --recurse-submodules` checks out 23b1c4e with the field
+      present. SSR relay is now reproducible off-machine. (Note: the
+      interim gitlink at b998e7f was briefly uncompilable for the host —
+      the submodule working copy had been masking the missing field by
+      sitting on `win-local-chain`.)
 
 
