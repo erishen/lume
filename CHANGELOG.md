@@ -28,6 +28,17 @@ All notable changes to Lume are documented here. The format follows
   mirrored from lume-core `80ac91a`); `opts.timeout` still tightens
   per call. Slow upstreams (300s refresh proxies) no longer 502.
 
+### Fixed
+
+- Hand-merged from lume-core: cast accessors answer in the cast's own
+  type (`lang/builtins.c` — the fallback default converts over the same
+  bridge the direct cast builds, so `int(m, "k", true)` answers `1`, not
+  `true`), and `/` on two integers types as float in the checker
+  (`lang/typecheck_expr.c`) — the interpreter's long-standing behavior
+  the static type used to contradict. Closes the five-run CI red on
+  lume-core `ci.yml` (accessor compile refusal + the integer-division
+  bit-pattern print it was hiding).
+
 ## [0.8.0] - 2026-10-22
 
 ### Added
