@@ -255,7 +255,12 @@ for _ in $(seq 1 200); do
 done
 [ "$(curl -s -m 8 http://127.0.0.1:$MIN_GC_PORT/gc)" = "minimal gc ok: 1799970000" ] || fail "minimal-server-gc: route answer"
 pass "minimal-server-gc: inline-temp for-in over HTTP"
-kill $MINGC_PID 2>/dev/null; MINGC_PID=0
+kill $MINGC_PID 2>/dev/null; MINGC_PID=
+# 置空而非置 0: 末尾 EXIT trap 会再 kill $MINGC_PID —— `kill 0` 是向整个
+# 进程组发 SIGTERM, 会把 run_all.sh 自身、外层 recipe shell 和 make 一起
+# 打死(CI 实证: "all tests passed" 后 recipe Terminated / make wait ECHILD,
+# step 以 143 退出; 自 d3bc42f 引入 min-gc 段起必现)。空变量在无引号展开下
+# 整个参数消失, kill 只剩 usage 错误且已被 2>/dev/null 吞掉。
 pkill -f "[b]in/lume /tmp/lume-min-gc-test" 2>/dev/null || true
 
 echo
