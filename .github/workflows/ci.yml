@@ -54,13 +54,15 @@ jobs:
           make -j4 asan
 
   # The pin in lang/PIN says which lume-core commit lang/ was copied from.
-  # Full drift detection needs a lume-core checkout, which the runner does not
-  # have (and erishen/lume-core is an empty repo, so there is nothing to
-  # clone); check-sync therefore always verifies the committed md5 baseline in
-  # lang/PIN.manifest.  That is the leg that fails here - a synced file
-  # edited by hand without a `make sync-lang` bump.  When lume-core is
-  # published and this tree gets cloned as a sibling, check-sync silently
-  # upgrades to comparing against the pinned commit too.
+  # Two legs guard it:
+  #   - committed md5 baseline (lang/PIN.manifest): fails when a synced
+  #     file is edited by hand without a `make sync-lang` bump;
+  #   - real drift check against a sibling lume-core checkout: fails when
+  #     a synced file (loader.c etc.) was changed upstream but never pulled
+  #     into lang/ — exactly the loader.c drift this job used to miss while
+  #     erishen/lume-core was an empty repo and only the md5 leg could run.
+  # sync-lang.py resolves core_dir as ../lume-core, so the core checkout
+  # must land next to the host checkout in the runner workspace.
   check-sync:
     runs-on: ubuntu-latest
     steps:
@@ -68,7 +70,14 @@ jobs:
         with:
           path: lume
           submodules: recursive
-      - name: Verify the pin
+      - name: Checkout lume-core as a sibling (real drift detection)
+        uses: actions/checkout@v5
+        with:
+          repository: erishen/lume-core
+          path: lume-core
+      - name: Verify the md5 baseline
         working-directory: lume
-        run: |
-          make check-sync
+        run: make check-sync
+      - name: Verify the pin against the pinned core commit
+        working-directory: lume
+        run: python3 scripts/sync-lang.py check
