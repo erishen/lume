@@ -30,6 +30,18 @@ All notable changes to Lume are documented here. The format follows
 
 ### Fixed
 
+- `lang/` synced to lume-core `v0.10.1` (`95abfbb`): `lang/loader.c` gains
+  the per-run latch reset (vm->error / error_msg / stack_count cleared at
+  `loader_run` entry) — an embedded host calling `loader_run` twice on one
+  VM handle used to silently no-op the second exec after an aborted one.
+  PIN bumped `v0.9.3-53` → `v0.10.1`.
+- agent-httpd gitlink bumped to `3ff62f9` (ubuntu-smoke CI job).
+- CI: `check-sync` upgraded to real drift detection — the job now checks
+  out `erishen/lume-core` next to the host checkout and runs
+  `sync-lang.py check` against the pinned commit, catching upstream
+  changes to synced files (the loader.c drift above) that the committed-md5
+  leg alone could not.
+
 - Hand-merged from lume-core: cast accessors answer in the cast's own
   type (`lang/builtins.c` — the fallback default converts over the same
   bridge the direct cast builds, so `int(m, "k", true)` answers `1`, not
