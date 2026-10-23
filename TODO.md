@@ -140,3 +140,30 @@ exits cleanly). Details and open hardening items live in:
 
 Host action: keep the two sub-repo TODOs in sync when picking up
 those items (they file into the sub-repos directly, not the host).
+
+## Direction 2 (2026-10-23) — Windows smoke-bin portability + tre UBSan noise
+
+Closed on this repo:
+
+- [x] `tests/smoke.c` now builds and runs on Windows/mingw
+      (`make tests/smoke-bin`): agent-httpd/sqlite/http slices gated
+      `#ifndef _WIN32` (Windows build has no agent-httpd/sqlite layer
+      and no outbound `http_*`), `mkdir_p`/`rmrf` replace the
+      `rm -rf && mkdir -p` shell calls (mingw `system()` is cmd.exe),
+      and the 0600 permission assertions only check existence on
+      Windows (CRT `stat` maps mode bits differently). Result on this
+      machine: **98 tests, 0 failed**.
+- [x] `lang/loader.c` (mirrored from core): on Windows `_fullpath()`
+      only normalizes — it does not require the path to exist, so a
+      missing `import` reported `cannot read …` instead of the
+      `cannot resolve import` every other platform gives. Added an
+      `access(canon, F_OK)` mirror of `realpath` semantics in the
+      `_WIN32` branch.
+
+Known Windows-local limits (Linux CI is authoritative; not treated as
+bugs): `make asan`'s `tests/smoke-bin-asan` leg OOMs inside the
+allocation-heavy tests (Windows ASan runtime shadow-map exhaustion,
+"internal allocator is out of memory trying to allocate 0x70 bytes",
+not parameter-fixable) and `tests/lsp_smoke.sh` cannot fork the ASan
+binary under MSYS2. The `asan-compile` emitter gate, `--check` over
+examples, `lang-basics` and the interp leg are all green on Windows.

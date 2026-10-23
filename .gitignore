@@ -9,12 +9,16 @@ bin/
 *.d
 build-asan/
 tests/smoke-bin
+tests/smoke-bin.exe
 tests/smoke-bin.dSYM/
 tests/tools-bin
+tests/tools-bin.exe
 tests/tools-bin.dSYM/
 tests/smoke-bin-asan
+tests/smoke-bin-asan.exe
 tests/smoke-bin-asan.dSYM/
 tests/tools-bin-asan
+tests/tools-bin-asan.exe
 tests/tools-bin-asan.dSYM/
 
 # --- 前端依赖与产物 ---------------------------------------------------------

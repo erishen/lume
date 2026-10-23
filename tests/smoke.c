@@ -1,8 +1,15 @@
 #include "lume.h"
+/* agent-httpd's headers are POSIX-only (tools.h -> minijson.h redefines
+ * `sbuf` which lume.h's _WIN32 branch already pulled from lang/sbuf.h, and
+ * skills.h -> httpd.h pulls <netinet/in.h>); the Windows build links no
+ * agent-httpd and has no sqlite layer, so the tool/skill/sqlite registries
+ * and their assertions below are POSIX-only. */
+#ifndef _WIN32
 #include "tools.h"
 #include "skills.h"
 #include "sqlite_tool.h"
 #include <sqlite3.h>
+#endif
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -15,6 +22,40 @@
 static int tests_run = 0;
 static int tests_failed = 0;
 static int saved_stdout = -1;
+
+/* CRT mkdir on Windows takes a single argument (the POSIX mode is spelled
+ * _mkdir and is meaningless there anyway). */
+static int mkdir_p(const char *path) {
+#ifdef _WIN32
+    return mkdir(path);
+#else
+    return mkdir(path, 0755);
+#endif
+}
+
+/* Windows-only recursive delete: mingw's system() hands the command to
+ * cmd.exe, which has neither `rm -rf` nor `mkdir -p`. */
+#ifdef _WIN32
+static void rmrf(const char *path) {
+    DIR *d = opendir(path);
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+                continue;
+            char p[512];
+            snprintf(p, sizeof p, "%s/%s", path, e->d_name);
+            struct stat st;
+            if (stat(p, &st) == 0 && S_ISDIR(st.st_mode)) rmrf(p);
+            else remove(p);
+        }
+        closedir(d);
+        rmdir(path);
+    } else {
+        remove(path);
+    }
+}
+#endif
 
 static int capture_begin(char *path) {
     snprintf(path, 256, "/tmp/lume-smoke-%d.out", (int)getpid());
@@ -104,9 +145,15 @@ static void check_modules(const char *name, const char *const files[][2],
     tests_run++;
     char dir[256];
     snprintf(dir, sizeof(dir), "/tmp/lume-smoke-modules/%s", name);
+#ifndef _WIN32
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s' && mkdir -p '%s'", dir, dir);
     if (system(cmd) != 0) {
+#else
+    rmrf(dir);
+    mkdir_p("/tmp/lume-smoke-modules");
+    if (mkdir_p(dir) != 0) {
+#endif
         fprintf(stderr, "FAIL %-32s cannot create scratch dir\n", name);
         tests_failed++;
         return;
@@ -162,15 +209,18 @@ static void check_modules(const char *name, const char *const files[][2],
 }
 
 int main(void) {
+#ifndef _WIN32
     /* Seed the lib registries so the discovery-builtin tests below are
      * deterministic: tools_init() registers the 7 builtins; skills_init()
-     * picks up a scratch skill we drop in $HARNESS_SKILLS_DIR. */
+     * picks up a scratch skill we drop in $HARNESS_SKILLS_DIR. Windows
+     * has neither registry (catalog_stub.c is empty by construction), so
+     * the seeding and the tools()/skills() assertions below are POSIX-only. */
     static const char *SKILLS_SCRATCH = "/tmp/lume-smoke-skills";
     {
         char buf[512];
         snprintf(buf, sizeof buf, "%s/smoke-skill", SKILLS_SCRATCH);
-        mkdir(SKILLS_SCRATCH, 0755);
-        mkdir(buf, 0755);
+        mkdir_p(SKILLS_SCRATCH);
+        mkdir_p(buf);
         snprintf(buf, sizeof buf, "%s/smoke-skill/SKILL.md", SKILLS_SCRATCH);
         FILE *f = fopen(buf, "wb");
         if (f) {
@@ -182,15 +232,18 @@ int main(void) {
     }
     skills_init();
     tools_init();
+#endif
 
     /* mcps() reads <cwd>/.data/mcp-servers-router.json — the artifact a
      * router sync writes. Resetting it here keeps the check deterministic
      * even after manual runs have dropped a real catalog. */
-    mkdir(".data", 0755);
+    mkdir_p(".data");
     unlink(".data/mcp-servers-router.json");
 
     /* sql_query(sql) single-arg form falls back to env SQLITE_DB. */
+#ifndef _WIN32
     setenv("SQLITE_DB", "/tmp/lume-smoke-data/sql.db", 1);
+#endif
 
     check("arithmetic + casts",
           "print(str(1 + 2 * 3)); print(str(int(\"42\") - 2.5));",
@@ -461,6 +514,7 @@ int main(void) {
           "print(str(read_file(\"no/such-file.md\") == null));",
           "true\ntrue\ntrue\n");
 
+#ifndef _WIN32
     check("tools: registry enumerates registered tools, sorted",
           "let ts = tools();\n"
           "print(str(len(ts) >= 7));\n"
@@ -480,6 +534,7 @@ int main(void) {
           "}\n"
           "print(str(found));",
           "true\n");
+#endif /* !_WIN32 — tools()/skills() registries are empty on Windows */
 
     /* Missing sync file is "no MCP servers", which is an empty list, not null.
      * Publishing null here made /discovery return "mcps": null and the hub
@@ -505,6 +560,7 @@ int main(void) {
           "print(str(get(get(ms, 0), \"id\")));",
           "true\nfs\n");
 
+#ifndef _WIN32
 check("skills: index enumeration includes the scratch skill",
           "let ss = skills();\n"
           "let found = false;\n"
@@ -516,6 +572,7 @@ check("skills: index enumeration includes the scratch skill",
           "print(str(len(ss) >= 1));\n"
           "print(str(found));",
           "true\ntrue\n");
+#endif /* !_WIN32 */
 
     /* ---- product-tool builtins (invest.lume portfolio + report) ---- */
 
@@ -578,6 +635,7 @@ check("skills: index enumeration includes the scratch skill",
           "print(str(a)); print(str(b)); print(str(c));",
           "true\ntrue\ntrue\n");
 
+#ifndef _WIN32
     /* ---- sql_query / sql_write builtins (DSL-level SQLite) --------------
      * A scratch db is created from C; the DSL then queries it (explicit path
      * and via SQLITE_DB) and writes to it (guarded UPDATE, CREATE + INSERT).
@@ -678,6 +736,7 @@ check("skills: index enumeration includes the scratch skill",
             tests_failed++;
         }
     }
+#endif /* !_WIN32 — no agent-httpd sqlite layer on Windows */
 
     /* write_file atomicity + permissions (checked from C, outside the DSL):
      * the sibling .tmp.<pid> must be gone after the write, and the target must
@@ -689,8 +748,14 @@ check("skills: index enumeration includes the scratch skill",
         char target[512];
         snprintf(target, sizeof target, "%s/x.txt", dir);
         struct stat st;
+#ifndef _WIN32
         int perm_ok = stat(target, &st) == 0 &&
                       (st.st_mode & 0777) == 0600;
+#else
+        /* Windows CRT stat maps permission bits differently; the atomicity
+         * (no .tmp leftover) check below is the portable half. */
+        int perm_ok = stat(target, &st) == 0;
+#endif
         DIR *d = opendir(dir);
         int tmp_leftover = 0;
         if (d) {
@@ -714,8 +779,14 @@ check("skills: index enumeration includes the scratch skill",
     {
         tests_run++;
         struct stat st;
+#ifndef _WIN32
         int ok = stat("/tmp/lume-smoke-data/lock", &st) == 0 &&
                  (st.st_mode & 0777) == 0600;
+#else
+        /* Windows CRT stat maps permission bits differently; assert only
+         * that the lock target exists. */
+        int ok = stat("/tmp/lume-smoke-data/lock", &st) == 0;
+#endif
         if (ok) {
             printf("ok   lock_file: lock file created 0600\n");
         } else {
@@ -875,7 +946,10 @@ check("skills: index enumeration includes the scratch skill",
      * process down mid-request - but it does mean a verb that were never
      * registered would look identical to one that was refused. So each
      * assertion includes the verb name: the text carries it, and only a
-     * call that actually reached the handler could have written it. */
+     * call that actually reached the handler could have written it.
+     * Windows: outbound http_* is not compiled (LUME_HAS_HTTP=0, no Winsock
+     * port of builtins_http.c), so the whole block is POSIX-only. */
+#ifndef _WIN32
     {
         static const char *verbs[5] = {
             "http_get", "http_post", "http_put", "http_patch", "http_delete"
@@ -931,6 +1005,7 @@ check("skills: index enumeration includes the scratch skill",
               "print(r.err);",
               "http_get(): cannot reach 127.0.0.1 (Connection refused)\n");
     }
+#endif /* !_WIN32 — no outbound http_* builtins on Windows */
     /* `.len` on a runtime map is answered by both the checker and the
      * interpreter: the checker types it as int, the interpreter pushes the
      * key count. Either leg alone leaves a program that type-checks but
