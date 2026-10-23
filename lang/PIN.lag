@@ -6,10 +6,10 @@ builtins.c 40
 builtins.h 6
 builtins_catalog.c 46
 builtins_fs.c 0
-builtins_http.c 4
+builtins_http.c 5
 builtins_internal.h 45
 builtins_sql.c 447
-interp.c 9
+interp.c 21
 lume.h 21
 main.c 328
 typecheck.c 21

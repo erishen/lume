@@ -1,3 +1,22 @@
+/* ============================================================================
+ * interp.c — Table of Contents  (HOST-OWNED variant of lume-core/src/interp.c)
+ *
+ * This file is hand-merged from lume-core/src/interp.c, NOT copied by
+ * `make sync-lang` (it lives in lang/PIN's host_owned list). Host-specific
+ * deltas vs core: a `#include "minijson.h"` block near the top, the P9 for-in
+ * GC fix is hand-merged, and the `sql_tx_*` transaction builtins are removed.
+ * Navigation anchors are the dashed section banners already in the file:
+ *
+ *  1. VM plumbing .......................... L54
+ *  2. string literal unescaping ............ L83
+ *  3. function call engine ................. L97
+ *  4. expressions (eval_expr dispatch) ..... L290
+ *  5. expression cases (one fn each) ....... L590
+ *  6. statements (exec_statement dispatch) . L913
+ *  7. statement cases (one fn each) ........ L1135
+ *  8. VM setup & top-level execution ....... L1376
+ * ========================================================================== */
+
 #include "lume.h"
 #include "builtins.h"
 #include <math.h>
