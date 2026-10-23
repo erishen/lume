@@ -7,7 +7,7 @@ builtins_hof.c 6eaac3ed7eb2d23806ed1ac7f15b8c0e
 builtins_math.c 8d976fb86a54b61138fc6b94548ca1d9
 builtins_str.c d96f5834e11b2b15f3f2150d6152cfc1
 lexer.c c3236cb5a9f624a9a381496d0d69a0e3
-loader.c 986c78d5102b1935cdc4c26cbdcc1627
+loader.c 4987cf832d9e3e78f6de4e6fe7a45eb5
 os_win32.c be70b1a072cca491a96899bcecc155e8
 parser.c de979b918123c532c56260b84da66bee
 parser_expr.c 99559619a26a8c4c10521d29233e7bf3

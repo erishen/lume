@@ -370,11 +370,8 @@ void ck_stmt(Checker *c, Node *n) {
              * is a silent mismatch on the interpreter and refused on the
              * native backends — reject here so all three agree. Parameters
              * or returns still unresolved (NULL) defer the verdict to the
-             * native signature pass's fixed point. (Statement-position
-             * assignments are wrapped in N_EXPR_STMT by the parser, so the
-             * ck_expr N_ASSIGN case in typecheck_expr.c is the one that
-             * actually runs; this mirrors it for any path that produces a
-             * bare N_ASSIGN statement.) */
+             * native signature pass's fixed point (which propagates the old
+             * signature into the new lambda and compares again). */
             if (vt->kind == TY_FUNC && vt->func &&
                 vt->func->type == N_FUNC_LIT &&
                 n->as.assign.value &&
