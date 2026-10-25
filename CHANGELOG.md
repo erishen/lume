@@ -6,6 +6,8 @@ All notable changes to Lume are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-25
+
 ### Added
 
 - Request map (`lang/bridge.c`): `origin` and `referer` fields, plus a
@@ -50,6 +52,14 @@ All notable changes to Lume are documented here. The format follows
   the static type used to contradict. Closes the five-run CI red on
   lume-core `ci.yml` (accessor compile refusal + the integer-division
   bit-pattern print it was hiding).
+
+- **Family version alignment to lume-core `v0.11.0`.** `LUME_VERSION`
+  bumped `0.8.1 → 0.11.0` so the host's self-reported version matches the
+  coordinated lume-core `v0.11.0` release. The agent-httpd submodule pin
+  (`3ff62f9`) is exactly the agent-httpd `v0.11.0` commit, keeping the
+  mirror debt clean. `lang/PIN` is intentionally left at lume-core
+  `06dcfec` (accept-lag discipline — no `sync-lang`); the vendored
+  `lang/` tree tracks core one commit behind `v0.11.0`.
 
 ## [0.8.0] - 2026-10-22
 
