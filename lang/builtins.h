@@ -97,6 +97,13 @@ Value b_igamma(VM *vm, int argc, Value *args);
 Value b_ibeta(VM *vm, int argc, Value *args);
 Value b_tdist_cdf(VM *vm, int argc, Value *args);
 Value b_chisq_cdf(VM *vm, int argc, Value *args);
+/* technical-indicator sequence builtins (#54, 2026-10-25) */
+Value b_rolling_max(VM *vm, int argc, Value *args);
+Value b_rolling_min(VM *vm, int argc, Value *args);
+Value b_kdj(VM *vm, int argc, Value *args);
+Value b_williams_r(VM *vm, int argc, Value *args);
+Value b_atr(VM *vm, int argc, Value *args);
+Value b_obv(VM *vm, int argc, Value *args);
 Value b_el(VM *vm, int argc, Value *args);
 Value b_render(VM *vm, int argc, Value *args);
 Value b_html(VM *vm, int argc, Value *args);

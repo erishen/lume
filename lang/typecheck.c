@@ -434,6 +434,8 @@ const char *const LUME_BUILTIN_NAMES[] = {
     "min", "max", "pi", "e",
     /* statistical distribution builtins (2026-10-20, builtins_math.c + rt.c) */
     "normcdf", "erf", "gamma", "lgamma", "igamma", "ibeta", "tdist_cdf", "chisq_cdf",
+    /* 技术指标序列内建 (#54, 2026-10-25, builtins_math.c) */
+    "rolling_max", "rolling_min", "kdj", "williams_r", "atr", "obv",
     /* outbound HTTP (2026-10-04, builtins_http.c) */
     "http_get",
     /* HTTP verbs that carry a body (2026-10-05) */
@@ -479,6 +481,10 @@ static const BuiltinSig LUME_BUILTIN_SIG[] = {
     {"sql_tx_begin",1,1}, {"sql_tx_exec",2,3}, {"sql_tx_commit",1,1}, {"sql_tx_rollback",1,1},
     {"normcdf",1,1}, {"erf",1,1}, {"gamma",1,1}, {"lgamma",1,1},
     {"abs",1,1}, {"sqrt",1,1}, {"exp",1,1}, {"log",1,1}, {"ln",1,1},
+    /* 技术指标序列内建 (#54, 2026-10-25): rolling_max/min (list,window) ->
+     * float list; kdj/williams_r/atr (high,low,close,period); obv (close,volume). */
+    {"rolling_max",2,2}, {"rolling_min",2,2},
+    {"kdj",4,4}, {"williams_r",4,4}, {"atr",4,4}, {"obv",2,2},
     {"floor",1,1}, {"ceil",1,1}, {"round",1,1},
     {"strftime",2,2}, {"replace",3,3}, {"put",3,3},
     /* bounded optional upper (runtime: argc > max rejected) */

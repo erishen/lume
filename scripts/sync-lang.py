@@ -83,6 +83,15 @@ HOST_PINNED = {"lume.h", "main.c", "builtins_internal.h", "builtins.c",
                "builtins_catalog.c", "builtins_fs.c", "vdom.c",
                "interp.c", "builtins.h", "builtins_http.c",
                "typecheck.c", "typecheck_expr.c", "typecheck_stmt.c",
+               # Host builtins_math.c is a self-contained single-unit file (basic
+               # numerics + distribution CDFs + the #54 technical-indicator
+               # sequences: rolling_max/min, kdj, williams_r, atr, obv, ported
+               # interpreter-only). Upstream's builtins_math.c is a 27-line hub
+               # that #includes three .inc fragments the host tree does not carry
+               # (host is one translation unit, no .inc splitting). Syncing the
+               # hub over would #include files that don't exist and break the
+               # host build, so pin it and track the drift with the lag report.
+               "builtins_math.c",
                # Windows (MSYS2/mingw) build replaces bridge.c with this stub;
                # lume's copy adds a bridge_run() that errors out because this
                # build links no HTTP server. Pinned so `sync` cannot silently

@@ -1498,6 +1498,14 @@ void bridge_seed_builtins(VM *vm) {
         {"ibeta", b_ibeta},
         {"tdist_cdf", b_tdist_cdf},
         {"chisq_cdf", b_chisq_cdf},
+        /* 技术指标序列内建 (#54, 2026-10-25, builtins_math.c): 窗口极值 / KDJ /
+         * Williams %R / ATR / OBV。宿主是解释器单后端, 只需解释器 native_*。 */
+        {"rolling_max", b_rolling_max},
+        {"rolling_min", b_rolling_min},
+        {"kdj", b_kdj},
+        {"williams_r", b_williams_r},
+        {"atr", b_atr},
+        {"obv", b_obv},
         {"min", b_min},
         {"max", b_max},
         {"tools", b_tools},

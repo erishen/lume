@@ -100,3 +100,7 @@ logs/
 ._*
 .venv-sqlite/
 .tmpbuild/
+
+# 本机测试脚手架 (mktemp/xcrun shim, 沙箱写 /tmp 被锁时用)
+.work/
+.work-host/

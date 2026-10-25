@@ -326,3 +326,276 @@ Value b_igamma(VM *vm, int argc, Value *args)    { return vm_native(vm, argc, ar
 Value b_ibeta(VM *vm, int argc, Value *args)     { return vm_native(vm, argc, args, native_ibeta); }
 Value b_tdist_cdf(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_tdist_cdf); }
 Value b_chisq_cdf(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_chisq_cdf); }
+
+/* ============================================================================
+ * Technical-indicator sequence builtins (#54, 2026-10-25) — host-only port.
+ *
+ * The host tree is the interpreter-only leg: there is no rt.c / native code
+ * generator here, so only the interpreter native_* need to exist. The six
+ * routines below mirror core's builtins_math_quant.inc byte-for-byte in
+ * their window / leading-NAN / 1/3-EWM seeding so a script that runs under
+ * the host `bin/lume` and under core's three backends prints the same
+ * numbers. The list helpers are self-contained statics (each translation
+ * unit keeps its own copy, exactly like core's .inc fragments).
+ *
+ *   rolling_max(list, window) / rolling_min(list, window) -> float list
+ *   kdj(high, low, close, period) -> {rsv, k, d, j} float lists
+ *   williams_r(high, low, close, period) -> float list
+ *   atr(high, low, close, period)      -> float list
+ *   obv(close, volume)                 -> float list
+ * ==========================================================================*/
+
+static bool m54_arg_list(VM *vm, Value v, ObjList **out) {
+    if (!IS_OBJ(v) || AS_OBJ(v)->type != OBJ_LIST) {
+        vm_set_error(vm, "expected list argument");
+        return false;
+    }
+    *out = &AS_OBJ(v)->as.list;
+    return true;
+}
+
+static bool m54_list_num(VM *vm, ObjList *L, int i, double *out) {
+    Value v = L->items[i];
+    if (IS_INT(v))   { *out = (double)AS_INT(v); return true; }
+    if (IS_FLOAT(v)) { *out = v.as.n;           return true; }
+    vm_set_error(vm, "quant builtin needs a list of numbers");
+    return false;
+}
+
+static double *m54_list_to_doubles(VM *vm, ObjList *L, int *n) {
+    *n = L->count;
+    double *xs = (double *)malloc((size_t)(*n ? *n : 1) * sizeof(double));
+    if (!xs) { vm_set_error(vm, "out of memory"); return NULL; }
+    for (int i = 0; i < *n; i++)
+        if (!m54_list_num(vm, L, i, &xs[i])) { free(xs); return NULL; }
+    return xs;
+}
+
+static void native_rolling_max(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double wd;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &wd)) return;
+    int64_t w = (int64_t)wd;
+    if (w < 1) { vm_set_error(vm, "rolling_max() needs a positive window"); return; }
+    Obj *res = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(res));
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (xs) {
+        for (int i = 0; i < n; i++) {
+            if (i + 1 < w) { list_push(vm, res, val_num(NAN)); continue; }
+            double m = xs[i + 1 - w];
+            for (int64_t j = i + 2 - w; j <= i; j++) if (xs[j] > m) m = xs[j];
+            list_push(vm, res, val_num(m));
+        }
+        free(xs);
+    }
+    vm_pop(vm);
+    *out = val_obj(res);
+}
+
+static void native_rolling_min(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double wd;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &wd)) return;
+    int64_t w = (int64_t)wd;
+    if (w < 1) { vm_set_error(vm, "rolling_min() needs a positive window"); return; }
+    Obj *res = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(res));
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (xs) {
+        for (int i = 0; i < n; i++) {
+            if (i + 1 < w) { list_push(vm, res, val_num(NAN)); continue; }
+            double m = xs[i + 1 - w];
+            for (int64_t j = i + 2 - w; j <= i; j++) if (xs[j] < m) m = xs[j];
+            list_push(vm, res, val_num(m));
+        }
+        free(xs);
+    }
+    vm_pop(vm);
+    *out = val_obj(res);
+}
+
+/* build the four KDJ series as a map {rsv,k,d,j} of full-length float lists */
+static Obj *m54_kdj_lists(VM *vm, double *hx, double *lx, double *cx, int n,
+                          int64_t w, double **rsvp, double **kp, double **dp, double **jp) {
+    *rsvp = malloc((size_t)n * sizeof(double));
+    *kp = malloc((size_t)n * sizeof(double));
+    *dp = malloc((size_t)n * sizeof(double));
+    *jp = malloc((size_t)n * sizeof(double));
+    if (!*rsvp || !*kp || !*dp || !*jp) {
+        free(*rsvp); free(*kp); free(*dp); free(*jp);
+        vm_set_error(vm, "out of memory");
+        return NULL;
+    }
+    double alpha = 1.0 / 3.0;
+    for (int i = 0; i < n; i++) {
+        if (i + 1 < w) {
+            (*rsvp)[i] = (*kp)[i] = (*dp)[i] = (*jp)[i] = NAN;
+            continue;
+        }
+        int64_t s = i + 1 - w;
+        double hi = hx[s], lo = lx[s];
+        for (int64_t j = s + 1; j <= i; j++) {
+            if (hx[j] > hi) hi = hx[j];
+            if (lx[j] < lo) lo = lx[j];
+        }
+        double den = hi - lo;
+        (*rsvp)[i] = (den == 0.0) ? 50.0 : (cx[i] - lo) / den * 100.0;
+    }
+    int64_t seed = (w - 1 < n) ? (w - 1) : -1;
+    double ek = 0.0, ed = 0.0;
+    for (int i = 0; i < n; i++) {
+        if (i < seed || (*rsvp)[i] != (*rsvp)[i]) {
+            (*kp)[i] = (*dp)[i] = NAN;
+            continue;
+        }
+        ek = (i == seed) ? (*rsvp)[i] : alpha * (*rsvp)[i] + (1.0 - alpha) * ek;
+        ed = (i == seed) ? ek : alpha * ek + (1.0 - alpha) * ed;
+        (*kp)[i] = ek;
+        (*dp)[i] = ed;
+        (*jp)[i] = 3.0 * ek - 2.0 * ed;
+    }
+    Obj *maps[4];
+    int ni;
+    for (ni = 0; ni < 4; ni++) {
+        double *col = (ni == 0 ? *rsvp : ni == 1 ? *kp : ni == 2 ? *dp : *jp);
+        Obj *lst = AS_OBJ(make_list(vm));
+        vm_push(vm, val_obj(lst));
+        for (int i = 0; i < n; i++) list_push(vm, lst, val_num(col[i]));
+        vm_pop(vm);
+        maps[ni] = lst;
+    }
+    free(*rsvp); free(*kp); free(*dp); free(*jp);
+    Obj *map = AS_OBJ(make_map(vm));
+    vm_push(vm, val_obj(map));
+    map_set(vm, map, "rsv", val_obj(maps[0]));
+    map_set(vm, map, "k", val_obj(maps[1]));
+    map_set(vm, map, "d", val_obj(maps[2]));
+    map_set(vm, map, "j", val_obj(maps[3]));
+    vm_pop(vm);
+    return map;
+}
+
+static void native_kdj(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *H, *Lo, *C; double pd;
+    if (argc < 4 || !m54_arg_list(vm, args[0], &H) || !m54_arg_list(vm, args[1], &Lo) ||
+        !m54_arg_list(vm, args[2], &C) || !arg_num(vm, args[3], &pd)) return;
+    int64_t w = (int64_t)pd;
+    int64_t nh = H->count, nl = Lo->count, nc = C->count;
+    if (nh != nl || nh != nc || nh < 2 || w < 2) {
+        vm_set_error(vm, "kdj() needs (high, low, close, period) with equal lists and period >= 2");
+        return;
+    }
+    int n; double *hx = m54_list_to_doubles(vm, H, &n);
+    double *lx = hx ? m54_list_to_doubles(vm, Lo, &n) : NULL;
+    double *cx = lx ? m54_list_to_doubles(vm, C, &n) : NULL;
+    if (!cx) { free(hx); free(lx); return; }
+    double *rsvp, *kp, *dp, *jp;
+    Obj *map = m54_kdj_lists(vm, hx, lx, cx, n, w, &rsvp, &kp, &dp, &jp);
+    free(hx); free(lx); free(cx);
+    if (!map) return;
+    *out = val_obj(map);
+}
+
+static void native_williams_r(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *H, *Lo, *C; double pd;
+    if (argc < 4 || !m54_arg_list(vm, args[0], &H) || !m54_arg_list(vm, args[1], &Lo) ||
+        !m54_arg_list(vm, args[2], &C) || !arg_num(vm, args[3], &pd)) return;
+    int64_t w = (int64_t)pd;
+    int64_t nh = H->count, nl = Lo->count, nc = C->count;
+    if (nh != nl || nh != nc || nh < 2 || w < 2) {
+        vm_set_error(vm, "williams_r() needs (high, low, close, period) with equal lists and period >= 2");
+        return;
+    }
+    int n; double *hx = m54_list_to_doubles(vm, H, &n);
+    double *lx = hx ? m54_list_to_doubles(vm, Lo, &n) : NULL;
+    double *cx = lx ? m54_list_to_doubles(vm, C, &n) : NULL;
+    if (!cx) { free(hx); free(lx); return; }
+    Obj *res = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(res));
+    for (int i = 0; i < n; i++) {
+        if (i + 1 < w) { list_push(vm, res, val_num(NAN)); continue; }
+        int64_t s = i + 1 - w;
+        double hi = hx[s], lo = lx[s];
+        for (int64_t j = s + 1; j <= i; j++) {
+            if (hx[j] > hi) hi = hx[j];
+            if (lx[j] < lo) lo = lx[j];
+        }
+        double den = hi - lo;
+        double v = (den == 0.0) ? 0.0 : (hi - cx[i]) / den * -100.0;
+        list_push(vm, res, val_num(v));
+    }
+    free(hx); free(lx); free(cx);
+    vm_pop(vm);
+    *out = val_obj(res);
+}
+
+static void native_atr(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *H, *Lo, *C; double pd;
+    if (argc < 4 || !m54_arg_list(vm, args[0], &H) || !m54_arg_list(vm, args[1], &Lo) ||
+        !m54_arg_list(vm, args[2], &C) || !arg_num(vm, args[3], &pd)) return;
+    int64_t w = (int64_t)pd;
+    int64_t nh = H->count, nl = Lo->count, nc = C->count;
+    if (nh != nl || nh != nc || nh < 2 || w < 1) {
+        vm_set_error(vm, "atr() needs (high, low, close, period) with equal lists and period >= 1");
+        return;
+    }
+    int n; double *hx = m54_list_to_doubles(vm, H, &n);
+    double *lx = hx ? m54_list_to_doubles(vm, Lo, &n) : NULL;
+    double *cx = lx ? m54_list_to_doubles(vm, C, &n) : NULL;
+    if (!cx) { free(hx); free(lx); return; }
+    double *tr = malloc((size_t)n * sizeof(double));
+    if (!tr) { free(hx); free(lx); free(cx); vm_set_error(vm, "out of memory"); return; }
+    for (int i = 0; i < n; i++) {
+        double h = hx[i] - lx[i];
+        if (i > 0) {
+            double t2 = hx[i] - cx[i - 1]; if (t2 < 0) t2 = -t2;
+            double t3 = lx[i] - cx[i - 1]; if (t3 < 0) t3 = -t3;
+            double t = t2 > t3 ? t2 : t3;
+            tr[i] = t > h ? t : h;
+        } else {
+            tr[i] = h;
+        }
+    }
+    Obj *res = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(res));
+    for (int i = 0; i < n; i++) {
+        if (i + 1 < w) { list_push(vm, res, val_num(NAN)); continue; }
+        double s = 0.0;
+        for (int64_t j = i + 1 - w; j <= i; j++) s += tr[j];
+        list_push(vm, res, val_num(s / (double)w));
+    }
+    free(tr); free(hx); free(lx); free(cx);
+    vm_pop(vm);
+    *out = val_obj(res);
+}
+
+static void native_obv(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *Cl, *Vl;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &Cl) || !m54_arg_list(vm, args[1], &Vl)) return;
+    if (Cl->count != Vl->count || Cl->count < 2) {
+        vm_set_error(vm, "obv() needs two equal-length lists (n >= 2)");
+        return;
+    }
+    int n; double *cx = m54_list_to_doubles(vm, Cl, &n);
+    double *vx = cx ? m54_list_to_doubles(vm, Vl, &n) : NULL;
+    if (!vx) { free(cx); return; }
+    Obj *res = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(res));
+    double obv = 0.0;
+    list_push(vm, res, val_num(obv));
+    for (int i = 1; i < n; i++) {
+        double d = cx[i] - cx[i - 1];
+        if (d > 0.0) obv += vx[i];
+        else if (d < 0.0) obv -= vx[i];
+        list_push(vm, res, val_num(obv));
+    }
+    free(cx); free(vx);
+    vm_pop(vm);
+    *out = val_obj(res);
+}
+
+Value b_rolling_max(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_rolling_max); }
+Value b_rolling_min(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_rolling_min); }
+Value b_kdj(VM *vm, int argc, Value *args)          { return vm_native(vm, argc, args, native_kdj); }
+Value b_williams_r(VM *vm, int argc, Value *args)   { return vm_native(vm, argc, args, native_williams_r); }
+Value b_atr(VM *vm, int argc, Value *args)          { return vm_native(vm, argc, args, native_atr); }
+Value b_obv(VM *vm, int argc, Value *args)          { return vm_native(vm, argc, args, native_obv); }
