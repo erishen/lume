@@ -112,6 +112,7 @@ Value b_ewma(VM *vm, int argc, Value *args);
 Value b_pct_change(VM *vm, int argc, Value *args);
 Value b_max_drawdown(VM *vm, int argc, Value *args);
 Value b_rsi(VM *vm, int argc, Value *args);
+Value b_rsi_cutler(VM *vm, int argc, Value *args);
 Value b_macd(VM *vm, int argc, Value *args);
 Value b_bollinger(VM *vm, int argc, Value *args);
 Value b_sharpe_ratio(VM *vm, int argc, Value *args);

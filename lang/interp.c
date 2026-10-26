@@ -1513,6 +1513,7 @@ void bridge_seed_builtins(VM *vm) {
         {"pct_change", b_pct_change},
         {"max_drawdown", b_max_drawdown},
         {"rsi", b_rsi},
+        {"rsi_cutler", b_rsi_cutler},
         {"macd", b_macd},
         {"bollinger", b_bollinger},
         {"sharpe_ratio", b_sharpe_ratio},

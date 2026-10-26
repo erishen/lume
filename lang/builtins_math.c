@@ -837,6 +837,47 @@ static void native_rsi(VM *vm, int argc, Value *args, Value *out) {
     *out = val_obj(res);
 }
 
+/* Cutler RSI (etl-consistent): gain/loss 是最近 w 个价变的 rolling(w) 均值,
+ * 窗口是「本地」的 → 尾值只依赖最后 w+1 根收盘价, 无 EMA 种子 warm-up, 可
+ * 精确复现 stock-analyzer 的 pandas _calculate_rsi(逐字节一致)。边界复刻
+ * pandas loss.replace(0, inf): loss 均值==0 → rs=gm/inf=0 → RSI=0(不是 100)。
+ * 返回全长度 list([NaN]*w + [w+1] 个值), 与 rsi() 同形, 供 tail_k 取尾值。 */
+static void native_rsi_cutler(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double wnd;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &wnd)) return;
+    int64_t window = (int64_t)wnd;
+    int64_t count = L->count;
+    if (count < 2 || window < 1 || window > count - 1) {
+        vm_set_error(vm, "rsi_cutler() needs (prices, window in [1, len-1])");
+        return;
+    }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    Obj *res = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(res));
+    for (int64_t i = 0; i < n; i++) {
+        if (i < window) { list_push(vm, res, val_num(NAN)); continue; }
+        double sg = 0.0, sl = 0.0;
+        for (int64_t j = i - window + 1; j <= i; j++) {
+            double d = xs[j] - xs[j - 1];
+            if (d > 0.0) sg += d; else if (d < 0.0) sl += -d;
+        }
+        double gm = sg / (double)window;
+        double lm = sl / (double)window;
+        double rsi;
+        if (lm > 0.0) {
+            double rs = gm / lm;
+            rsi = 100.0 - 100.0 / (1.0 + rs);
+        } else {
+            rsi = 0.0;   /* pandas loss.replace(0, inf) → rs=0 → RSI=0 */
+        }
+        list_push(vm, res, val_num(rsi));
+    }
+    free(xs);
+    vm_pop(vm);
+    *out = val_obj(res);
+}
+
 static void native_macd(VM *vm, int argc, Value *args, Value *out) {
     ObjList *L; double fd, sd, gd;
     if (argc < 4 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &fd) ||
@@ -1145,6 +1186,7 @@ Value b_ewma(VM *vm, int argc, Value *args)           { return vm_native(vm, arg
 Value b_pct_change(VM *vm, int argc, Value *args)     { return vm_native(vm, argc, args, native_pct_change); }
 Value b_max_drawdown(VM *vm, int argc, Value *args)   { return vm_native(vm, argc, args, native_max_drawdown); }
 Value b_rsi(VM *vm, int argc, Value *args)            { return vm_native(vm, argc, args, native_rsi); }
+Value b_rsi_cutler(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_rsi_cutler); }
 Value b_macd(VM *vm, int argc, Value *args)           { return vm_native(vm, argc, args, native_macd); }
 Value b_bollinger(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_bollinger); }
 Value b_sharpe_ratio(VM *vm, int argc, Value *args)         { return vm_native(vm, argc, args, native_sharpe_ratio); }
