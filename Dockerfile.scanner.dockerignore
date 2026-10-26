@@ -1,0 +1,38 @@
+# Dockerfile.scanner.dockerignore — 仅作用于 Dockerfile.scanner (BuildKit 按 Dockerfile 关联)。
+# 目的: 把 ~1.8G 的 lume/ 构建上下文瘦身到 ~115M(只留 C 构建真正需要的), 不碰共享的
+#       根 .dockerignore(那文件被现有 lume/docker/Dockerfile 依赖, 不能破坏)。
+#
+# 构建只需: lang/ + Makefile + agent-httpd/(submodule, 仅 src/ + 头 + Makefile) + .env.example。
+# 相对路径均为 context 根 = work/lume/lume/。
+
+# --- 顶层大块 ---
+/docker/                 # 1.4G (ghidra 717M + ghidra-deps + jdk 196M), C 构建不需要
+/frontend/               # 169M, 前端 node_modules/源码, 容器只 COPY 宿主 www/
+/tests/
+/tools/
+/editor/
+/out/
+/build/
+/build-asan/
+/bin/                    # Mach-O 宿主产物, 容器内重编
+/logs/
+/docs/
+/examples/
+/skills/
+/scripts/
+/www/                    # 由 app 镜像 COPY, 不在 C 基座
+/tmp*
+*.md
+.env
+.env.*
+
+# --- agent-httpd/: 只留 src/(C 源+头) 与构建脚本, 排掉大体积预置物 ---
+/agent-httpd/cgi-bin/    # 109M
+/agent-httpd/logs/
+/agent-httpd/bin/
+/agent-httpd/build/
+/agent-httpd/www/
+/agent-httpd/tests/
+/agent-httpd/examples/
+/agent-httpd/deploy/
+/agent-httpd/scripts/

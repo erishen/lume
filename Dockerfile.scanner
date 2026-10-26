@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1
+# ============================================================================
+# lume-scanner base —— 用**当前宿主 lume/ C 源码**重编静态 Linux bin/lume.
+#
+# 为什么不用 erishen/lume:v0.6.3 老基底:
+#   v0.6.3 早于二期 #54/#55 (kdj/atr/obv/williams_r + RSI/MACD/布林/绩效
+#   风险) 移植, 跑 /api/indicators 会 "undefined variable kdj"。必须用最新
+#   源码重编才带全内建。
+#
+# 构建上下文 = work/lume/lume/ (该树有 agent-httpd/ submodule + lang/ + Makefile;
+# 其 .dockerignore 已排除 build/ bin/ *.o *.a node_modules .data logs .env).
+# 产物 bin/lume 静态链 (glibc 内嵌), runtime 不依赖动态库。
+# ============================================================================
+
+# ---------- Stage 1: 重编 bin/lume (静态 glibc) ----------
+FROM debian:bookworm-slim AS lume-build
+# gcc + 静态链接所需: libcrypt(basic auth crypt(3)) + libsqlite3(原生 SQL 工具)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libc6-dev libcrypt-dev libsqlite3-dev make m4 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build/lume
+# COPY . . 受上下文根 (lume/) 的 .dockerignore 约束, 只带 C 源码 + Makefile + agent-httpd。
+COPY . .
+# 命令行 CFLAGS_EXTRA/LDFLAGS_EXTRA 会覆盖两处 Makefile 的 += 分支, 故把 agent-httpd
+# 与宿主 Makefile 依赖的 feature 显式放全 (与 proven lume/docker/Dockerfile 同款):
+#   -D_GNU_SOURCE: agent-httpd POSIX 扩展; -DHAVE_CRYPT(_H): 宿主机装 libcrypt-dev
+#     后 Basic Auth 才不恒 401; -static + --gc-sections: 产出无动态依赖的 ~1.7M 二进制。
+RUN rm -rf agent-httpd/bin agent-httpd/build && make all \
+    CFLAGS_EXTRA="-D_GNU_SOURCE -DHAVE_CRYPT -DHAVE_CRYPT_H -ffunction-sections -fdata-sections -Wno-format-truncation -Wno-stringop-truncation" \
+    LDFLAGS_EXTRA="-lcrypt -lm -static -Wl,--gc-sections"
+
+# ---------- Stage 2: 运行时 (debian, 静态二进制 + curl 供 agent 聊天/工具调上游) ----------
+FROM debian:bookworm-slim AS runtime
+# curl: agent.c 的 /react/api/chat 与工具执行 fork+execlp("curl") 调 LLM/SSE, 硬依赖。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app \
+    && useradd -u 10001 -d /home/lume -m lume
+COPY --from=lume-build /build/lume/bin/lume /usr/local/bin/lume
+COPY --from=lume-build /build/lume/.env.example /app/.env.example
+WORKDIR /app
+USER 10001
+# scanner 默认 8094 (宿主 compose 映射 18094->8094); docroot ./www 由 app 镜像 COPY。
+EXPOSE 8094
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -fsS -m 4 http://127.0.0.1:8094/api/meta >/dev/null || exit 1
+CMD ["/usr/local/bin/lume", "scanner.lume"]
