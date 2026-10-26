@@ -599,3 +599,563 @@ Value b_kdj(VM *vm, int argc, Value *args)          { return vm_native(vm, argc,
 Value b_williams_r(VM *vm, int argc, Value *args)   { return vm_native(vm, argc, args, native_williams_r); }
 Value b_atr(VM *vm, int argc, Value *args)          { return vm_native(vm, argc, args, native_atr); }
 Value b_obv(VM *vm, int argc, Value *args)          { return vm_native(vm, argc, args, native_obv); }
+
+/* ============================================================================
+ * Quant indicators & risk builtins (#55, 2026-10-26) — host-only port.
+ *
+ * Second batch of the core's builtins_math_quant.inc surface, ported so the
+ * host interpreter can serve scanner performance/risk analytics from a single
+ * process. Formulas mirror core line-for-line (Welford means, the same
+ * BI_ANNUAL_SCALE = sqrt(252) constant, Wilder RSI, 1/3-seeded KDJ-free EMA
+ * recurrence, interpolated quantiles) so core's three backends and the host
+ * keep printing identical numbers. Reuses the m54_* list helpers from the
+ * #54 section above.
+ *
+ *   rolling_mean / rolling_stddev / ewma / pct_change / max_drawdown
+ *   rsi (Wilder smoothing)
+ *   macd -> {macd, signal, hist} ; bollinger -> {mid, upper, lower}
+ *   sharpe_ratio / sortino_ratio / sharpe_annualized (returns list + rf)
+ *   annualized_return / annualized_volatility / cumulative_return (prices/returns)
+ *   semivariance / downside_deviation
+ *   value_at_risk / expected_shortfall / param_var (quantile-based VaR)
+ *   calmar_ratio (mean daily pct / max drawdown, both in percent units)
+ * ==========================================================================*/
+
+#define M55_ANNUAL_SCALE 15.874507866387544  /* sqrt(252), core's BI_ANNUAL_SCALE_I */
+
+/* inverse standard-normal CDF — clone of core's bi_norminv (Acklam 2011),
+ * identical constants/branches so param_var stays byte-identical to core. */
+static double m55_norminv(double p)
+{
+    static const double a[6] = { -3.969683028665376e+01, 2.209460984245205e+02,
+        -2.759285104469687e+02, 1.383577518672690e+02, -3.066479806614716e+01,
+        2.506628277459239e+00 };
+    static const double b[5] = { -5.447609879822406e+01, 1.615858368580409e+02,
+        -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01 };
+    static const double c[6] = { -7.784894002430293e-03, -3.223964580411365e-01,
+        -2.400758277161838e+00, -2.549732539343734e+00, 4.374664141464968e+00,
+        2.938163982698783e+00 };
+    static const double d[4] = { 7.784695709041462e-03, 3.224671290700398e-01,
+        2.445134137142996e+00, 3.754408661907416e+00 };
+    static const double plow = 0.02425, phigh = 0.97575;
+    double q, r;
+    if (p <= 0.0 || p >= 1.0) return NAN;
+    if (p < plow) {
+        q = sqrt(-2.0 * log(p));
+        return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+               ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0);
+    }
+    if (p > phigh) {
+        q = sqrt(-2.0 * log(1.0 - p));
+        return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+                ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0);
+    }
+    q = p - 0.5;
+    r = q * q;
+    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
+           (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0);
+}
+
+/* EMA with alpha = 2/(period+1), seeded at row 0 (the macd/bollinger helper,
+ * core's interp_ema twin). */
+static Obj *m55_ema(VM *vm, ObjList *L, int64_t period) {
+    if (L->count < 1 || period < 1) return NULL;
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return NULL;
+    double a = 2.0 / (double)(period + 1);
+    Obj *out = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(out));
+    double e = xs[0];
+    list_push(vm, out, val_num(e));
+    for (int i = 1; i < n; i++) {
+        e = a * xs[i] + (1.0 - a) * e;
+        list_push(vm, out, val_num(e));
+    }
+    free(xs);
+    vm_pop(vm);
+    return out;
+}
+
+static int m55_cmp_d(const void *pa, const void *pb) {
+    double x = *(const double *)pa, y = *(const double *)pb;
+    return x < y ? -1 : (x > y ? 1 : 0);
+}
+
+/* interpolated percentile over a sorted array (core's boot_pctl_sorted). */
+static double m55_pctl_sorted(const double *v, int64_t m, double p100) {
+    double r = p100 / 100.0 * (double)(m - 1);
+    int64_t lo = (int64_t)r;
+    double frac = r - (double)lo;
+    return lo + 1 < m ? v[lo] + frac * (v[lo + 1] - v[lo]) : v[lo];
+}
+
+static void native_rolling_mean(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double wd;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &wd)) return;
+    int64_t w = (int64_t)wd;
+    if (w < 1) { vm_set_error(vm, "rolling_mean() needs a positive window"); return; }
+    Obj *res = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(res));
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (xs) {
+        double s = 0.0;
+        for (int i = 0; i < n; i++) {
+            s += xs[i];
+            if (i >= w) s -= xs[i - w];
+            list_push(vm, res, val_num(i + 1 >= w ? s / (double)w : NAN));
+        }
+        free(xs);
+    }
+    vm_pop(vm);
+    *out = val_obj(res);
+}
+
+static void native_rolling_stddev(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double wd;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &wd)) return;
+    int64_t w = (int64_t)wd;
+    if (w < 1) { vm_set_error(vm, "rolling_stddev() needs a positive window"); return; }
+    Obj *res = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(res));
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (xs) {
+        for (int i = 0; i < n; i++) {
+            if (i + 1 < w || w < 2) { list_push(vm, res, val_num(NAN)); continue; }
+            int64_t lo = (int64_t)i + 1 - w;
+            double m = 0.0;
+            for (int64_t j = lo; j <= i; j++) m += xs[j];
+            m /= (double)w;
+            double s = 0.0;
+            for (int64_t j = lo; j <= i; j++) { double d = xs[j] - m; s += d * d; }
+            list_push(vm, res, val_num(sqrt(s / (double)(w - 1))));
+        }
+        free(xs);
+    }
+    vm_pop(vm);
+    *out = val_obj(res);
+}
+
+static void native_ewma(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double alpha;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &alpha)) return;
+    if (alpha <= 0.0 || alpha > 1.0) {
+        vm_set_error(vm, "ewma() needs alpha in (0,1]");
+        return;
+    }
+    Obj *res = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(res));
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (xs) {
+        if (n > 0) {
+            double e = xs[0];
+            list_push(vm, res, val_num(e));
+            for (int i = 1; i < n; i++) {
+                e = alpha * xs[i] + (1.0 - alpha) * e;
+                list_push(vm, res, val_num(e));
+            }
+        }
+        free(xs);
+    }
+    vm_pop(vm);
+    *out = val_obj(res);
+}
+
+static void native_pct_change(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L;
+    if (argc < 1 || !m54_arg_list(vm, args[0], &L)) return;
+    Obj *res = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(res));
+    if (L->count >= 2) {
+        int n; double *xs = m54_list_to_doubles(vm, L, &n);
+        if (xs) {
+            for (int i = 1; i < n; i++) {
+                double prev = xs[i - 1];
+                double pc = prev == 0.0 ? NAN : 100.0 * (xs[i] - prev) / prev;
+                list_push(vm, res, val_num(pc));
+            }
+            free(xs);
+        }
+    }
+    vm_pop(vm);
+    *out = val_obj(res);
+}
+
+static void native_max_drawdown(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L;
+    if (argc < 1 || !m54_arg_list(vm, args[0], &L)) return;
+    if (L->count < 2) { vm_set_error(vm, "max_drawdown() needs >= 2 elements"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    double peak = xs[0], mdd = 0.0;
+    for (int i = 1; i < n; i++) {
+        if (xs[i] > peak) peak = xs[i];
+        double dd = peak > 0.0 ? 100.0 * (peak - xs[i]) / peak : 0.0;
+        if (dd > mdd) mdd = dd;
+    }
+    free(xs);
+    *out = val_num(mdd);
+}
+
+static void native_rsi(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double wnd;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &wnd)) return;
+    int64_t window = (int64_t)wnd;
+    if (L->count < 2 || window < 1 || window > (int64_t)L->count - 1) {
+        vm_set_error(vm, "rsi() needs (prices, window in [1, len-1])");
+        return;
+    }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    Obj *res = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(res));
+    double avg_gain = 0.0, avg_loss = 0.0;
+    for (int64_t i = 0; i < n; i++) {
+        if (i < window) { list_push(vm, res, val_num(NAN)); continue; }
+        double ch = xs[i] - xs[i - 1];
+        double gain = ch > 0.0 ? ch : 0.0;
+        double loss = ch < 0.0 ? -ch : 0.0;
+        if (i == window) {
+            double sg = 0.0, sl = 0.0;
+            for (int64_t j = 1; j <= window; j++) {
+                double d = xs[j] - xs[j - 1];
+                if (d > 0.0) sg += d; else sl += -d;
+            }
+            avg_gain = sg / (double)window;
+            avg_loss = sl / (double)window;
+        } else {
+            avg_gain = (avg_gain * (window - 1) + gain) / (double)window;
+            avg_loss = (avg_loss * (window - 1) + loss) / (double)window;
+        }
+        if (!(avg_loss > 0.0)) {
+            list_push(vm, res, val_num(avg_gain > 0.0 ? 100.0 : 50.0));
+        } else {
+            list_push(vm, res, val_num(100.0 - 100.0 / (1.0 + avg_gain / avg_loss)));
+        }
+    }
+    free(xs);
+    vm_pop(vm);
+    *out = val_obj(res);
+}
+
+static void native_macd(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double fd, sd, gd;
+    if (argc < 4 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &fd) ||
+        !arg_num(vm, args[2], &sd) || !arg_num(vm, args[3], &gd)) return;
+    int64_t fast = (int64_t)fd, slow = (int64_t)sd, signal = (int64_t)gd;
+    if (L->count < 1 || fast < 1 || slow < 1 || signal < 1) {
+        vm_set_error(vm, "macd() needs (prices, fast, slow, signal) with periods >= 1");
+        return;
+    }
+    Obj *ef = m55_ema(vm, L, fast);
+    Obj *es = m55_ema(vm, L, slow);
+    if (!ef || !es) return;
+    int n; double *fx = m54_list_to_doubles(vm, &ef->as.list, &n);
+    double *sx = fx ? m54_list_to_doubles(vm, &es->as.list, &n) : NULL;
+    if (!sx) { free(fx); return; }
+    Obj *macd = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(macd));
+    for (int i = 0; i < n; i++) list_push(vm, macd, val_num(fx[i] - sx[i]));
+    free(fx); free(sx);
+    vm_pop(vm);
+    Obj *sig = m55_ema(vm, &macd->as.list, signal);
+    if (!sig) return;
+    int m; double *mx = m54_list_to_doubles(vm, &macd->as.list, &m);
+    double *gx = mx ? m54_list_to_doubles(vm, &sig->as.list, &m) : NULL;
+    if (!gx) { free(mx); return; }
+    Obj *hist = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(hist));
+    for (int i = 0; i < m; i++) list_push(vm, hist, val_num(mx[i] - gx[i]));
+    free(mx); free(gx);
+    vm_pop(vm);
+    Obj *map = AS_OBJ(make_map(vm));
+    vm_push(vm, val_obj(map));
+    map_set(vm, map, "macd", val_obj(macd));
+    map_set(vm, map, "signal", val_obj(sig));
+    map_set(vm, map, "hist", val_obj(hist));
+    vm_pop(vm);
+    *out = val_obj(map);
+}
+
+static void native_bollinger(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double wnd, k;
+    if (argc < 3 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &wnd) ||
+        !arg_num(vm, args[2], &k)) return;
+    int64_t window = (int64_t)wnd;
+    if (L->count < 2 || window < 2 || window > (int64_t)L->count || !isfinite(k)) {
+        vm_set_error(vm, "bollinger() needs (prices, window in [2, len], k)");
+        return;
+    }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    Obj *mid = AS_OBJ(make_list(vm));
+    Obj *up = AS_OBJ(make_list(vm));
+    Obj *lo = AS_OBJ(make_list(vm));
+    vm_push(vm, val_obj(mid)); vm_push(vm, val_obj(up)); vm_push(vm, val_obj(lo));
+    for (int i = 0; i < n; i++) {
+        if (i + 1 < window) {
+            list_push(vm, mid, val_num(NAN));
+            list_push(vm, up, val_num(NAN));
+            list_push(vm, lo, val_num(NAN));
+            continue;
+        }
+        int64_t s = (int64_t)i + 1 - window;
+        double m = 0.0, m2 = 0.0;
+        int64_t kk = 0;
+        for (int64_t j = s; j <= i; j++, kk++) {
+            double d = xs[j] - m;
+            m += d / (double)(kk + 1);
+            m2 += d * (xs[j] - m);
+        }
+        double sd = sqrt(m2 / (double)(window - 1));
+        list_push(vm, mid, val_num(m));
+        list_push(vm, up, val_num(m + k * sd));
+        list_push(vm, lo, val_num(m - k * sd));
+    }
+    free(xs);
+    vm_pop(vm); vm_pop(vm); vm_pop(vm);
+    Obj *map = AS_OBJ(make_map(vm));
+    vm_push(vm, val_obj(map));
+    map_set(vm, map, "mid", val_obj(mid));
+    map_set(vm, map, "upper", val_obj(up));
+    map_set(vm, map, "lower", val_obj(lo));
+    vm_pop(vm);
+    *out = val_obj(map);
+}
+
+/* ---- Performance / risk (#48/#53/#57 contracts, mirrored from core) ---- */
+
+static void native_sharpe_ratio(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double rf;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &rf)) return;
+    if (!isfinite(rf)) { vm_set_error(vm, "sharpe_ratio() needs a finite risk-free rate"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    if (n < 2) { free(xs); vm_set_error(vm, "sharpe_ratio() needs at least two observations"); return; }
+    double m = 0.0, m2 = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = xs[i] - m;
+        m += d / (double)(i + 1);
+        m2 += d * (xs[i] - m);
+    }
+    free(xs);
+    double sd = sqrt(m2 / (double)(n - 1));
+    if (!(sd > 0.0) || !isfinite(m)) { *out = val_num(NAN); return; }
+    *out = val_num((m - rf) / sd);
+}
+
+static void native_sortino_ratio(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double rf;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &rf)) return;
+    if (!isfinite(rf)) { vm_set_error(vm, "sortino_ratio() needs a finite risk-free rate"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    if (n < 2) { free(xs); vm_set_error(vm, "sortino_ratio() needs at least two observations"); return; }
+    double m = 0.0, dd = 0.0;
+    for (int i = 0; i < n; i++) {
+        m += xs[i];
+        double d = xs[i] - rf;
+        if (d < 0.0) dd += d * d;
+    }
+    free(xs);
+    m /= (double)n;
+    double ds = sqrt(dd / (double)n);
+    if (!(ds > 0.0) || !isfinite(m)) { *out = val_num(NAN); return; }
+    *out = val_num((m - rf) / ds);
+}
+
+static void native_annualized_return(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L;
+    if (argc < 1 || !m54_arg_list(vm, args[0], &L)) return;
+    if (L->count < 2) { vm_set_error(vm, "annualized_return() needs >= 2 prices"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    for (int i = 0; i < n; i++) {
+        if (!(xs[i] > 0.0)) { free(xs); *out = val_num(NAN); return; }
+    }
+    double r = pow(xs[n - 1] / xs[0], 1.0 / (double)(n - 1)) - 1.0;
+    free(xs);
+    *out = val_num(r);
+}
+
+static void native_annualized_volatility(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L;
+    if (argc < 1 || !m54_arg_list(vm, args[0], &L)) return;
+    if (L->count < 2) { vm_set_error(vm, "annualized_volatility() needs >= 2 returns"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    double m = 0.0, m2 = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = xs[i] - m;
+        m += d / (double)(i + 1);
+        m2 += d * (xs[i] - m);
+    }
+    free(xs);
+    *out = val_num(sqrt(m2 / (double)(n - 1)) * M55_ANNUAL_SCALE);
+}
+
+static void native_sharpe_annualized(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double rf;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &rf)) return;
+    if (L->count < 2) { vm_set_error(vm, "sharpe_annualized() needs >= 2 returns"); return; }
+    if (!isfinite(rf)) { vm_set_error(vm, "sharpe_annualized(): rf must be finite"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    double m = 0.0, m2 = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = xs[i] - m;
+        m += d / (double)(i + 1);
+        m2 += d * (xs[i] - m);
+    }
+    free(xs);
+    double sd = sqrt(m2 / (double)(n - 1));
+    if (!(sd > 0.0) || !isfinite(m)) { *out = val_num(NAN); return; }
+    *out = val_num(((m - rf) / sd) * M55_ANNUAL_SCALE);
+}
+
+static void native_cumulative_return(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L;
+    if (argc < 1 || !m54_arg_list(vm, args[0], &L)) return;
+    if (L->count < 2) { vm_set_error(vm, "cumulative_return() needs >= 2 prices"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    if (!(xs[0] > 0.0) || !(xs[n - 1] > 0.0)) { free(xs); *out = val_num(NAN); return; }
+    double r = xs[n - 1] / xs[0] - 1.0;
+    free(xs);
+    *out = val_num(r);
+}
+
+static void native_semivariance(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L;
+    if (argc < 1 || !m54_arg_list(vm, args[0], &L)) return;
+    if (L->count < 2) { vm_set_error(vm, "semivariance() needs >= 2 returns"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    double m = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = xs[i] - m;
+        m += d / (double)(i + 1);
+    }
+    double sv = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = xs[i] - m;
+        if (d < 0.0) sv += d * d;
+    }
+    free(xs);
+    *out = val_num(sv / (double)n);
+}
+
+static void native_downside_deviation(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double t;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &t)) return;
+    if (L->count < 2) { vm_set_error(vm, "downside_deviation() needs >= 2 returns"); return; }
+    if (!isfinite(t)) { vm_set_error(vm, "downside_deviation(): threshold must be finite"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    double dd = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = xs[i] - t;
+        if (d < 0.0) dd += d * d;
+    }
+    free(xs);
+    *out = val_num(sqrt(dd / (double)n));
+}
+
+static void native_value_at_risk(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double level;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &level)) return;
+    if (!isfinite(level) || level <= 0.0 || level >= 1.0) {
+        vm_set_error(vm, "value_at_risk() needs level in (0,1)"); return;
+    }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    if (n < 1) { free(xs); vm_set_error(vm, "value_at_risk() needs a non-empty list"); return; }
+    qsort(xs, (size_t)n, sizeof(double), m55_cmp_d);
+    double q = m55_pctl_sorted(xs, n, level * 100.0);
+    free(xs);
+    *out = val_num(-q);
+}
+
+static void native_expected_shortfall(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double level;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &level)) return;
+    if (!isfinite(level) || level <= 0.0 || level >= 1.0) {
+        vm_set_error(vm, "expected_shortfall() needs level in (0,1)"); return;
+    }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    if (n < 1) { free(xs); vm_set_error(vm, "expected_shortfall() needs a non-empty list"); return; }
+    qsort(xs, (size_t)n, sizeof(double), m55_cmp_d);
+    double q = m55_pctl_sorted(xs, n, level * 100.0);
+    double s = 0.0; int64_t k = 0;
+    while (k < n && xs[k] <= q) { s += xs[k]; k++; }
+    free(xs);
+    if (k < 1) { vm_set_error(vm, "expected_shortfall() has no tail observations"); return; }
+    *out = val_num(-(s / (double)k));
+}
+
+static void native_param_var(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L; double level;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &L) || !arg_num(vm, args[1], &level)) return;
+    if (L->count < 2) { vm_set_error(vm, "param_var() needs >= 2 returns"); return; }
+    if (!(level > 0.0) || !(level < 1.0)) {
+        vm_set_error(vm, "param_var(): level must be in (0, 1)"); return;
+    }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    /* normal-model: mu + sigma * z(level), z from the regularized normal
+     * quantile via the inverse error function (core's closed form). */
+    double m = 0.0, m2 = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = xs[i] - m;
+        m += d / (double)(i + 1);
+        m2 += d * (xs[i] - m);
+    }
+    free(xs);
+    double sd = sqrt(m2 / (double)(n - 1));
+    double z = m55_norminv(level);
+    *out = val_num(-(m + z * sd));
+}
+
+static void native_calmar_ratio(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *P;
+    if (argc < 1 || !m54_arg_list(vm, args[0], &P)) return;
+    if (P->count < 2) { vm_set_error(vm, "calmar_ratio() needs >= 2 elements"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, P, &n);
+    if (!xs) return;
+    double m = 0.0;
+    for (int i = 1; i < n; i++) {
+        if (xs[i - 1] == 0.0) { free(xs); *out = val_num(NAN); return; }
+        m += 100.0 * (xs[i] - xs[i - 1]) / xs[i - 1];
+    }
+    m /= (double)(n - 1);
+    double mdd = 0.0, peak = xs[0];
+    for (int i = 1; i < n; i++) {
+        if (xs[i] > peak) peak = xs[i];
+        double dd = peak > 0.0 ? 100.0 * (peak - xs[i]) / peak : 0.0;
+        if (dd > mdd) mdd = dd;
+    }
+    free(xs);
+    *out = val_num(mdd > 0.0 ? m / mdd : NAN);
+}
+
+/* ---- #55 wrappers: performance/risk on top of the #54 list helpers ---- */
+Value b_rolling_mean(VM *vm, int argc, Value *args)   { return vm_native(vm, argc, args, native_rolling_mean); }
+Value b_rolling_stddev(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_rolling_stddev); }
+Value b_ewma(VM *vm, int argc, Value *args)           { return vm_native(vm, argc, args, native_ewma); }
+Value b_pct_change(VM *vm, int argc, Value *args)     { return vm_native(vm, argc, args, native_pct_change); }
+Value b_max_drawdown(VM *vm, int argc, Value *args)   { return vm_native(vm, argc, args, native_max_drawdown); }
+Value b_rsi(VM *vm, int argc, Value *args)            { return vm_native(vm, argc, args, native_rsi); }
+Value b_macd(VM *vm, int argc, Value *args)           { return vm_native(vm, argc, args, native_macd); }
+Value b_bollinger(VM *vm, int argc, Value *args)      { return vm_native(vm, argc, args, native_bollinger); }
+Value b_sharpe_ratio(VM *vm, int argc, Value *args)         { return vm_native(vm, argc, args, native_sharpe_ratio); }
+Value b_sortino_ratio(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_sortino_ratio); }
+Value b_annualized_return(VM *vm, int argc, Value *args)    { return vm_native(vm, argc, args, native_annualized_return); }
+Value b_annualized_volatility(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_annualized_volatility); }
+Value b_sharpe_annualized(VM *vm, int argc, Value *args)   { return vm_native(vm, argc, args, native_sharpe_annualized); }
+Value b_cumulative_return(VM *vm, int argc, Value *args)    { return vm_native(vm, argc, args, native_cumulative_return); }
+Value b_semivariance(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_semivariance); }
+Value b_downside_deviation(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_downside_deviation); }
+Value b_value_at_risk(VM *vm, int argc, Value *args)       { return vm_native(vm, argc, args, native_value_at_risk); }
+Value b_expected_shortfall(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_expected_shortfall); }
+Value b_param_var(VM *vm, int argc, Value *args)           { return vm_native(vm, argc, args, native_param_var); }
+Value b_calmar_ratio(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_calmar_ratio); }

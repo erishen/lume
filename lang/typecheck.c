@@ -436,6 +436,12 @@ const char *const LUME_BUILTIN_NAMES[] = {
     "normcdf", "erf", "gamma", "lgamma", "igamma", "ibeta", "tdist_cdf", "chisq_cdf",
     /* 技术指标序列内建 (#54, 2026-10-25, builtins_math.c) */
     "rolling_max", "rolling_min", "kdj", "williams_r", "atr", "obv",
+    /* 量化绩效/风险内建 (#55, 2026-10-26, builtins_math.c) */
+    "rolling_mean", "rolling_stddev", "ewma", "pct_change", "max_drawdown",
+    "rsi", "macd", "bollinger",
+    "sharpe_ratio", "sortino_ratio", "annualized_return", "annualized_volatility",
+    "sharpe_annualized", "cumulative_return", "semivariance", "downside_deviation",
+    "value_at_risk", "expected_shortfall", "param_var", "calmar_ratio",
     /* outbound HTTP (2026-10-04, builtins_http.c) */
     "http_get",
     /* HTTP verbs that carry a body (2026-10-05) */
@@ -485,6 +491,15 @@ static const BuiltinSig LUME_BUILTIN_SIG[] = {
      * float list; kdj/williams_r/atr (high,low,close,period); obv (close,volume). */
     {"rolling_max",2,2}, {"rolling_min",2,2},
     {"kdj",4,4}, {"williams_r",4,4}, {"atr",4,4}, {"obv",2,2},
+    /* #55: 序列/绩效/风险 (list 输入 -> list/标量; *(_ratio/calmar) 取 returns 列表) */
+    {"rolling_mean",2,2}, {"rolling_stddev",2,2}, {"ewma",2,2},
+    {"pct_change",1,1}, {"max_drawdown",1,1}, {"rsi",2,2},
+    {"macd",4,4}, {"bollinger",3,3},
+    {"sharpe_ratio",2,2}, {"sortino_ratio",2,2},
+    {"annualized_return",1,1}, {"annualized_volatility",1,1}, {"sharpe_annualized",2,2},
+    {"cumulative_return",1,1}, {"semivariance",1,1}, {"downside_deviation",2,2},
+    {"value_at_risk",2,2}, {"expected_shortfall",2,2}, {"param_var",2,2},
+    {"calmar_ratio",1,1},
     {"floor",1,1}, {"ceil",1,1}, {"round",1,1},
     {"strftime",2,2}, {"replace",3,3}, {"put",3,3},
     /* bounded optional upper (runtime: argc > max rejected) */
