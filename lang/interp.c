@@ -1528,6 +1528,13 @@ void bridge_seed_builtins(VM *vm) {
         {"expected_shortfall", b_expected_shortfall},
         {"param_var", b_param_var},
         {"calmar_ratio", b_calmar_ratio},
+        /* 相关/回归/分布形态 (#57, 2026-10-27, builtins_math.c): 解释器侧 */
+        {"correlation", b_correlation},
+        {"linreg", b_linreg},
+        {"skew", b_skew},
+        {"kurtosis", b_kurtosis},
+        {"spearman", b_spearman},
+        {"kelly_fraction", b_kelly_fraction},
         {"min", b_min},
         {"max", b_max},
         {"tools", b_tools},

@@ -1179,7 +1179,212 @@ static void native_calmar_ratio(VM *vm, int argc, Value *args, Value *out) {
     *out = val_num(mdd > 0.0 ? m / mdd : NAN);
 }
 
-/* ---- #55 wrappers: performance/risk on top of the #54 list helpers ---- */
+/* ---- #57 相关/回归/分布形态 (2026-10-27, 移植自 lume-core builtins_math_quant.inc,
+ *      公式逐行一致; 宿主解释器单后端, 只需 native_* 实现) ---- */
+
+static void native_correlation(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *X, *Y;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &X) || !m54_arg_list(vm, args[1], &Y)) return;
+    if (X->count != Y->count || X->count < 2) {
+        vm_set_error(vm, "correlation() needs two equal-length lists (n >= 2)");
+        return;
+    }
+    int n; double *xs = m54_list_to_doubles(vm, X, &n);
+    double *ys = xs ? m54_list_to_doubles(vm, Y, &n) : NULL;
+    if (!ys) { free(xs); return; }
+    /* Joint Welford — 与 core / rt.c 同一递推 */
+    double mx = 0.0, my = 0.0, sxx = 0.0, sxy = 0.0, syy = 0.0;
+    for (int i = 0; i < n; i++) {
+        double dx = xs[i] - mx, dy = ys[i] - my;
+        mx += dx / (double)(i + 1);
+        my += dy / (double)(i + 1);
+        sxx += dx * (xs[i] - mx);
+        sxy += dx * (ys[i] - my);
+        syy += dy * (ys[i] - my);
+    }
+    free(xs); free(ys);
+    if (sxx == 0.0 || syy == 0.0) {
+        vm_set_error(vm, "correlation(): one series is constant");
+        return;
+    }
+    *out = val_num(sxy / sqrt(sxx * syy));
+}
+
+static void native_linreg(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *X, *Y;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &X) || !m54_arg_list(vm, args[1], &Y)) return;
+    if (X->count != Y->count || X->count < 2) {
+        vm_set_error(vm, "linreg() needs two equal-length lists (n >= 2)");
+        return;
+    }
+    int n; double *xs = m54_list_to_doubles(vm, X, &n);
+    double *ys = xs ? m54_list_to_doubles(vm, Y, &n) : NULL;
+    if (!ys) { free(xs); return; }
+    double mx = 0.0, my = 0.0, sxx = 0.0, sxy = 0.0, syy = 0.0;
+    for (int i = 0; i < n; i++) {
+        double dx = xs[i] - mx, dy = ys[i] - my;
+        mx += dx / (double)(i + 1);
+        my += dy / (double)(i + 1);
+        sxx += dx * (xs[i] - mx);
+        sxy += dx * (ys[i] - my);
+        syy += dy * (ys[i] - my);
+    }
+    free(xs); free(ys);
+    if (sxx == 0.0) { vm_set_error(vm, "linreg(): x is constant"); return; }
+    double slope = sxy / sxx;
+    double intercept = my - slope * mx;
+    double r2 = (syy == 0.0) ? (sxy == 0.0 ? 1.0 : NAN) : sxy * sxy / (sxx * syy);
+    Obj *m = AS_OBJ(make_map(vm));
+    vm_push(vm, val_obj(m));
+    map_set(vm, m, "slope", val_num(slope));
+    map_set(vm, m, "intercept", val_num(intercept));
+    map_set(vm, m, "r2", val_num(r2));
+    vm_pop(vm);
+    *out = val_obj(m);
+}
+
+static void native_skew(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L;
+    if (argc < 1 || !m54_arg_list(vm, args[0], &L)) return;
+    if (L->count < 3) { vm_set_error(vm, "skew() needs >= 3 elements"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    double m = 0.0;
+    for (int i = 0; i < n; i++) m += xs[i];
+    m /= (double)n;
+    double t1 = 0.0, t2 = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = xs[i] - m;
+        t1 += d * d * d;
+        t2 += d * d;
+    }
+    free(xs);
+    if (t2 == 0.0) { vm_set_error(vm, "skew(): series is constant"); return; }
+    double g = t1 / (t2 * sqrt(t2));
+    *out = val_num(g * (double)n / ((double)(n - 1) * (double)(n - 2)));
+}
+
+static void native_kurtosis(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L;
+    if (argc < 1 || !m54_arg_list(vm, args[0], &L)) return;
+    if (L->count < 4) { vm_set_error(vm, "kurtosis() needs >= 4 elements"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    double m = 0.0;
+    for (int i = 0; i < n; i++) m += xs[i];
+    m /= (double)n;
+    double t1 = 0.0, t2 = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = xs[i] - m;
+        double d2 = d * d;
+        t1 += d2 * d2;
+        t2 += d2;
+    }
+    free(xs);
+    if (t2 == 0.0) { vm_set_error(vm, "kurtosis(): series is constant"); return; }
+    double k = (double)n * ((double)n + 1.0) * t1
+               / ((double)(n - 1) * (double)(n - 2) * (double)(n - 3) * t2 * t2)
+               - 3.0 * (double)(n - 1) * (double)(n - 1)
+                   / ((double)(n - 2) * (double)(n - 3));
+    *out = val_num(k);
+}
+
+/* Spearman 秩相关: 先各自排秩(并列取平均秩), 再对秩做 Pearson。
+ * 逐行移植自 core interp_spearman_pairs(二分定位首/末同值 → 平均秩), 复用 m55_cmp_d。 */
+static double m57_spearman_pairs(const double *xs, const double *ys, int n) {
+    double *sx = malloc((size_t)n * sizeof(double));
+    double *sy = malloc((size_t)n * sizeof(double));
+    double *ox = malloc((size_t)n * sizeof(double));
+    double *oy = malloc((size_t)n * sizeof(double));
+    if (!sx || !sy || !ox || !oy) {
+        free(sx); free(sy); free(ox); free(oy); return NAN;
+    }
+    for (int i = 0; i < n; i++) { sx[i] = xs[i]; sy[i] = ys[i]; }
+    qsort(sx, (size_t)n, sizeof(double), m55_cmp_d);
+    qsort(sy, (size_t)n, sizeof(double), m55_cmp_d);
+    for (int i = 0; i < n; i++) {
+        int lo = 0, hi = n - 1, first = -1, last = -1;
+        while (lo <= hi) {
+            int mid = lo + (hi - lo) / 2;
+            if (sx[mid] < xs[i]) lo = mid + 1;
+            else { first = mid; hi = mid - 1; }
+        }
+        lo = 0; hi = n - 1;
+        while (lo <= hi) {
+            int mid = lo + (hi - lo) / 2;
+            if (sx[mid] > xs[i]) hi = mid - 1;
+            else { last = mid; lo = mid + 1; }
+        }
+        ox[i] = ((double)(first + 1) + (double)(last + 1)) / 2.0;
+        lo = 0; hi = n - 1; first = -1; last = -1;
+        while (lo <= hi) {
+            int mid = lo + (hi - lo) / 2;
+            if (sy[mid] < ys[i]) lo = mid + 1;
+            else { first = mid; hi = mid - 1; }
+        }
+        lo = 0; hi = n - 1;
+        while (lo <= hi) {
+            int mid = lo + (hi - lo) / 2;
+            if (sy[mid] > ys[i]) hi = mid - 1;
+            else { last = mid; lo = mid + 1; }
+        }
+        oy[i] = ((double)(first + 1) + (double)(last + 1)) / 2.0;
+    }
+    free(sx); free(sy);
+    double mx = 0.0, my = 0.0, sxx = 0.0, sxy = 0.0, syy = 0.0;
+    for (int i = 0; i < n; i++) {
+        double dx = ox[i] - mx, dy = oy[i] - my;
+        mx += dx / (double)(i + 1);
+        my += dy / (double)(i + 1);
+        sxx += dx * (ox[i] - mx);
+        sxy += dx * (oy[i] - my);
+        syy += dy * (oy[i] - my);
+    }
+    free(ox); free(oy);
+    if (sxx == 0.0 || syy == 0.0) return NAN;
+    return sxy / sqrt(sxx * syy);
+}
+
+static void native_spearman(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *X, *Y;
+    if (argc < 2 || !m54_arg_list(vm, args[0], &X) || !m54_arg_list(vm, args[1], &Y)) return;
+    if (X->count != Y->count || X->count < 2) {
+        vm_set_error(vm, "spearman() needs two equal-length lists (n >= 2)");
+        return;
+    }
+    int n; double *xs = m54_list_to_doubles(vm, X, &n);
+    double *ys = xs ? m54_list_to_doubles(vm, Y, &n) : NULL;
+    if (!ys) { free(xs); return; }
+    *out = val_num(m57_spearman_pairs(xs, ys, n));
+    free(xs); free(ys);
+}
+
+static void native_kelly_fraction(VM *vm, int argc, Value *args, Value *out) {
+    ObjList *L;
+    if (argc < 1 || !m54_arg_list(vm, args[0], &L)) return;
+    if (L->count < 2) { vm_set_error(vm, "kelly_fraction() needs >= 2 returns"); return; }
+    int n; double *xs = m54_list_to_doubles(vm, L, &n);
+    if (!xs) return;
+    /* Welford: 均值 / 方差 = Kelly f* */
+    double m = 0.0, m2 = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = xs[i] - m;
+        m += d / (double)(i + 1);
+        m2 += d * (xs[i] - m);
+    }
+    free(xs);
+    double var = m2 / (double)(n - 1);
+    if (!(var > 0.0)) { *out = val_num(NAN); return; }
+    *out = val_num(m / var);
+}
+
+/* ---- #57 wrappers ---- */
+Value b_correlation(VM *vm, int argc, Value *args)   { return vm_native(vm, argc, args, native_correlation); }
+Value b_linreg(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_linreg); }
+Value b_skew(VM *vm, int argc, Value *args)           { return vm_native(vm, argc, args, native_skew); }
+Value b_kurtosis(VM *vm, int argc, Value *args)       { return vm_native(vm, argc, args, native_kurtosis); }
+Value b_spearman(VM *vm, int argc, Value *args)       { return vm_native(vm, argc, args, native_spearman); }
+Value b_kelly_fraction(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_kelly_fraction); }
 Value b_rolling_mean(VM *vm, int argc, Value *args)   { return vm_native(vm, argc, args, native_rolling_mean); }
 Value b_rolling_stddev(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_rolling_stddev); }
 Value b_ewma(VM *vm, int argc, Value *args)           { return vm_native(vm, argc, args, native_ewma); }

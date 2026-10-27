@@ -442,6 +442,8 @@ const char *const LUME_BUILTIN_NAMES[] = {
     "sharpe_ratio", "sortino_ratio", "annualized_return", "annualized_volatility",
     "sharpe_annualized", "cumulative_return", "semivariance", "downside_deviation",
     "value_at_risk", "expected_shortfall", "param_var", "calmar_ratio",
+    /* 相关/回归/分布形态 (#57, 2026-10-27, builtins_math.c) */
+    "correlation", "linreg", "skew", "kurtosis", "spearman", "kelly_fraction",
     /* outbound HTTP (2026-10-04, builtins_http.c) */
     "http_get",
     /* HTTP verbs that carry a body (2026-10-05) */
@@ -500,6 +502,9 @@ static const BuiltinSig LUME_BUILTIN_SIG[] = {
     {"cumulative_return",1,1}, {"semivariance",1,1}, {"downside_deviation",2,2},
     {"value_at_risk",2,2}, {"expected_shortfall",2,2}, {"param_var",2,2},
     {"calmar_ratio",1,1},
+    /* #57: 相关/回归/分布形态 (correlation/spearman/linreg 取两等长列表; skew/kurtosis/kelly 取单列表) */
+    {"correlation",2,2}, {"spearman",2,2}, {"linreg",2,2},
+    {"skew",1,1}, {"kurtosis",1,1}, {"kelly_fraction",1,1},
     {"floor",1,1}, {"ceil",1,1}, {"round",1,1},
     {"strftime",2,2}, {"replace",3,3}, {"put",3,3},
     /* bounded optional upper (runtime: argc > max rejected) */

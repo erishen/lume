@@ -127,6 +127,13 @@ Value b_value_at_risk(VM *vm, int argc, Value *args);
 Value b_expected_shortfall(VM *vm, int argc, Value *args);
 Value b_param_var(VM *vm, int argc, Value *args);
 Value b_calmar_ratio(VM *vm, int argc, Value *args);
+/* 相关/回归/分布形态 (#57, 2026-10-27, builtins_math.c) */
+Value b_correlation(VM *vm, int argc, Value *args);
+Value b_linreg(VM *vm, int argc, Value *args);
+Value b_skew(VM *vm, int argc, Value *args);
+Value b_kurtosis(VM *vm, int argc, Value *args);
+Value b_spearman(VM *vm, int argc, Value *args);
+Value b_kelly_fraction(VM *vm, int argc, Value *args);
 Value b_el(VM *vm, int argc, Value *args);
 Value b_render(VM *vm, int argc, Value *args);
 Value b_html(VM *vm, int argc, Value *args);
