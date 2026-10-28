@@ -86,6 +86,8 @@ Value b_ceil(VM *vm, int argc, Value *args);
 Value b_round(VM *vm, int argc, Value *args);
 Value b_min(VM *vm, int argc, Value *args);
 Value b_max(VM *vm, int argc, Value *args);
+/* Bitwise or (2026-10-28): `|` 保留给 enum variant, 位或用 bitor(a,b)。 */
+Value b_bitor(VM *vm, int argc, Value *args);
 /* Statistical distribution builtins (P4, 2026-10-20): the interpreter
  * wrappers validate arguments and surface vm_set_error; the same numbers
  * are computed by rt.c's lume_bi_* for the native backends. */

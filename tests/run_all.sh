@@ -31,6 +31,17 @@ pass "build + parse demo/lang-basics"
 ./tests/smoke-bin || fail "interpreter unit tests"
 pass "interpreter unit tests"
 
+# 2b. bitwise operators end-to-end -----------------------------------------
+BITOUT=$(./bin/lume tests/test-bitwise.lume 2>&1)
+[ "$?" -eq 0 ] || fail "run test-bitwise"
+printf '%s' "$BITOUT" | grep -Fq "bitwise ok 18" || fail "test-bitwise ($BITOUT)"
+# typecheck rejects non-int operands
+cat > /tmp/lume-bit-bad.lume <<'LUME'
+print(1.5 & 1);
+LUME
+./bin/lume --check /tmp/lume-bit-bad.lume >/dev/null 2>&1 && fail "bitwise float should be rejected"
+pass "bitwise operators + int-only typecheck"
+
 # 3. tool registry integration (no HTTP) -------------------------------------
 ./tests/tools-bin || fail "tool integration"
 pass "tool registry + dispatch"

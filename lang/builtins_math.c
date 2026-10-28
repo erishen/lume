@@ -1406,3 +1406,15 @@ Value b_value_at_risk(VM *vm, int argc, Value *args)       { return vm_native(vm
 Value b_expected_shortfall(VM *vm, int argc, Value *args)  { return vm_native(vm, argc, args, native_expected_shortfall); }
 Value b_param_var(VM *vm, int argc, Value *args)           { return vm_native(vm, argc, args, native_param_var); }
 Value b_calmar_ratio(VM *vm, int argc, Value *args)        { return vm_native(vm, argc, args, native_calmar_ratio); }
+
+/* bitor(a,b): 位或。lume 的 `|` 保留给 enum variant, 故位或走内建。
+ * 只接受整数(与位运算符一致); 非整数 → error。 */
+static void native_bitor(VM *vm, int argc, Value *args, Value *out) {
+    if (argc < 2 || !IS_INT(args[0]) || !IS_INT(args[1])) {
+        vm_set_error(vm, "bitor() needs int arguments");
+        return;
+    }
+    *out = val_int(AS_INT(args[0]) | AS_INT(args[1]));
+}
+
+Value b_bitor(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_bitor); }

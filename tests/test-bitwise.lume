@@ -1,0 +1,51 @@
+// tests/test-bitwise.lume —— 位运算符(& ^ << >>)端到端单测。
+// 验证 lexer/parser 优先级、typecheck、interp 的 i64 语义。
+// `|` 保留给 enum variant,不做位或(需要时用内建函数)。
+// 运行: ./bin/lume tests/test-bitwise.lume
+// 期望输出以 "bitwise ok N" 结尾(所有断言通过,N 为断言数)。
+
+let st = { pass: 0, fail: 0 };
+let count = 0;
+
+func expect(name, got, want) {
+  if (got == want) {
+    st.pass = st.pass + 1;
+  } else {
+    st.fail = st.fail + 1;
+    print("FAIL " + name + "  got=" + str(got) + "  want=" + str(want));
+  }
+}
+
+// 基本四则
+expect("12 & 10", 12 & 10, 8); count = count + 1;
+expect("12 ^ 10", 12 ^ 10, 6); count = count + 1;
+expect("1 << 4", 1 << 4, 16); count = count + 1;
+expect("256 >> 4", 256 >> 4, 16); count = count + 1;
+
+// i64 环绕与符号
+expect("-1 & 0xff", -1 & 255, 255); count = count + 1;
+expect("-8 >> 1", -8 >> 1, -4); count = count + 1;          // 算术右移保留符号
+expect("1 << 63", 1 << 63, -9223372036854775808); count = count + 1;  // 环绕到 LLONG_MIN
+expect("-1 >> 63", -1 >> 63, -1); count = count + 1;        // 全 1 算术右移仍全 1
+expect("(1<<62)<<2", (1 << 62) << 2, 0); count = count + 1; // x86 shl: 移出高位 → 0
+
+// 优先级(与 C/Python 一致): 移位 > 关系 > 相等 > & > ^
+expect("1 + 2 << 3", 1 + 2 << 3, 24); count = count + 1;    // 加法先于移位
+expect("16 >> 2 & 3", 16 >> 2 & 3, 0); count = count + 1;   // (16>>2)&3 = 0
+expect("5 & 3 ^ 1", 5 & 3 ^ 1, 0); count = count + 1;       // (5&3)^1 = 0
+expect("(1 & 2) == 0", (1 & 2) == 0, true); count = count + 1;
+expect("8 ^ 3 & 1", 8 ^ 3 & 1, 9); count = count + 1;       // 8 ^ (3&1) = 9
+
+// 结合性: 移位/位与/异或都是左结合
+expect("1 << 2 << 3", 1 << 2 << 3, 32); count = count + 1;  // (1<<2)<<3
+expect("12 ^ 5 ^ 3", 12 ^ 5 ^ 3, 10); count = count + 1;    // (12^5)^3
+
+// 大数/连续运算
+expect("0xffff & 0x0ff0", 65535 & 4080, 4080); count = count + 1;
+expect("(0x1234 << 8) >> 8", (4660 << 8) >> 8, 4660); count = count + 1;
+
+if (st.fail > 0) {
+  print("bitwise FAILED (" + str(st.fail) + " of " + str(count) + ")");
+} else {
+  print("bitwise ok " + str(count));
+}

@@ -466,10 +466,14 @@ Token *lex_all(const char *source, char *errbuf, size_t errbuf_size,
             case '/': t = TOK_SLASH; break;
             case '%': t = TOK_PERCENT; break;
             case '<':
-                t = source[o.lx.pos + 1] == '=' ? (width = 2, TOK_LE) : TOK_LT;
+                t = source[o.lx.pos + 1] == '=' ? (width = 2, TOK_LE)
+                  : source[o.lx.pos + 1] == '<' ? (width = 2, TOK_SHL)
+                  : TOK_LT;
                 break;
             case '>':
-                t = source[o.lx.pos + 1] == '=' ? (width = 2, TOK_GE) : TOK_GT;
+                t = source[o.lx.pos + 1] == '=' ? (width = 2, TOK_GE)
+                  : source[o.lx.pos + 1] == '>' ? (width = 2, TOK_SHR)
+                  : TOK_GT;
                 break;
             case '=':
                 t = source[o.lx.pos + 1] == '=' ? (width = 2, TOK_EQEQ)
@@ -486,7 +490,13 @@ Token *lex_all(const char *source, char *errbuf, size_t errbuf_size,
                 t = source[o.lx.pos + 1] == '|' ? (width = 2, TOK_OR) : TOK_PIPE;
                 break;
             case '&':
-                t = source[o.lx.pos + 1] == '&' ? (width = 2, TOK_AND) : TOK_ERROR;
+                /* `&&` stays logical and; a lone `&` is now bitwise and.
+                 * It used to be a lex error, so no existing program can
+                 * read the new meaning. */
+                t = source[o.lx.pos + 1] == '&' ? (width = 2, TOK_AND) : TOK_AMP;
+                break;
+            case '^':
+                t = TOK_CARET;
                 break;
             default:
                 t = TOK_ERROR;

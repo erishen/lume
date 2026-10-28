@@ -432,6 +432,7 @@ const char *const LUME_BUILTIN_NAMES[] = {
     /* math builtins (2026-09-28, builtins_math.c) */
     "abs", "sqrt", "exp", "log", "ln", "pow", "floor", "ceil", "round",
     "min", "max", "pi", "e",
+    "bitor", /* bitwise or (2026-10-28): `|` 保留给 enum variant */
     /* statistical distribution builtins (2026-10-20, builtins_math.c + rt.c) */
     "normcdf", "erf", "gamma", "lgamma", "igamma", "ibeta", "tdist_cdf", "chisq_cdf",
     /* 技术指标序列内建 (#54, 2026-10-25, builtins_math.c) */
@@ -485,6 +486,7 @@ static const BuiltinSig LUME_BUILTIN_SIG[] = {
     {"render",1,1}, {"sort",1,1}, {"str_match",2,2}, {"regex",2,2},
     {"sha256",1,1}, {"base64_encode",1,1}, {"base64_decode",1,1},
     {"pow",2,2}, {"hmac_sha256",2,2}, {"push",2,2}, {"map",2,2}, {"filter",2,2},
+    {"bitor",2,2},
     {"reduce",3,3}, {"igamma",2,2}, {"ibeta",3,3}, {"tdist_cdf",2,2}, {"chisq_cdf",2,2},
     {"sql_tx_begin",1,1}, {"sql_tx_exec",2,3}, {"sql_tx_commit",1,1}, {"sql_tx_rollback",1,1},
     {"normcdf",1,1}, {"erf",1,1}, {"gamma",1,1}, {"lgamma",1,1},

@@ -825,6 +825,19 @@ static void eval_expr_binary(VM *vm, Node *n, Env *env) {
             case OP_LE:  vm_push(vm, val_bool(a <= b)); return;
             case OP_GT:  vm_push(vm, val_bool(a >  b)); return;
             case OP_GE:  vm_push(vm, val_bool(a >= b)); return;
+            case OP_BAND: vm_push(vm, val_int(a & b)); return;
+            case OP_BXOR: vm_push(vm, val_int(a ^ b)); return;
+            case OP_BOR:  vm_push(vm, val_int(a | b)); return;
+            case OP_SHL:
+                /* 移位数 >= 64 是 UB; 左移负数/溢出按 i64 环绕语义。C 的
+                 * << 对负数实现相关,这里用无符号计算再转回,与 native 后端
+                 * 的 shl i64 一致(SPEC §integers)。 */
+                vm_push(vm, val_int((long long)((unsigned long long)a << (b & 63))));
+                return;
+            case OP_SHR:
+                /* 算术右移:负数保留符号位(与 native 的 ashr i64 一致)。 */
+                vm_push(vm, val_int((long long)a >> (b & 63)));
+                return;
             default: vm_push(vm, val_null()); return;
         }
     }
@@ -1537,6 +1550,7 @@ void bridge_seed_builtins(VM *vm) {
         {"kelly_fraction", b_kelly_fraction},
         {"min", b_min},
         {"max", b_max},
+        {"bitor", b_bitor},
         {"tools", b_tools},
         {"skills", b_skills},
         {"mcps", b_mcps},

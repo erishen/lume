@@ -499,6 +499,17 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
                 }
                 return type_prim(TY_BOOL);
             }
+            if (op == OP_SHL || op == OP_SHR ||
+                op == OP_BAND || op == OP_BXOR || op == OP_BOR) {
+                Type *lt = ck_expr(c, n->as.binary.left, NULL);
+                Type *rt = ck_expr(c, n->as.binary.right, NULL);
+                /* 位运算只对整数定义(i64)。浮点/字符串是类型错误。 */
+                if (lt && rt && lt->kind != TY_ANY && rt->kind != TY_ANY) {
+                    if (lt->kind != TY_INT || rt->kind != TY_INT)
+                        ck_fail(c, n->line, "bitwise operators need ints");
+                }
+                return type_prim(TY_INT);
+            }
             /* arithmetic */
             Type *lt = ck_expr(c, n->as.binary.left, NULL);
             Type *rt = ck_expr(c, n->as.binary.right, NULL);
