@@ -25,6 +25,10 @@
 *.md
 .env
 .env.*
+# .env.example 是构建输入的必需品: runtime 阶段 COPY 它进 /app (Dockerfile:41)。
+# 上面 `.env.*` 会把它一起排掉, 于是 "COPY .env.example" 报 not found 整层失败。
+# 必须显式豁免(秘密仍是 .env, 只放行 example 模板)。
+!/.env.example
 
 # --- agent-httpd/: 只留 src/(C 源+头) 与构建脚本, 排掉大体积预置物 ---
 /agent-httpd/cgi-bin/    # 109M
