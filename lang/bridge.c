@@ -126,6 +126,13 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
             req->authorization[0] ? make_string_cstr(vm, req->authorization)
                                   : val_null());
 
+    /* Cookie likewise has a dedicated parser field (http_parse.c writes the
+     * raw "Cookie:" value unsplit; it is NOT captured in extra_headers).
+     * Expose it so DSL can read session cookies for page navigation that
+     * cannot carry a custom header. */
+    map_set(vm, m, "cookie",
+            req->cookie[0] ? make_string_cstr(vm, req->cookie) : val_null());
+
     /* Query string: req->path may carry "?a=1&b=2" (route matching already
      * strips it). Expose the raw string (no '?') plus a decoded params map:
      * '+' -> space, %XX -> byte, a segment without '=' gets an empty value,
