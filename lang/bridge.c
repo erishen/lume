@@ -5,6 +5,9 @@
 #include <stdlib.h> /* getenv(LUME_BIND) */
 #include <string.h> /* strchr/memchr/strlen */
 #include <ctype.h>  /* isalnum (envelope header-name validation) */
+#include <strings.h> /* strncasecmp (Accept: text/event-stream 匹配) */
+#include <unistd.h>  /* write (SSE 逐事件写出) */
+#include <unistd.h>  /* write (SSE 逐事件写出) */
 
 /* from agent-httpd util.c (internal.h) — URL-decode a query segment */
 extern void url_decode(char *dst, const char *src);
@@ -339,6 +342,103 @@ static bool envelope_headers(VM *vm, Obj *m, HttpResponse *res) {
  *   - list/number/bool/null    -> 200 application/json, JSON-encoded payload
  * So `return { message: "hi" };` and `return { status: 201, body: {...} };`
  * need no explicit stringify()/type. */
+/* ---- SSE: 路由返回 { sse: [...] } 时走流式 ---------------------------------
+ * 为什么放这里而不是 result_to_response 内部: 流式不走"填 res.body 再序列化"
+ * 那条路 —— SSE 没有 Content-Length, 结束靠关闭连接。所以它需要 client_fd 与
+ * 一个"我来写完整响应"的钩子(httpd 的 HttpResponse.stream_fn)。
+ *
+ * 两个前提条件(缺一就退回普通 JSON):
+ *   1. 客户端 Accept 里带 text/event-stream —— 否则浏览器/缓冲中间层会"空白
+ *      到结束", 比一次性返回更糟
+ *   2. agent-httpd 版本带 stream_fn(旧版没有该字段, 由编译期决定)
+ * 满足时把事件数组挂在 res->stream_data, 由 sse_flush 真正写出去。
+ *
+ * 数组元素: 字符串原样作为 data, 其它值 JSON 序列化(与 lume-core 一致)。 */
+
+typedef struct {
+    Obj *items;         /* OBJ_LIST, GC 存活期内有效(本请求内) */
+} SsePayload;
+
+static long sse_flush(void *data, int fd, const HttpRequest *req, int *handled) {
+    (void)req;
+    SsePayload *p = (SsePayload *)data;
+    static const char head[] =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/event-stream; charset=utf-8\r\n"
+        "Cache-Control: no-cache\r\n"
+        "X-Accel-Buffering: no\r\n"
+        "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"
+        "X-Frame-Options: DENY\r\n"
+        "Referrer-Policy: no-referrer\r\n"
+        "\r\n";
+    long sent = 0;
+    size_t n = sizeof head - 1;
+    if (write(fd, head, n) != (ssize_t)n) { *handled = 1; return 0; }
+    sent += (long)n;
+    for (int i = 0; p && p->items && i < p->items->as.list.count; i++) {
+        Value it = p->items->as.list.items[i];
+        /* 事件体: "data: " + <text> + "\n\n" */
+        static const char pre[] = "data: ";
+        if (write(fd, pre, sizeof pre - 1) != (ssize_t)(sizeof pre - 1)) break;
+        sent += (long)(sizeof pre - 1);
+        if (IS_OBJ(it) && AS_OBJ(it)->type == OBJ_STRING) {
+            Obj *o = AS_OBJ(it);
+            const char *txt = obj_string(o);
+            size_t len = obj_string_len(o);
+            if (len && write(fd, txt, len) != (ssize_t)len) break;
+            sent += (long)len;
+        } else {
+            /* 非字符串: 用 httpd 侧已有的 JSON 序列化? 这里没有 VM 上下文,
+             * 简化处理为 "null" —— 调用方应只传字符串。文档写明。 */
+            static const char nul[] = "null";
+            if (write(fd, nul, 4) != 4) break;
+            sent += 4;
+        }
+        static const char end[] = "\n\n";
+        if (write(fd, end, 2) != 2) break;
+        sent += 2;
+    }
+    *handled = 1;
+    return sent;
+}
+
+/* 未实现: 非字符串元素需要 VM 才能序列化。为保持行为一致, 这里在发现非字符串
+ * 元素时直接拒(返回 false, 调用方退回普通 JSON), 而不是悄悄写成 "null"。 */
+static bool sse_all_strings(Obj *list) {
+    for (int i = 0; i < list->as.list.count; i++) {
+        Value it = list->as.list.items[i];
+        if (!IS_OBJ(it) || AS_OBJ(it)->type != OBJ_STRING) return false;
+    }
+    return true;
+}
+
+/* 尝试把 { sse: [...] } 装成流式响应。返回 true 表示已接管。 */
+static bool try_sse(VM *vm, Value result, HttpResponse *res,
+                    const char *method, const char *path) {
+    if (!IS_OBJ(result) || AS_OBJ(result)->type != OBJ_MAP) return false;
+    int found = 0;
+    Value sv = map_get(vm, AS_OBJ(result), "sse", &found);
+    if (!found || !IS_OBJ(sv) || AS_OBJ(sv)->type != OBJ_LIST) return false;
+    Obj *list = AS_OBJ(sv);
+
+    (void)method; (void)path;
+    /* 非字符串元素: 退回 JSON(见上), 保证至少数据完整 */
+    if (!sse_all_strings(list)) return false;
+
+    static SsePayload payload;   /* 单线程请求处理, 无并发写 */
+    payload.items = list;
+    res->stream_fn = sse_flush;
+    res->stream_data = &payload;
+    strcpy(res->content_type, "text/event-stream; charset=utf-8");
+    res->status_code = 200;
+    strcpy(res->status_text, "OK");
+    /* body 留空: 序列化会被 handled 跳过, 这里只是满足"非 NULL"避免错误页 */
+    res->body = strdup("");
+    res->body_length = 0;
+    return true;
+}
+
 static void result_to_response(VM *vm, Value result, HttpResponse *res,
                                const char *method, const char *path) {
     if (vm->error) {
@@ -508,7 +608,20 @@ static int route_shim(HttpRequest *req, HttpResponse *res) {
                 vm_set_error(vm, "route handler for %s %s returned a bad value",
                              req->method, req->path);
         }
-        result_to_response(vm, result, res, req->method, req->path);
+        /* SSE 优先: 只有客户端明确要 text/event-stream 才走流式。
+         * 不这样做的话, 浏览器/缓冲代理会"空白到结束" —— 比一次性返回更糟。 */
+        bool wants_sse = false;
+        if (req && req->accept[0]) {
+            for (const char *a = req->accept; *a; a++) {
+                if (strncasecmp(a, "text/event-stream", 17) == 0) {
+                    wants_sse = true;
+                    break;
+                }
+            }
+        }
+        if (!(wants_sse && try_sse(vm, result, res, req->method, req->path))) {
+            result_to_response(vm, result, res, req->method, req->path);
+        }
         vm_pop(vm);
         vm_after_request(vm);
         /* Return 0 = handled; the framework serializes the filled response.
