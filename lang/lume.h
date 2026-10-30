@@ -410,7 +410,7 @@ bool values_equal(Value a, Value b);
  * lume-nsgm's PayPal variant; a third module silently fails registration with
  * a message that blames the last route, not the full table). 128 leaves room
  * for several modules per app; RouteRec is ~40B, so the VM grows ~4KB. */
-#define MAX_AL_ROUTES 128
+#define MAX_AL_ROUTES 256
 #define MAX_AL_TOOLS 96
 
 typedef struct {
