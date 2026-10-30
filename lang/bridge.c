@@ -607,7 +607,10 @@ static int route_shim(HttpRequest *req, HttpResponse *res) {
     VM *vm = g_vm;
     for (int i = 0; i < vm->route_count; i++) {
         RouteRec *r = &vm->routes[i];
-        if (strcmp(r->method, req->method) != 0) continue;
+        /* HEAD falls through to GET routes (RFC 9110 9.3.2): the handler runs,
+         * the framework drops the body but keeps Content-Length. */
+        if (strcmp(r->method, req->method) != 0 &&
+            !(strcmp(req->method, "HEAD") == 0 && strcmp(r->method, "GET") == 0)) continue;
         if (!route_pattern_match(r->path, req->path)) continue;
 
         request_to_value(vm, req, r->label);   /* request map pushed */
