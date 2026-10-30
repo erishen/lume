@@ -571,8 +571,17 @@ static int route_pattern_match(const char *pattern, const char *path) {
 
     /* Dynamic ':name' segments: match exactly one path segment (never '/'),
      * any value. No capture here — the framework matcher already wrote the
-     * decoded values into the request (request_to_value exposes req.params). */
-    const char *pp = pattern, *cp = path;
+     * decoded values into the request (request_to_value exposes req.params).
+     *
+     * Copy the query-stripped prefix first: the last segment's length must
+     * stop at '?' (otherwise "/:slug/" vs "/kb_abac/?lang=en" sees a segment
+     * value of "kb_abac/?lang=en" and never matches), and a '/' inside the
+     * query ("?from=https://…") must not be treated as a path separator. */
+    char clean[MAX_PATH_SIZE];
+    if (n >= sizeof clean) return 0;
+    memcpy(clean, path, n);
+    clean[n] = '\0';
+    const char *pp = pattern, *cp = clean;
     for (;;) {
         const char *pe = strchr(pp, '/');
         const char *ce = strchr(cp, '/');
