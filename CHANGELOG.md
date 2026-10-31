@@ -4,7 +4,15 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.12.0] - 2026-10-31
+
+### Changed
+
+- `LUME_VERSION` 0.11.0 → 0.12.0 (binary self-report 单一来源).
+- Bumped vendored `agent-httpd` gitlink to v0.12.0 (`f4d1cab`) — 含 MCP
+  tool-registry HTTP 端点、路由级 SSE、Referrer-Policy 放宽、以及
+  `tools/call` 的 fail-closed 防御. **部署注意:** 改版本宏后须
+  `rm -f build/*.o bin/lume` 再重建, 否则二进制自报旧 0.11.0.
 
 ## [0.11.0] - 2026-10-25
 
