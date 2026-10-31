@@ -182,7 +182,8 @@ SRCS     := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parse
             lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/loader.c lang/vdom.c \
             lang/builtins_http.c lang/bridge.c lang/token.c lang/iquest.c \
             lang/localfns.c \
-            lang/compat/sha256/sha256.c
+            lang/compat/sha256/sha256.c lang/compat/sha512/sha512.c \
+            lang/compat/ed25519/ed25519.c
 # Windows: 去掉吃 agent-httpd 的三片(iquest 走 minijson 读取半 + agenthttpd_route,
 # builtins_sql 走 AH 里的 db_query_json/db_write_exec, builtins_http 是裸 socket +
 # 可选 TLS), 换入 bridge_stub.c; 另加 os_win32.c 供 builtins_fs.c 的
@@ -197,7 +198,8 @@ ifneq ($(strip $(IS_WINDOWS)),)
             lang/bridge_stub.c lang/token.c lang/os_win32.c \
             lang/builtins_stub.c lang/catalog_stub.c \
             lang/localfns.c \
-            lang/compat/sha256/sha256.c \
+            lang/compat/sha256/sha256.c lang/compat/sha512/sha512.c \
+            lang/compat/ed25519/ed25519.c \
             lang/compat/regex/regcomp.c lang/compat/regex/regexec.c \
             lang/compat/regex/regerror.c lang/compat/regex/tre-mem.c
 endif
@@ -241,7 +243,7 @@ build:
 bin:
 	mkdir -p bin
 else
-$(shell mkdir -p build bin build/compat/regex build/compat/sha256 2>/dev/null)
+$(shell mkdir -p build bin build/compat/regex build/compat/sha256 build/compat/sha512 build/compat/ed25519 2>/dev/null)
 build: ;
 bin: ;
 endif

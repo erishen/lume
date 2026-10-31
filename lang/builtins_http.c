@@ -411,7 +411,61 @@ static int ssl_ctx_ready(void) {
     g_ssl_ctx = ctx;
     return 0;
 }
+
+/* 预热: 在**fork 之前**(单线程阶段)把 TLS 上下文与 CA 路径准备好。
+ *
+ * 为什么必须显式预热 —— macOS 上的 fork 安全闸门:
+ * Libcrypto 首次 SSL_CTX_new / set_default_verify_paths 时会摸到系统框架,
+ * 顺带初始化 Objective-C 运行时(CFNetwork/Security 那条链)与若干后台线程。
+ * 若这一步发生在 worker 里 —— 而 worker 本身就是父进程 fork 出来的 ——
+ * 子进程再碰这些已经"半初始化"的框架, libobjc 会直接 abort:
+ *   "+[NSString initialize] may have been in progress in another thread
+ *    when fork() was called ... Crashing instead."
+ * 表现是连接被对端掐断(RemoteDisconnected), 且只在**首次** HTTPS 时出现;
+ * 纯 HTTP 因为不碰 TLS 而不受影响 —— 很迷惑。
+ *
+ * 服务端(prefork 模型)只要在 start_worker_pool() 之前调一次本函数,
+ * 之后所有 worker 都继承一份初始化好的 CTX, 各进程独立使用自己的 fds。
+ * 注意 fork 后**不能**复用父进程已建立的 SSL*(连接状态是进程私有的),
+ * 但共享 CTX 是 OpenSSL 官方支持的用法 —— CTX 只放配置, 不放连接。 */
+#endif  /* HAVE_OPENSSL (ssl_ctx_ready) */
+
+/* 注意本函数在 #if 之外: 它是给服务端用的稳定入口, 无 libssl 的构建里也
+ * 必须有符号(返回 1 = "没有可预热的东西"), 否则调用方要么反复写 #if,
+ * 要么就得靠弱符号去猜。 */
+/* 定义在下面(open_conn_impl 之后用到它的地方); 预热需要提前调用。 */
+static int open_conn_impl(Url *u, const char *proxy, Conn *c, long deadline);
+static int tls_attach(Conn *c, const char *sni_host, long deadline);
+
+int lume_http_warmup(void) {
+#if defined(HAVE_OPENSSL)
+    if (ssl_ctx_ready() != 0) return -1;
+    /* 只建 CTX 不够 —— 实测: warmup 返回 0, 业务请求仍崩。原因是有一次
+     * objc/CFNetwork 的初始化发生在**握手内部**(读系统根证书走 Keychain),
+     * 而不是在 SSL_CTX_set_default_verify_paths 时。所以这里必须真的
+     * 完成一次 TLS 握手, 把那条链在单线程阶段就跑通。
+     *
+     * 失败不当错误: 没有外网的环境里, 预热的目标是"别在 worker 里炸",
+     * 而不是"必须连通"。连不上会由业务请求自己报错。 */
+    Url u;
+    memset(&u, 0, sizeof u);
+    u.host = "example.com";
+    u.port = 443;
+    u.https = 1;
+    /* scheme 指针类型看 Url 定义; 这里只在直连(tls_attach)路径用到 host/port。 */
+    Conn probe;
+    memset(&probe, 0, sizeof probe);
+    probe.fd = -1;
+    long dl = now_ms() + 5000;
+    if (open_conn_impl(&u, NULL, &probe, dl) == 0 && probe.fd >= 0) {
+        (void)tls_attach(&probe, "example.com", dl);
+        conn_close(&probe);
+    }
+    return 0;
+#else
+    return 1;   /* 无 libssl 的构建: HTTPS 本来就不支持, 无需预热 */
 #endif
+}
 
 /* 挂 TLS。返回 0 成功,1 = 本构建没有 libssl,-1 = 握手/证书失败。
  * SNI 必须设,否则证书校验拿不到对得上的名字。 */

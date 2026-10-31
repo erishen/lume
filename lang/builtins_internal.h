@@ -118,6 +118,12 @@ void native_http_put(VM *vm, int argc, Value *args, Value *out);
 void native_http_patch(VM *vm, int argc, Value *args, Value *out);
 void native_http_delete(VM *vm, int argc, Value *args, Value *out);
 
+/* 在 fork 之前预热 TLS 上下文(见 builtins_http.c 里的长注释)。
+ * 服务端用 prefork 模型时**必须**在起 worker 前调一次: macOS 上
+ * libobjc 的 fork 闸门会让"子进程里首次初始化 TLS"直接 abort,
+ * 表现为首次 HTTPS 出站连接被掐断。返回 0 成功 / -1 失败 / 1 无 libssl。 */
+int lume_http_warmup(void);
+
 /* ---- 高阶集合函数(builtins_hof.c) ---- */
 void native_range(VM *vm, int argc, Value *args, Value *out);
 void native_map(VM *vm, int argc, Value *args, Value *out);

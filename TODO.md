@@ -135,7 +135,63 @@ exits cleanly). Details and open hardening items live in:
   for codegen + LSP bridge (**done 2026-10-22**: codegen covered by
   `asan-compile` — `--compile-text` / `--compile-llvm` /
   `native_backends.sh` under ASan+LSan; LSP doc-lifetime fixed —
-  didClose + exit cleanup in `bridge_lsp.c`, `tests/lsp_smoke.sh` wired
+  didClose + exit cleanup in `bridge_lsp.c`, `test`
+
+## P13 (host mirror) — 2026-10-30 React SSR / nsbp-lume dependency puzzle
+
+Filed 2026-10-30 from two real projects in this checkout:
+`personal/personal-site/nsbp` (React 19 + react-router-dom + `loadable`
++ webpack) and `personal/personal-site/nsbp-lume` (React 19 +
+react-router-dom + `loadable` + esbuild, SSR via `renderToPipeableStream`).
+The host repo's job here is the **mirror discipline** and the **dependent-
+project disposition**, not to re-write lume-core's TODO — the language-side
+item is the `lume-core/TODO.md` P14 block.
+
+### Mirror + host discipline
+
+- [ ] Keep the host `lang/` mirror honest if/when the core lands the React-
+  SSR-relevant builtin/server gaps from core P14: any new builtin or server
+  behavior that nsbp-lume-style projects would want from a lume-hosted
+  React SSR site must land in **lume-core**, not in the host's `lang/` tree,
+  otherwise `make sync-lang` turns the host into DRIFT next time the core
+  and host diverge (the exact problem the host TODO already warns about).
+- [ ] Re-run `make sync-lang` discipline (commit core-mirrored content first,
+  then sync to refresh the PIN) if lume-core P14 produces a syncable change;
+  re-verify the relevant dependent project (e.g. a lume-hosted variant of
+  nsbp-lume) after the sync rather than before.
+
+### Dependent-project disposition
+
+- [ ] Decide, for `personal/personal-site/nsbp-lume`, whether it stays a
+  **parallel** React SSR project (Hono/node-server, no lume dependency —
+  current state) or becomes a **lume-hosted** variant (lume-core `server{}`
+  + the project's React SSR build step). The current code does not answer
+  this: `nsbp-lume` adds lume-core to its build/runtime picture only as a
+  comparison target, not as a dependency. Writing that decision down here
+  keeps the next README/architecture pass from reprising it.
+- [ ] If the decision is "lume-hosted variant": add a concrete path item,
+  not a vague one — e.g. "wire the nsbp-lume React SSR build step so a
+  lume-core `server{}` route serves the prebuilt shell + client chunk +
+  hydration boot, with the esbuild/ webpack `react-dom/server` polyfill
+  story from core P14 resolved first." Do **not** create a TODO item that
+  assumes `lume-core/build/lang/c/` already exists — that path does not
+  exist as a source directory today (lume-core emits C on demand, it does
+  not mirror `lang/` there).
+- [ ] If the decision is "parallel / no lume benefit": record why (e.g.
+  the React SSR dependency surface, the node-on-windows footprint, and the
+  missing esbuild polyfill already make the React SSR host a Node project;
+  lume-core's builtin server does not absorb that), so the next review does
+  not re-open it as a "gap."
+
+### node-on-windows ops note (host-side read-only)
+
+Not a lume-core language item, but relevant to anyone running these projects
+on Windows: today's working Node toolchain on this Windows box is the locally
+installed `node@22.11.0` / `npm@10.9.2`; the system `npm@9.6.x` is a known
+poison for npm-linked workspace packages and blocks `npm run build` on
+nsbp-lume. If the lume host framework ever targets a Windows developer/deployer
+picture that includes a React SSR site, the ops story must include "use a sane
+Node 20+ toolchain, not the system npm."s/lsp_smoke.sh` wired
   into `make asan` under LSan). P11 fully closed.
 
 Host action: keep the two sub-repo TODOs in sync when picking up
@@ -167,3 +223,82 @@ allocation-heavy tests (Windows ASan runtime shadow-map exhaustion,
 not parameter-fixable) and `tests/lsp_smoke.sh` cannot fork the ASan
 binary under MSYS2. The `asan-compile` emitter gate, `--check` over
 examples, `lang-basics` and the interp leg are all green on Windows.
+
+## P13 (audit mirror) — 2026-10-30 fastapi-web migration inventory
+
+Filed 2026-10-30 after scoping a FastAPI service
+(`personal/web-services/fastapi-web`) onto a lume DSL server. Conclusion:
+the framework side is further along than expected — MySQL is a real
+backend, static serving has gzip/ETag/Range, htpasswd + bcrypt + session
+cookies exist, and the response envelope can already override the
+security header block. Four gaps block a 1:1 port; only one of them is a
+real engineering item. Per-repo detail lives in the two sub-TODOs:
+
+- `agent-httpd/TODO.md` → **P2** — security review (CSRF/Host allowlist,
+  cookie `Secure`, login throttling, `req.user`, audit log).
+- `lume-core/TODO.md` → **P13** — language builtins (`crypt_verify`,
+  `const_time_eq`, multipart, fs allowlist).
+
+Host-side disposition (what this repo decides for dependent projects):
+
+- [ ] **File uploads are out of scope until the body path is redesigned.**
+      `MAX_REQUEST_SIZE` is 64 KiB and the body must fit one read buffer
+      (`agent-httpd/src/httpd.h:8`, `http.c` 413 path force-closes), and
+      there is no multipart parser anywhere in either tree. The download
+      direction works today (Lume strings are NUL-safe, so `read_file` +
+      a `{type, headers, body}` envelope serves bytes). Decision for
+      fastapi-web-style services: no uploads; if a use case truly needs
+      them, schedule the buffer redesign, do not bolt a parser onto a
+      64 KiB ceiling.
+- [ ] **Redis is not adopted.** The tree has zero Redis support, and the
+      DSL gives nothing that a SQLite table cannot do at this scale.
+      Porting a `redis_client.py` module should become "cache/queue tables
+      in the same DB", not a new builtin.
+- [ ] **No ORM, no migrations, no OpenAPI.** `sql_query`/`sql_write` are
+      raw SQL with guardrails (`builtins_sql.c`); schema changes stay in
+      the project's own init script. Do not file this as a gap again —
+      it is the price of the zero-dependency property that also removes
+      the whole CVE surface (see the security review).
+- [ ] **The middleware chain stays a per-handler convention.** IP filter,
+      path protection and anti-spam were FastAPI middleware; here they
+      become a `guard(req)` call at the top of each handler. Accepted,
+      with the caveat that one forgotten call is a hole — the containment
+      for that is the `is_same_origin` gate the agent-httpd P2 item adds,
+      which cannot be forgotten because it lives in the framework.
+- [ ] **Builtins land in lume-core first, then `make sync-lang`.** The
+      warmup change below is exactly the shape that goes wrong: host-only
+      edits to a synced file turn into DRIFT on the next sync. Any new
+      builtin adds **five** coordinated edits — `LUME_BUILTIN_NAMES` and
+      the arity contract in `typecheck.c`, the `interp.c` builtin table,
+      the `b_*` wrapper in `builtins.c`, and the prototype in
+      `builtins_internal.h` — plus the host mirror.
+
+### In flight — macOS fork-safety TLS warmup (uncommitted 2026-10-30)
+
+Both working trees carry an uncommitted change that must land together:
+
+- this repo: `lang/builtins_http.c` + `lang/builtins_internal.h` add
+  `lume_http_warmup()` — builds the SSL CTX **and performs one probe TLS
+  handshake** before any thread exists, because macOS libobjc aborts the
+  child when Objective-C runtime init (CFNetwork/Security, reached from
+  the first cert-store read) is in progress across a `fork()`. Compiles
+  clean against the pinned submodule (verified 2026-10-30).
+- `agent-httpd/src/core/framework.c` calls it through a **weak symbol**
+  right after `agent_init()` and before `pthread_create(session_prune_
+  thread)` — the ordering is the whole point, so do not move the call
+  below the thread or below `start_worker_pool()`.
+
+- [ ] Commit both halves (core/gitlink discipline: the agent-httpd side
+      first, then the host picking up the bumped gitlink), or revert both
+      together. A half-landed pair compiles on this machine only.
+- [ ] Warmup currently dials `example.com:443` with a 5 s deadline on
+      every server start. That is a network dependency and a third-party
+      connection from a local service. Replace the probe with something
+      that exercises the same init path without external traffic (connect
+      + `SSL_CTX_set_default_verify_paths` against a local socket, or gate
+      the dial behind an env opt-in), and make the failure mode a warning
+      rather than a 5 s startup stall on offline machines.
+- [ ] Add a regression that runs the prefork server with an outbound
+      `https://` route as its **first** request — the bug only reproduces
+      on the first HTTPS egress per process, so a test that warms up in
+      the parent by accident proves nothing.
