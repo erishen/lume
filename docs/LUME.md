@@ -437,7 +437,23 @@ portfolio_* 工具,`tool` 声明在模块顶层照常注册,入口 import 一行
 | `now()` | 当前时间戳 |
 | `env(k)` | 环境变量值;未设置 → `null`。凭据命名的变量(`*API_KEY`/`*TOKEN`/`*SECRET`/`*PASSWORD`/`*CREDENTIAL` 等,大小写不敏感、词边界匹配)对脚本层脱敏 → `null`(运行时自身读取不受影响);`HTPASSWD_FILE` 这类含 PASSWD 但语义非密钥的配置名不受影响 |
 | `files(dir)` | 目录条目列表(排序;目录带尾部 `/`;缺失 → `[]`) |
+| `http_get/http_post/http_put/http_patch/http_delete(url, opts?)` | HTTP 请求, 返回 `{ok, status, body, err, headers}` |
 | `read_file(path)` | 整个文件内容;缺失/不可读 → `null`(上限 16 MiB) |
+**`http_*` 的返回值与 `headers`。** `opts` 可给 `headers`(出站请求头)、
+`timeout`(秒)、`max_bytes`、`allow_private`(默认拒绝回环/私有地址, 本机
+调试要显式开)。返回 map 里 `headers` 是**最后一跳**的响应头, 键名统一小写:
+
+```lume
+let r = http_get("http://127.0.0.1:8080/login", {allow_private: true});
+let cookie = get(get(r, "headers", {}), "set-cookie", "");   // 小写键名
+```
+
+键名小写是因为 HTTP 头名不区分大小写而 map 的键区分 —— 不归一化的话,
+调用方要猜 `get(h,"Set-Cookie")` 还是 `"set-cookie"`, 猜错的症状是
+"头明明有, 却取不到"。同名头出现多次时用 `", "` 连接(与 curl 呈现一致),
+调用方可按逗号切开逐条解析 —— 比只留最后一条安全, 后者会悄悄丢掉会话 cookie。
+
+
 | `write_file(path, s)` | 写文件(**原子写**:先写同目录 `.tmp.<pid>` 再 rename,崩溃不会留半截文件);成功 → `true` |
 | `mkdir(path)` | 逐级创建目录(0700),已是目录也返回 `true` |
 | `lock_file(path, 等待毫秒?)` | flock 排他锁(文件自动创建 0600;进程死自动释放;同进程再次调用会替换旧锁);拿到 → `true`,超时/失败 → `false` |

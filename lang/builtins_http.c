@@ -1064,6 +1064,65 @@ static void http_call(VM *vm, int argc, Value *args, Value *out,
      * length 用 resp.len 而非 strlen),这之后才能释放并复位缓冲区。 */
     map_set(vm, r, "body", make_string(vm, resp.p ? resp.p : "", resp.len));
     map_set(vm, r, "err", make_string_cstr(vm, err[0] ? err : ""));
+    /* headers: 最后一跳的响应头, 小写键名 -> 值。
+     *
+     * 为什么需要: 有些协议把会话状态放在 Set-Cookie 里(典型是家用路由器的
+     * 管理后台: 先 GET 首页拿 cookie, 再带这个 cookie 登录, 之后所有请求都
+     * 依赖它)。以前这里只返回 body, 调用方拿不到 cookie, 于是这类交互在
+     * .lume 里根本写不出来 —— 只能留一个 Python 脚本在镜像里做。
+     *
+     * 名字统一小写: HTTP 头名大小写不敏感, 但 map 的键是敏感的。
+     * 不做归一化的话, 调用方要写 get(h,"Set-Cookie") 还是 "set-cookie"
+     * 全靠猜, 猜错的症状是"cookie 明明是有的, 却取不到"。
+     *
+     * 同名头出现多次时用 ", " 连接(与 curl/浏览器的呈现一致):
+     * Set-Cookie 的多个值不该被合并, 但合并后仍可按逗号切开逐条解析,
+     * 比"只留最后一条"安全 —— 后者会悄悄丢掉会话 cookie。 */
+    Obj *hm = AS_OBJ(make_map(vm));
+    vm_push(vm, val_obj(hm));
+    if (hdr[0]) {
+        char *save = NULL;
+        char *line = strtok_r(hdr, "\r\n", &save);
+        /* 第一行是状态行, 跳过 */
+        if (line) line = strtok_r(NULL, "\r\n", &save);
+        while (line) {
+            char *colon = strchr(line, ':');
+            if (colon) {
+                *colon = '\0';
+                char *val = colon + 1;
+                while (*val == ' ' || *val == '\t') val++;
+                size_t vlen = strlen(val);
+                while (vlen > 0 && (val[vlen-1] == ' ' || val[vlen-1] == '\t')) {
+                    val[--vlen] = '\0';
+                }
+                char lname[128];
+                size_t nl = strlen(line) < sizeof lname - 1 ? strlen(line) : sizeof lname - 1;
+                for (size_t i = 0; i < nl; i++) {
+                    lname[i] = (char)tolower((unsigned char)line[i]);
+                }
+                lname[nl] = '\0';
+                int found = 0;
+                Value prev = map_get(vm, hm, lname, &found);
+                if (found && IS_OBJ(prev) && AS_OBJ(prev)->type == OBJ_STRING) {
+                    /* 已有同名: 追加而不是覆盖 */
+                    size_t plen = strlen(obj_string(AS_OBJ(prev)));
+                    char *joined = malloc(plen + vlen + 3);
+                    if (joined) {
+                        memcpy(joined, obj_string(AS_OBJ(prev)), plen);
+                        memcpy(joined + plen, ", ", 2);
+                        memcpy(joined + plen + 2, val, vlen + 1);
+                        map_set(vm, hm, lname, make_string_cstr(vm, joined));
+                        free(joined);
+                    }
+                } else {
+                    map_set(vm, hm, lname, make_string_cstr(vm, val));
+                }
+            }
+            line = strtok_r(NULL, "\r\n", &save);
+        }
+    }
+    map_set(vm, r, "headers", val_obj(hm));
+    vm_pop(vm); /* hm */
     body_done(&resp);
     *out = vm_pop(vm);
 }

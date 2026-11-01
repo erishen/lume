@@ -4,6 +4,24 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`http_*` returns `headers`.** The request builtins used to hand back only
+  `{ok, status, body, err}`, so a script could send a `Cookie` header but never
+  read the `Set-Cookie` that issued it. That made a whole class of protocols
+  impossible to write in `.lume` — the common case being a router admin panel
+  that hands out a session cookie on `GET /html/index.html` and then requires it
+  for login and every request after. Such integrations had to stay in a
+  sidecar in another language.
+
+  Keys are lowercased because header names are case-insensitive while map keys
+  are not; without normalisation the caller has to guess `"Set-Cookie"` vs
+  `"set-cookie"`, and guessing wrong looks like "the header isn't there".
+  Repeated headers are joined with `", "` (matching curl's rendering) rather
+  than keeping only the last, which would silently drop a session cookie.
+
 ## [0.12.0] - 2026-10-31
 
 ### Changed

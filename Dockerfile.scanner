@@ -30,13 +30,23 @@ RUN rm -rf agent-httpd/bin agent-httpd/build && make all \
     LDFLAGS_EXTRA="-lcrypt -lm -static -Wl,--gc-sections"
 
 # ---------- Stage 2: 运行时 (debian, 静态二进制 + curl 供 agent 聊天/工具调上游) ----------
-FROM debian:bookworm-slim AS runtime
-# curl: agent.c 的 /react/api/chat 与工具执行 fork+execlp("curl") 调 LLM/SSE, 硬依赖。
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/* \
+# ---------- Stage 2: runtime ----------
+# alpine 而不是 debian:bookworm-slim。
+# 理由与 lume-a2a 相同(那边实测 121MB → 21.8MB): runtime 阶段只需要
+# curl + CA 证书 + 一个非 root 用户, 而 debian-slim 带进 97MB 的
+# libc6/coreutils/util-linux/perl-base/bash —— 与本项目无关。
+#
+# 二进制本身是静态的(ldd: "not a dynamic executable"), 所以换成 alpine
+# 不影响运行。保留 curl 是硬要求: agent.c:471 用 execlp("curl", ...)
+# 把 /react/api/chat 的模型请求交给 curl 子进程(TLS 由 curl 负责)。
+# 换成 scratch 会报 "curl exit 7"(找不到命令), 已实测。
+#
+# adduser 用 -S(系统用户)/-D(不设密码)/-u 10001: 与原来的 useradd 等价,
+# uid 必须保持一致 —— compose 里挂载的 .data 属主是按这个 uid 写的。
+FROM alpine:3.20 AS runtime
+RUN apk add --no-cache curl ca-certificates tzdata \
     && mkdir -p /app \
-    && useradd -u 10001 -d /home/lume -m lume
+    && adduser -S -D -H -u 10001 -h /home/lume lume
 COPY --from=lume-build /build/lume/bin/lume /usr/local/bin/lume
 COPY --from=lume-build /build/lume/.env.example /app/.env.example
 WORKDIR /app
