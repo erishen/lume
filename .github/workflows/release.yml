@@ -45,7 +45,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsqlite3-dev libcrypt-dev m4
+          sudo apt-get install -y libsqlite3-dev libcrypt-dev m4 \
+            libjitterentropy3-dev libzstd-dev zlib1g-dev liblzma-dev libbrotli-dev
 
       - name: Build lume
         run: make
@@ -92,9 +93,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           rm -rf build agent-httpd/bin agent-httpd/build
+          # ubuntu-26.04's static libcrypto.a pulls in compression + jitter
+          # entropy deps (OpenSSL 3.x built with them enabled); the 24.04
+          # runner's did not, which is why v0.12.0 linked fine and v0.12.1
+          # died on undefined jent_entropy_init_ex/ZSTD_*/deflateEnd.
           make all TARGET=bin/lume-static \
             CFLAGS_EXTRA="-D_GNU_SOURCE -DHAVE_CRYPT -DHAVE_CRYPT_H -ffunction-sections -fdata-sections -Wno-format-truncation -Wno-stringop-truncation" \
-            LDFLAGS_EXTRA="-lcrypt -lm -static -Wl,--gc-sections"
+            LDFLAGS_EXTRA="-lcrypt -lm -static -Wl,--gc-sections -ljitterentropy -lzstd -lz -llzma -lbrotlidec -lbrotlienc"
           echo "==> static binary type:"; file bin/lume-static
           # 静态二进制必须零动态依赖, 否则 scratch 镜像里 SQLite/启动会崩
           if ldd bin/lume-static 2>&1 | grep -q "not a dynamic executable"; then
