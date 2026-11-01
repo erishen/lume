@@ -47,11 +47,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libsqlite3-dev libcrypt-dev m4 \
             libzstd-dev zlib1g-dev liblzma-dev libbrotli-dev
-          # The jitterentropy dev package was renamed between runner
-          # images: 24.04-arm has libjitterentropy-dev, 26.04 (ubuntu-
-          # latest) renamed it to libjitterentropy3-dev.
+          # The jitterentropy dev package only exists on 26.04+ images
+          # (ubuntu-latest). 24.04-arm has none at all — and its libcrypto
+          # has no jitter references either, so the Makefile's probe just
+          # skips the -l flag there. Install failures are non-fatal.
           sudo apt-get install -y libjitterentropy3-dev \
-            || sudo apt-get install -y libjitterentropy-dev
+            || sudo apt-get install -y libjitterentropy-dev || true
 
       - name: Build lume
         run: make

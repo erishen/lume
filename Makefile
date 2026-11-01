@@ -152,15 +152,23 @@ ifeq ($(HAVE_OPENSSL),1)
     LDFLAGS += -Wl,-rpath,$(OPENSSL_PREFIX)/lib
 endif
 
-# Static builds: ubuntu 24.04+'s static libcrypto.a is built with the
-# JITTER entropy source and ZSTD/zlib (transitively LZMA/brotli)
+# Static builds: newer static libcrypto.a (ubuntu 26.04+) is built with
+# the JITTER entropy source and ZSTD/zlib (transitively LZMA/brotli)
 # compression backends enabled, so it drags those undefined symbols in.
 # They must appear AFTER -lssl -lcrypto: the static linker resolves
 # left-to-right, and appending them via LDFLAGS_EXTRA (which lands
 # before this block's -lcrypto, line ~78) left c_zlib.o/jitter
 # unresolved. Guarded on -static so dynamic builds stay untouched.
+# jitterentropy is probed per-library: older runners (24.04) ship a
+# libcrypto without jitter references AND no dev package at all, where
+# a blind -ljitterentropy would fail with 'cannot find -ljitterentropy'.
 ifneq (,$(findstring -static,$(LDFLAGS_EXTRA)))
-    LDFLAGS += -ljitterentropy -lzstd -lz -llzma -lbrotlidec -lbrotlienc
+    LJIT := $(firstword $(wildcard /usr/lib/x86_64-linux-gnu/libjitterentropy.a \
+                         /usr/lib/x86_64-linux-gnu/libjitterentropy3.a))
+    ifneq (,$(LJIT))
+        LDFLAGS += -ljitterentropy
+    endif
+    LDFLAGS += -lzstd -lz -llzma -lbrotlidec -lbrotlienc
 endif
 
 TARGET   := bin/lume$(TARGET_SUFFIX)
