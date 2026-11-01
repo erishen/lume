@@ -4,6 +4,33 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
+## [0.12.2] - 2026-11-01
+
+### Fixed
+
+- **Restored the linux-x64 release artifact.** v0.12.1 shipped without
+  `lume-linux-x64-static.tar.gz`: the release workflow's `ubuntu-latest` job
+  failed at `make`, while `ubuntu-24.04-arm` and `macos-14` both succeeded.
+  Two causes, both fixed after the tag was cut:
+
+  1. `agent-httpd` submodule pointer was at `f4d1cab`, where
+     `parse_range` assigns `char *` from `strchr(const char *)` — GCC 15
+     (the `ubuntu-latest` image) rejects that. Fixed in `e62c346`.
+  2. Static link order: compression / jitterentropy libs must follow
+     `-lcrypto`, and the jitterentropy dev package name differs per runner
+     image (`24.04-arm` has none at all).
+
+  Why this mattered beyond one platform: v0.12.1 is what every sibling project
+  pins. Anything built with `--platform linux/amd64` — which includes every
+  `docker buildx build` for a x64 target — got a 404 on the download and could
+  not build at all.
+
+### Changed
+
+- `Dockerfile.scanner` runtime stage uses `alpine:3.20` instead of
+  `debian:bookworm-slim` (116 MB → 19 MB). Only `curl`, CA certs and a
+  non-root user are needed; the rest was Debian's base system.
+
 ## [Unreleased]
 
 ### Added
