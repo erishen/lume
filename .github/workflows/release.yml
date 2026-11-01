@@ -46,7 +46,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libsqlite3-dev libcrypt-dev m4 \
-            libjitterentropy3-dev libzstd-dev zlib1g-dev liblzma-dev libbrotli-dev
+            libzstd-dev zlib1g-dev liblzma-dev libbrotli-dev
+          # The jitterentropy dev package was renamed between runner
+          # images: 24.04-arm has libjitterentropy-dev, 26.04 (ubuntu-
+          # latest) renamed it to libjitterentropy3-dev.
+          sudo apt-get install -y libjitterentropy3-dev \
+            || sudo apt-get install -y libjitterentropy-dev
 
       - name: Build lume
         run: make
