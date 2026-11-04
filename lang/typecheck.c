@@ -446,6 +446,11 @@ const char *const LUME_BUILTIN_NAMES[] = {
     "abs", "sqrt", "exp", "log", "ln", "pow", "floor", "ceil", "round",
     "min", "max", "pi", "e",
     "bitor", /* bitwise or (2026-10-28): `|` 保留给 enum variant */
+    /* bitwise builtin group (2026-11-04, 自 core 846c822): 与中缀语义统一,
+     * shr 为逻辑右移 */
+    "bitand", "bit_or", "bit_xor", "shl", "shr",
+    /* integer div/mod (P0-2, 2026-11-04, 自 core 846c822): 除零返回 0 */
+    "div", "mod",
     /* statistical distribution builtins (2026-10-20, builtins_math.c + rt.c) */
     "normcdf", "erf", "gamma", "lgamma", "igamma", "ibeta", "tdist_cdf", "chisq_cdf",
     /* 技术指标序列内建 (#54, 2026-10-25, builtins_math.c) */
@@ -502,6 +507,8 @@ static const BuiltinSig LUME_BUILTIN_SIG[] = {
     {"crypt_verify",2,2}, {"const_time_eq",2,2},
     {"pow",2,2}, {"hmac_sha256",2,2}, {"push",2,2}, {"map",2,2}, {"filter",2,2},
     {"bitor",2,2},
+    {"bitand",2,2}, {"bit_or",2,2}, {"bit_xor",2,2}, {"shl",2,2}, {"shr",2,2},
+    {"div",2,2}, {"mod",2,2},
     {"reduce",3,3}, {"igamma",2,2}, {"ibeta",3,3}, {"tdist_cdf",2,2}, {"chisq_cdf",2,2},
     {"sql_tx_begin",1,1}, {"sql_tx_exec",2,3}, {"sql_tx_commit",1,1}, {"sql_tx_rollback",1,1},
     {"normcdf",1,1}, {"erf",1,1}, {"gamma",1,1}, {"lgamma",1,1},

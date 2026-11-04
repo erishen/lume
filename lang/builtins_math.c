@@ -1418,3 +1418,73 @@ static void native_bitor(VM *vm, int argc, Value *args, Value *out) {
 }
 
 Value b_bitor(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_bitor); }
+
+/* 位运算 builtin 组（2026-11-04，自 core 846c822 移植）：与中缀 `& | ^ << >>`
+ * 语义统一——只接受整数（非整数 → error），移位掩 b & 63（≥64 是 UB），`shr`
+ * 是逻辑右移（无符号，不符号扩展）。core 同名 builtin 的底层在 rt.c
+ * (lume_bi_*)；lume 是纯解释器，直接在 native 里做。 */
+static void native_bitand(VM *vm, int argc, Value *args, Value *out) {
+    if (argc < 2 || !IS_INT(args[0]) || !IS_INT(args[1])) {
+        vm_set_error(vm, "bitand() needs int arguments");
+        return;
+    }
+    *out = val_int(AS_INT(args[0]) & AS_INT(args[1]));
+}
+static void native_bit_or(VM *vm, int argc, Value *args, Value *out) {
+    if (argc < 2 || !IS_INT(args[0]) || !IS_INT(args[1])) {
+        vm_set_error(vm, "bit_or() needs int arguments");
+        return;
+    }
+    *out = val_int(AS_INT(args[0]) | AS_INT(args[1]));
+}
+static void native_bit_xor(VM *vm, int argc, Value *args, Value *out) {
+    if (argc < 2 || !IS_INT(args[0]) || !IS_INT(args[1])) {
+        vm_set_error(vm, "bit_xor() needs int arguments");
+        return;
+    }
+    *out = val_int(AS_INT(args[0]) ^ AS_INT(args[1]));
+}
+static void native_shl(VM *vm, int argc, Value *args, Value *out) {
+    if (argc < 2 || !IS_INT(args[0]) || !IS_INT(args[1])) {
+        vm_set_error(vm, "shl() needs int arguments");
+        return;
+    }
+    *out = val_int((long long)((unsigned long long)AS_INT(args[0]) << (AS_INT(args[1]) & 63)));
+}
+static void native_shr(VM *vm, int argc, Value *args, Value *out) {
+    if (argc < 2 || !IS_INT(args[0]) || !IS_INT(args[1])) {
+        vm_set_error(vm, "shr() needs int arguments");
+        return;
+    }
+    /* 逻辑右移(无符号,非符号扩展)——与中缀 `>>`/core shr() 语义统一。 */
+    *out = val_int((long long)((unsigned long long)AS_INT(args[0]) >> (AS_INT(args[1]) & 63)));
+}
+
+Value b_bitand(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_bitand); }
+Value b_bit_or(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_bit_or); }
+Value b_bit_xor(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_bit_xor); }
+Value b_shl(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_shl); }
+Value b_shr(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_shr); }
+
+/* div/mod（2026-11-04，自 core 846c822）：整数除法/求模（P0-2）。与 core
+ * 语义一致——除零返回 0（不报错、不 SIGFPE），`/` 仍走浮点除法，div 才是
+ * 整数除。 */
+static void native_div(VM *vm, int argc, Value *args, Value *out) {
+    if (argc < 2 || !IS_INT(args[0]) || !IS_INT(args[1])) {
+        vm_set_error(vm, "div() needs int arguments");
+        return;
+    }
+    int64_t b = AS_INT(args[1]);
+    *out = val_int(b == 0 ? 0 : AS_INT(args[0]) / b);
+}
+static void native_mod(VM *vm, int argc, Value *args, Value *out) {
+    if (argc < 2 || !IS_INT(args[0]) || !IS_INT(args[1])) {
+        vm_set_error(vm, "mod() needs int arguments");
+        return;
+    }
+    int64_t b = AS_INT(args[1]);
+    *out = val_int(b == 0 ? 0 : AS_INT(args[0]) % b);
+}
+
+Value b_div(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_div); }
+Value b_mod(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_mod); }

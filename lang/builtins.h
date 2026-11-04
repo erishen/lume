@@ -98,6 +98,17 @@ Value b_min(VM *vm, int argc, Value *args);
 Value b_max(VM *vm, int argc, Value *args);
 /* Bitwise or (2026-10-28): `|` 保留给 enum variant, 位或用 bitor(a,b)。 */
 Value b_bitor(VM *vm, int argc, Value *args);
+/* Bitwise builtin group (2026-11-04, 自 core 846c822): 与中缀 `& | ^ << >>`
+ * 语义统一。bitand/bit_or/bit_xor 取两整数做位运算；shl/shr 移位掩 0..63,
+ * shr 是逻辑右移。 */
+Value b_bitand(VM *vm, int argc, Value *args);
+Value b_bit_or(VM *vm, int argc, Value *args);
+Value b_bit_xor(VM *vm, int argc, Value *args);
+Value b_shl(VM *vm, int argc, Value *args);
+Value b_shr(VM *vm, int argc, Value *args);
+/* Integer div/mod (P0-2, 2026-11-04): 整数除法/求模, 除零返回 0。 */
+Value b_div(VM *vm, int argc, Value *args);
+Value b_mod(VM *vm, int argc, Value *args);
 /* Statistical distribution builtins (P4, 2026-10-20): the interpreter
  * wrappers validate arguments and surface vm_set_error; the same numbers
  * are computed by rt.c's lume_bi_* for the native backends. */

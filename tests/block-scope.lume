@@ -1,0 +1,79 @@
+// tests/block-scope.lume —— block scoping (core P1-9) 运行时单测。
+// 验证 N_BLOCK 的遮蔽/恢复/新绑定删除语义(2026-11-04 自 core 846c822 移植,
+// 此前 lume 运行时直接 clobber 外层绑定), 以及 GC root 固定: 块内 let
+// 覆盖外层后, 恢复路径上的外层字符串不能被块内分配触发的 GC 提前回收。
+// 运行: ./bin/lume tests/block-scope.lume
+// 期望输出以 "block-scope ok N" 结尾(所有断言通过,N 为断言数)。
+
+let st = { pass: 0, fail: 0 };
+let count = 0;
+
+func expect(name, got, want) {
+  if (got == want) {
+    st.pass = st.pass + 1;
+  } else {
+    st.fail = st.fail + 1;
+    print("FAIL " + name + "  got=" + str(got) + "  want=" + str(want));
+  }
+}
+
+// 1. 基本遮蔽: 块内 let 遮蔽外层, 块尾恢复
+let x = 1;
+if (true) {
+  let x = 2;
+  expect("shadow inside", x, 2); count = count + 1;
+}
+expect("restore outer", x, 1); count = count + 1;
+
+// 2. 嵌套块: 内层恢复中间层, 中间层恢复最外层
+let y = 10;
+if (true) {
+  let y = 20;
+  if (true) {
+    let y = 30;
+    expect("inner shadow", y, 30); count = count + 1;
+  }
+  expect("mid restore", y, 20); count = count + 1;
+}
+expect("outer restore", y, 10); count = count + 1;
+
+// 3. 块内新绑定在块尾消失: 外层同名绑定不受影响
+if (true) {
+  let z = 7;
+  expect("block-local z", z, 7); count = count + 1;
+}
+let z = 99;
+expect("outer z intact", z, 99); count = count + 1;
+
+// 4. for 循环体每迭代遮蔽并恢复
+let w = 5;
+for (i in [1, 2]) {
+  let w = i * 100;
+  expect("loop shadow " + str(i), w, i * 100); count = count + 1;
+}
+expect("loop restore", w, 5); count = count + 1;
+
+// 5. 无 let 的赋值穿透块(重新绑定到外层, 块后保留)
+let q = 5;
+if (true) {
+  q = 99;
+}
+expect("plain assign pierces", q, 99); count = count + 1;
+
+// 6. GC root: 被遮蔽的外层字符串在块内大量分配触发 GC 后仍能恢复
+let s = "outer-string";
+if (true) {
+  let s = "inner-string";
+  let junk = [];
+  for (k in range(60000)) {
+    push(junk, k);
+  }
+  expect("shadowed string in block", s, "inner-string"); count = count + 1;
+}
+expect("shadowed string restored", s, "outer-string"); count = count + 1;
+
+if (st.fail > 0) {
+  print("block-scope FAILED (" + str(st.fail) + " of " + str(count) + ")");
+} else {
+  print("block-scope ok " + str(count));
+}

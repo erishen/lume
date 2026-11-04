@@ -42,6 +42,13 @@ LUME
 ./bin/lume --check /tmp/lume-bit-bad.lume >/dev/null 2>&1 && fail "bitwise float should be rejected"
 pass "bitwise operators + int-only typecheck"
 
+# 2c. block scoping (P1-9) end-to-end ---------------------------------------
+# 块内 let 遮蔽/恢复/新绑定删除 + GC root(块内分配触发 GC 后外层字符串恢复)。
+BLOUT=$(./bin/lume tests/block-scope.lume 2>&1)
+[ "$?" -eq 0 ] || fail "run block-scope"
+printf '%s' "$BLOUT" | grep -Fq "block-scope ok" || fail "block-scope ($BLOUT)"
+pass "block scoping (shadow/restore/GC-root)"
+
 # 3. tool registry integration (no HTTP) -------------------------------------
 ./tests/tools-bin || fail "tool integration"
 pass "tool registry + dispatch"
