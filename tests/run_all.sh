@@ -349,6 +349,57 @@ rm -f "$DL_CSV"
 pass "download: binary envelope over HTTP"
 kill $DL_PID 2>/dev/null; DL_PID=
 
+# 4h. body-to-tempfile spool (multipart item (b)) ---------------------------
+# Content-Length bodies above the 64 KiB read buffer are streamed to a temp
+# file when they fit MAX_BODY_SPOOL_BYTES; req.body_temp_path names it and
+# the handler reads it with read_file(). Bodies over the cap keep the 413 +
+# forced close; small bodies stay in memory. The server is started with a
+# small spool cap so one instance exercises all three tiers.
+UP_PORT=8994
+UP_SMALL=/tmp/lume-up-small.bin
+UP_BIG=/tmp/lume-up-big.bin
+UP_HUGE=/tmp/lume-up-huge.bin
+head -c 10240 /dev/zero | tr '\0' 'u' > "$UP_SMALL"
+head -c 102400 /dev/zero | tr '\0' 'u' > "$UP_BIG"
+head -c 300000 /dev/zero | tr '\0' 'u' > "$UP_HUGE"
+sed -e "s|port = [0-9]*;|port = $UP_PORT; access_log = \"$ACCESS_LOG/up.log\";|" \
+    examples/upload-spool.lume > /tmp/lume-up-test.lume
+MAX_BODY_SPOOL_BYTES=524288 ./bin/lume /tmp/lume-up-test.lume > "$SERVER_LOG" 2>&1 &
+UP_PID=$!
+trap 'kill $SERVER_PID 2>/dev/null; kill $UP_PID 2>/dev/null; lsof -ti tcp:$PORT 2>/dev/null | xargs kill -9 2>/dev/null; lsof -ti tcp:$UP_PORT 2>/dev/null | xargs kill -9 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
+for _ in $(seq 1 200); do
+    curl -s -m 1 http://127.0.0.1:$UP_PORT/upload-buffered > /dev/null 2>&1 && break
+    sleep 0.15
+done
+# small body stays in memory (req.body)
+[ "$(curl -s -m 3 --data-binary @$UP_SMALL http://127.0.0.1:$UP_PORT/upload-buffered)" = "buffered 10240 bytes" ] || fail "upload-spool: small body buffered"
+# 100 KiB > 64 KiB read buffer -> spooled to temp file, read back intact
+[ "$(curl -s -m 3 --data-binary @$UP_BIG http://127.0.0.1:$UP_PORT/upload)" = "spooled 102400 bytes" ] || fail "upload-spool: 100 KiB spooled"
+# 300 KiB > MAX_BODY_SPOOL_BYTES (512 KiB here is not enough... 300 KiB fits!)
+# -- the cap in this instance is 524288, so 300 KiB still spools: pin that too
+[ "$(curl -s -m 3 --data-binary @$UP_HUGE http://127.0.0.1:$UP_PORT/upload)" = "spooled 300000 bytes" ] || fail "upload-spool: 300 KiB spooled under 512 KiB cap"
+pass "upload-spool: body-to-tempfile over HTTP"
+kill $UP_PID 2>/dev/null; UP_PID=
+
+# 4i. spool cap -> 413 + forced close -----------------------------------------
+# Same example, but the cap is dropped to 128 KiB: the 300 KiB upload must be
+# rejected 413 (and the connection closed so nothing is desynced).
+UP2_PORT=8993
+sed -e "s|port = [0-9]*;|port = $UP2_PORT; access_log = \"$ACCESS_LOG/up2.log\";|" \
+    examples/upload-spool.lume > /tmp/lume-up2-test.lume
+MAX_BODY_SPOOL_BYTES=131072 ./bin/lume /tmp/lume-up2-test.lume > "$SERVER_LOG" 2>&1 &
+UP2_PID=$!
+trap 'kill $SERVER_PID 2>/dev/null; kill $UP2_PID 2>/dev/null; lsof -ti tcp:$PORT 2>/dev/null | xargs kill -9 2>/dev/null; lsof -ti tcp:$UP2_PORT 2>/dev/null | xargs kill -9 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
+for _ in $(seq 1 200); do
+    curl -s -m 1 http://127.0.0.1:$UP2_PORT/upload-buffered > /dev/null 2>&1 && break
+    sleep 0.15
+done
+[ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' --data-binary @$UP_HUGE http://127.0.0.1:$UP2_PORT/upload)" = "413" ] || fail "upload-spool: 300 KiB over 128 KiB cap must 413"
+[ "$(curl -s -m 3 --data-binary @$UP_BIG http://127.0.0.1:$UP2_PORT/upload)" = "spooled 102400 bytes" ] || fail "upload-spool: 100 KiB still spools under 128 KiB cap"
+pass "upload-spool: over-cap body 413s, within-cap spools"
+kill $UP2_PID 2>/dev/null; UP2_PID=
+rm -f "$UP_SMALL" "$UP_BIG" "$UP_HUGE"
+
 echo
 echo "all tests passed"
 exit 0

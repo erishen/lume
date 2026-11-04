@@ -1,0 +1,36 @@
+// examples/upload-spool.lume — large request bodies land on disk, not memory.
+//
+// agent-httpd's transport spools any Content-Length body above the 64 KiB
+// read buffer (MAX_REQUEST_SIZE) to a temp file when it stays within
+// MAX_BODY_SPOOL_BYTES (default 8 MiB; override via the MAX_BODY_SPOOL_BYTES
+// / BODY_SPOOL_DIR envs). For such requests req.body is null and
+// req.body_temp_path names the file — a handler reads it with read_file()
+// instead of the body being rejected with 413. Bodies above the spool cap
+// keep the historical 413 + forced close; small bodies stay buffered in
+// req.body unchanged.
+//
+// Routes:
+//   POST /upload          -> spooled path: reads req.body_temp_path
+//   POST /upload-buffered -> small in-memory path: echoes req.body length
+server {
+  port = 8994;
+  access_log = "./logs/upload.log";
+}
+
+post "/upload", (req) => {
+  let p = get(req, "body_temp_path", null);
+  if (p == null) {
+    return { status: 400, body: "expected a spooled body (req.body_temp_path)" };
+  }
+  let r = try(() => read_file(p));
+  if (get(r, "err", null) != null) {
+    return { status: 500, body: "read spool file failed" };
+  }
+  return { type: "text/plain", body: "spooled " + str(len(get(r, "ok", ""))) + " bytes" };
+};
+
+post "/upload-buffered", (req) => {
+  return { type: "text/plain", body: "buffered " + str(len(get(req, "body", ""))) + " bytes" };
+};
+
+run();

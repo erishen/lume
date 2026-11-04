@@ -148,6 +148,12 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
                                : val_null());
     map_set(vm, m, "body",
             req->body ? make_string(vm, req->body, strlen(req->body)) : val_null());
+    /* Bodies above MAX_REQUEST_SIZE are spooled to a temp file by the
+     * transport (req->body stays null); this names that file so a handler
+     * can read_file() it. Null when the body was buffered in memory. */
+    map_set(vm, m, "body_temp_path",
+            req->body_temp_path ? make_string_cstr(vm, req->body_temp_path)
+                                : val_null());
 
     /* Authorization has a dedicated parser field (http_parse.c writes it;
      * it is NOT captured in extra_headers), so expose it explicitly for
