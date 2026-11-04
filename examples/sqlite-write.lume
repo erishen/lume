@@ -68,6 +68,24 @@ func seed_analysis() {
   }
 }
 
+// ---- 审计日志配方(agent-httpd docs/FRAMEWORK.md「身份与授权契约」) ----
+// actor 一律取门已解析的 req.user(未登录为空字符串;认证启用后自动带用户),
+// handler 不得自行解析 cookie —— req.user 就是权威身份。
+func seed_audit_log() {
+  let has = len(sql_query(
+    "select name from sqlite_master where type = 'table' and name = ?", ["audit_log"]));
+  if (has == 0) {
+    sql_write("create table audit_log (ts text, actor text, event text, detail text)");
+  }
+}
+
+func audit(actor, event, detail) {
+  seed_audit_log();
+  // 值走 ? 占位符绑定,detail 里的单引号不会破坏语句
+  sql_write("insert into audit_log values (?, ?, ?, ?)",
+            [strftime("%Y-%m-%dT%H:%M:%SZ", "now"), actor, event, detail]);
+}
+
 // 可视化页面:React 壳(frontend/src/sqlite-write/dsl.tsx 打包为 dsl.js,
 // 页面 fetch /dsl/data 用 sql_* API 拿同一份数据客户端渲染)。
 route "GET", "/dsl", func(req) {
@@ -78,9 +96,11 @@ route "GET", "/dsl", func(req) {
   };
 };
 
-// 同一份数据的原始 JSON(供脚本/接口消费)
+// 同一份数据的原始 JSON(供脚本/接口消费);每次读取记一条审计(actor =
+// req.user,示例环境认证关闭时为空串 —— 开认证后自动带上账号)
 route "GET", "/dsl/data", func(req) {
   seed_analysis();
+  audit(req.user, "dsl.data.read", "holdings + analysis snapshot");
   let holdings = sql_query(
     "select symbol, units, avg_cost from portfolio order by symbol");
   let analysis = sql_query("select * from analysis order by symbol");
