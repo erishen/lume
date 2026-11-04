@@ -274,6 +274,46 @@ kill $MINGC_PID 2>/dev/null; MINGC_PID=
 # 整个参数消失, kill 只剩 usage 错误且已被 2>/dev/null 吞掉。
 pkill -f "[b]in/lume /tmp/lume-min-gc-test" 2>/dev/null || true
 
+# 4f. first-request HTTPS egress (warmup / fork-safety regression) ------------
+# 每个进程的**首次** HTTPS 出站是 macOS libobjc fork 闸门的雷区:
+# lume_http_warmup() 必须在 master 单线程阶段完成 TLS 初始化, worker 里
+# 第一次出站才不崩。这里的 server 启动时不做任何出站(warmup 已无外部探测,
+# probe 走本地回环), /probe 就是整个进程的首次 HTTPS —— 预热缺失时 worker
+# 首次出站会踩闸门。无外网时跳过(CI 有网, 该段是权威)。
+HTTPS_PORT=8995
+if curl -s -m 5 -o /dev/null https://example.com/; then
+    cat > /tmp/lume-https-first.lume <<LUME
+server {
+  port = $HTTPS_PORT;
+  access_log = "$ACCESS_LOG/https-first.log";
+}
+
+get "/probe", (req) => {
+  let r = http_get("https://example.com/", { timeout = 5; });
+  if r["ok"] {
+    return "https-first ok";
+  }
+  return "https-first failed: " + str(r["err"]);
+};
+
+run();
+LUME
+    ./bin/lume /tmp/lume-https-first.lume > "$SERVER_LOG" 2>&1 &
+    HTTPS_PID=$!
+    trap 'kill $SERVER_PID 2>/dev/null; kill $HTTPS_PID 2>/dev/null; lsof -ti tcp:$PORT 2>/dev/null | xargs kill -9 2>/dev/null; lsof -ti tcp:$HTTPS_PORT 2>/dev/null | xargs kill -9 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
+    for _ in $(seq 1 200); do
+        curl -s -m 1 http://127.0.0.1:$HTTPS_PORT/probe > /dev/null 2>&1 && break
+        sleep 0.15
+    done
+    FIRST=$(curl -s -m 10 http://127.0.0.1:$HTTPS_PORT/probe)
+    [ "$FIRST" = "https-first ok" ] || fail "first-request HTTPS egress ($FIRST)"
+    pass "first-request HTTPS egress (warmup before fork)"
+    kill $HTTPS_PID 2>/dev/null; HTTPS_PID=
+    lsof -ti tcp:$HTTPS_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
+else
+    echo "skip   first-request HTTPS egress (no outbound network)"
+fi
+
 echo
 echo "all tests passed"
 exit 0

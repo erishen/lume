@@ -61,6 +61,7 @@ typedef struct ssl_st SSL;
 #include <netinet/in.h>
 #include <poll.h>
 #include <stdbool.h>
+#include <stdlib.h> /* getenv/atoi (TLS warmup probe opt-in) */
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -447,18 +448,40 @@ int lume_http_warmup(void) {
      *
      * 失败不当错误: 没有外网的环境里, 预热的目标是"别在 worker 里炸",
      * 而不是"必须连通"。连不上会由业务请求自己报错。 */
+    /* probe 目标默认本地回环 127.0.0.1:443 —— 不产生第三方连接(本地服务
+     * 首连本地), 离线/无本地 https 服务时连接立即失败, 不会让启动卡 5 秒。
+     * 本机若有 https 服务仍会完成一次真握手, 照样把 Keychain 那条初始化链
+     * 趟完。需要旧的外部探测行为时显式 opt-in:
+     *   LUME_TLS_WARMUP_PROBE=example.com:443
+     * (host[:port], 无端口默认 443; 连接失败/超时一律不阻塞启动)。 */
+    char probe_host[128] = "127.0.0.1";
+    int probe_port = 443;
+    const char *probe_env = getenv("LUME_TLS_WARMUP_PROBE");
+    if (probe_env && probe_env[0]) {
+        const char *pc = strrchr(probe_env, ':');
+        if (pc && pc[1]) {
+            size_t hl = (size_t)(pc - probe_env);
+            if (hl > 0 && hl < sizeof probe_host) {
+                memcpy(probe_host, probe_env, hl);
+                probe_host[hl] = '\0';
+            }
+            int p = atoi(pc + 1);
+            if (p > 0 && p < 65536) probe_port = p;
+        } else {
+            snprintf(probe_host, sizeof probe_host, "%s", probe_env);
+        }
+    }
     Url u;
     memset(&u, 0, sizeof u);
-    u.host = "example.com";
-    u.port = 443;
+    u.host = probe_host;
+    u.port = probe_port;
     u.https = 1;
-    /* scheme 指针类型看 Url 定义; 这里只在直连(tls_attach)路径用到 host/port。 */
     Conn probe;
     memset(&probe, 0, sizeof probe);
     probe.fd = -1;
-    long dl = now_ms() + 5000;
+    long dl = now_ms() + 500;   /* 本地回环 500ms 足够; 外部 opt-in 也是尽力而为 */
     if (open_conn_impl(&u, NULL, &probe, dl) == 0 && probe.fd >= 0) {
-        (void)tls_attach(&probe, "example.com", dl);
+        (void)tls_attach(&probe, probe_host, dl);
         conn_close(&probe);
     }
     return 0;

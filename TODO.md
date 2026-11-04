@@ -273,9 +273,14 @@ Host-side disposition (what this repo decides for dependent projects):
       the `b_*` wrapper in `builtins.c`, and the prototype in
       `builtins_internal.h` — plus the host mirror.
 
-### In flight — macOS fork-safety TLS warmup (uncommitted 2026-10-30)
+### In flight — macOS fork-safety TLS warmup (committed 2026-10-31, probe rework 2026-11-04)
 
-Both working trees carry an uncommitted change that must land together:
+Both halves landed 2026-10-31 (agent-httpd `09050e1c` calls via the
+file-end weak fallback right after `agent_init()`, before the first
+thread; host `builtins_http.c` provides the strong symbol). A duplicate
+late call (`71984e20`) that re-dialed the probe *after*
+`pthread_create(session_prune_thread)` was removed 2026-11-04 — it was
+both redundant and wrong-ordered.
 
 - this repo: `lang/builtins_http.c` + `lang/builtins_internal.h` add
   `lume_http_warmup()` — builds the SSL CTX **and performs one probe TLS
@@ -288,17 +293,30 @@ Both working trees carry an uncommitted change that must land together:
   thread)` — the ordering is the whole point, so do not move the call
   below the thread or below `start_worker_pool()`.
 
-- [ ] Commit both halves (core/gitlink discipline: the agent-httpd side
+- [x] Commit both halves (core/gitlink discipline: the agent-httpd side
       first, then the host picking up the bumped gitlink), or revert both
       together. A half-landed pair compiles on this machine only.
-- [ ] Warmup currently dials `example.com:443` with a 5 s deadline on
+      **Done 2026-10-31** (`09050e1c` + host side; `71984e20` duplicate
+      removed 2026-11-04).
+- [x] Warmup currently dials `example.com:443` with a 5 s deadline on
       every server start. That is a network dependency and a third-party
       connection from a local service. Replace the probe with something
       that exercises the same init path without external traffic (connect
       + `SSL_CTX_set_default_verify_paths` against a local socket, or gate
       the dial behind an env opt-in), and make the failure mode a warning
       rather than a 5 s startup stall on offline machines.
-- [ ] Add a regression that runs the prefork server with an outbound
+      **Done 2026-11-04**: probe now defaults to loopback `127.0.0.1:443`
+      with a 500 ms deadline — no third-party connection, no startup
+      stall on offline machines (local connect fails instantly), while a
+      local https service still completes a real handshake and trips the
+      Keychain init chain. Old external behaviour is an explicit opt-in:
+      `LUME_TLS_WARMUP_PROBE=example.com:443`.
+- [x] Add a regression that runs the prefork server with an outbound
       `https://` route as its **first** request — the bug only reproduces
       on the first HTTPS egress per process, so a test that warms up in
       the parent by accident proves nothing.
+      **Done 2026-11-04**: `tests/run_all.sh` leg 4f boots a minimal
+      server whose `/probe` handler issues `http_get("https://example.com/")`
+      — the process's first HTTPS egress, the server having done no
+      outbound work at startup (the probe is loopback-only). Skips with a
+      notice when outbound network is unavailable; CI is authoritative.
