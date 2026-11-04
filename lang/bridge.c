@@ -1,5 +1,6 @@
 #include "lume.h"
 #include "iquest.h"
+#include "builtins_internal.h" /* list_push (roles list construction) */
 #include "minijson.h"
 #include "llm.h"
 #include <stdlib.h> /* getenv(LUME_BIND) */
@@ -98,6 +99,32 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
                 auth_username(req, user_buf, sizeof(user_buf))
                     ? make_string_cstr(vm, user_buf)
                     : make_string_cstr(vm, ""));
+    }
+    {
+        /* req.roles is a LIST by contract: the htpasswd line's optional
+         * third column (user:hash:g1,g2), split on commas with blanks
+         * trimmed. Signed-out or role-less users get an empty list, so DSL
+         * code can always iterate without null-checks. The values come from
+         * auth_user_roles() (agent-httpd side, refreshed against the
+         * htpasswd file inside the call) — never from a client header. */
+        Obj *roles = AS_OBJ(make_list(vm));
+        vm_push(vm, val_obj((Obj *)roles)); /* root while filling */
+        char ruser_buf[64];
+        char roles_buf[128];
+        if (auth_username(req, ruser_buf, sizeof(ruser_buf)) &&
+            auth_user_roles(ruser_buf, roles_buf, sizeof(roles_buf))) {
+            const char *start = roles_buf;
+            for (const char *p = roles_buf;; p++) {
+                if (*p == ',' || *p == '\0') {
+                    size_t len = (size_t)(p - start);
+                    if (len > 0) list_push(vm, roles,
+                                           make_string(vm, start, len));
+                    if (*p == '\0') break;
+                    start = p + 1;
+                }
+            }
+        }
+        map_set(vm, m, "roles", vm_pop(vm));
     }
     map_set(vm, m, "remote_addr",
             req->remote_addr[0] ? make_string_cstr(vm, req->remote_addr)
