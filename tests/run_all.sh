@@ -314,6 +314,41 @@ else
     echo "skip   first-request HTTPS egress (no outbound network)"
 fi
 
+# 4g. binary download envelope ----------------------------------------------
+# examples/download.lume serves file bytes via read_file + the
+# { type, headers, body } response envelope. The server caps request bodies
+# at 64 KiB (MAX_REQUEST_SIZE), so downloads already work today while
+# uploads are a transport project (lume-core TODO, multipart section);
+# this pins the download shape and the try()/err 404 branch.
+DL_PORT=8998
+DL_CSV=/tmp/lume-dl-export.csv
+DL_BIN=/tmp/lume-dl-report.bin
+printf 'id,name\n1,alice\n2,bob\n' > "$DL_CSV"
+printf '\x89PNG\r\n\x1a\nfakepng-download' > "$DL_BIN"
+sed -e "s|port = [0-9]*;|port = $DL_PORT; access_log = \"$ACCESS_LOG/dl.log\";|" \
+    -e "s|\./data/export\.csv|$DL_CSV|g" \
+    -e "s|\./data/report\.bin|$DL_BIN|g" \
+    examples/download.lume > /tmp/lume-dl-test.lume
+./bin/lume /tmp/lume-dl-test.lume > "$SERVER_LOG" 2>&1 &
+DL_PID=$!
+trap 'kill $SERVER_PID 2>/dev/null; kill $DL_PID 2>/dev/null; lsof -ti tcp:$PORT 2>/dev/null | xargs kill -9 2>/dev/null; lsof -ti tcp:$DL_PORT 2>/dev/null | xargs kill -9 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
+for _ in $(seq 1 200); do
+    curl -s -m 1 http://127.0.0.1:$DL_PORT/export > /dev/null 2>&1 && break
+    sleep 0.15
+done
+[ "$(curl -s -m 3 http://127.0.0.1:$DL_PORT/export)" = "id,name
+1,alice
+2,bob" ] || fail "download: /export body"
+DLCT=$(curl -s -m 3 -D - -o /dev/null http://127.0.0.1:$DL_PORT/export | grep -i '^content-type' | tr -d '\r')
+[ "$DLCT" = "Content-Type: text/csv" ] || fail "download: /export content-type ($DLCT)"
+DLCT2=$(curl -s -m 3 -D - -o /dev/null http://127.0.0.1:$DL_PORT/report | grep -i '^content-type' | tr -d '\r')
+[ "$DLCT2" = "Content-Type: application/octet-stream" ] || fail "download: /report content-type ($DLCT2)"
+rm -f "$DL_CSV"
+[ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:$DL_PORT/export)" = "404" ] || fail "download: /export 404 after file removed (try/err branch)"
+[ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:$DL_PORT/nope)" = "404" ] || fail "download: unknown route 404"
+pass "download: binary envelope over HTTP"
+kill $DL_PID 2>/dev/null; DL_PID=
+
 echo
 echo "all tests passed"
 exit 0

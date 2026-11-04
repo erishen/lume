@@ -1,0 +1,43 @@
+// examples/download.lume — binary downloads need no upload machinery.
+//
+// Lume strings are NUL-safe, so read_file returns file bytes verbatim and
+// the { type, headers, body } response envelope carries them out with the
+// right Content-Type (agent-httpd http_resp.c emits the DSL envelope
+// `headers` map; `type` sets Content-Type). Projects that only need to move
+// files out (export a CSV, serve a PDF) should use this instead of reaching
+// for multipart uploads — the server caps request bodies at 64 KiB
+// (agent-httpd/src/httpd.h: MAX_REQUEST_SIZE) and uploads are a transport
+// project, while downloads already work today.
+//
+// read_file is capped at 16 MiB; serving files beyond that will need the
+// body-to-tempfile transport work (lume-core TODO, "Request bodies —
+// multipart, and the 64 KiB ceiling behind it", item (b)).
+//
+// Routes:
+//   GET /export -> text/csv download of data/export.csv (404 if missing)
+//   GET /report -> application/octet-stream download of data/report.bin
+server {
+  port = 8998;
+  access_log = "./logs/download.log";
+}
+
+let export_csv = "./data/export.csv";
+let report_bin = "./data/report.bin";
+
+get "/export", (req) => {
+  let r = try(() => read_file(export_csv));
+  if (get(r, "err", null) != null) {
+    return { status: 404, body: "missing " + export_csv };
+  }
+  return { type: "text/csv", body: get(r, "ok", "") };
+};
+
+get "/report", (req) => {
+  let r = try(() => read_file(report_bin));
+  if (get(r, "err", null) != null) {
+    return { status: 404, body: "missing " + report_bin };
+  }
+  return { type: "application/octet-stream", body: get(r, "ok", "") };
+};
+
+run();
