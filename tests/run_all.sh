@@ -49,6 +49,28 @@ BLOUT=$(./bin/lume tests/block-scope.lume 2>&1)
 printf '%s' "$BLOUT" | grep -Fq "block-scope ok" || fail "block-scope ($BLOUT)"
 pass "block scoping (shadow/restore/GC-root)"
 
+# 2d. for-init scoping (P1-3) ------------------------------------------------
+# 经典 for 整体活在子作用域: 兄弟循环可同名(C99), init 变量循环结束不可见;
+# for-init 不得遮蔽外层同名函数局部(两编译后端的扁平预扫描 + asg_find
+# 位置感知会让嵌套同名循环读错变量)。
+FSOUT=$(./bin/lume tests/for-scope.lume 2>&1)
+[ "$?" -eq 0 ] || fail "run for-scope"
+printf '%s' "$FSOUT" | grep -Fq "for-scope ok" || fail "for-scope ($FSOUT)"
+# for-init shadowing an outer local is rejected
+cat > /tmp/lume-for-bad.lume <<'LUME'
+let i = 1;
+for (let i = 0; i < 1; i = i + 1) { }
+LUME
+./bin/lume --check /tmp/lume-for-bad.lume >/dev/null 2>&1 && fail "for-init shadow should be rejected"
+# nested same-name for-init is also rejected (would mis-bind via asg_find)
+cat > /tmp/lume-for-bad2.lume <<'LUME'
+for (let i = 0; i < 1; i = i + 1) {
+  for (let i = 0; i < 1; i = i + 1) { }
+}
+LUME
+./bin/lume --check /tmp/lume-for-bad2.lume >/dev/null 2>&1 && fail "nested for-init shadow should be rejected"
+pass "for-init scoping (sibling loops + shadow rejection)"
+
 # 3. tool registry integration (no HTTP) -------------------------------------
 ./tests/tools-bin || fail "tool integration"
 pass "tool registry + dispatch"
