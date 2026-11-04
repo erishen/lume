@@ -397,9 +397,20 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
                  * runtime one, so it cannot reach the accessor. */
                 Type *it = ck_expr(c, n->as.index.index, NULL);
                 it = resolve(c, it, n->line);
-                if (it->kind != TY_ANY && it->kind != TY_INT)
-                    ck_fail(c, n->line, "a list index must be an int, got '%s'",
-                            ty_str(it));
+                if (it->kind != TY_ANY && it->kind != TY_INT) {
+                    /* '/' always yields float (no int/int division), so
+                     * `xs[i/2]` lands here with no clue that the fix is
+                     * floor()/div() — spell it out. */
+                    if (n->as.index.index->type == N_BINARY &&
+                        n->as.index.index->as.binary.op == OP_DIV)
+                        ck_fail(c, n->line, "a list index must be an int, got '%s' "
+                                "(the index contains '/', which always yields a "
+                                "float — wrap it in floor() or use div())",
+                                ty_str(it));
+                    else
+                        ck_fail(c, n->line, "a list index must be an int, got '%s'",
+                                ty_str(it));
+                }
                 /* A negative literal is allowed (it counts from the end), so
                  * the sign is not checked here -- rt.c normalises it. Any int
                  * expression is accepted; whether the value is in range is a
@@ -577,7 +588,10 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
                               ? resolve(c, n->as.letx.annot, n->line) : NULL;
             /* Write the resolved annotation back for the native emitters,
              * same write-back a statement let does. */
-            if (n->as.letx.annot) n->as.letx.annot = annot;
+            /* Same collecting-walk rule as N_LET: do not overwrite the raw
+             * annotation during pass 0, or an unreproducible "unknown type"
+             * diagnostic would be swallowed. */
+            if (n->as.letx.annot && !c->collecting) n->as.letx.annot = annot;
             Type *it = ck_expr(c, n->as.letx.init, annot);
             if (annot && it && !type_compat(c, it, annot, n->line)) {
                 ck_fail(c, n->line,

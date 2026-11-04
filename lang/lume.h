@@ -374,6 +374,9 @@ void map_set(VM *vm, Obj *map, const char *key, Value v);
 Obj *map_shallow_copy(VM *vm, Obj *src); /* `{ p with ... }` — see value.c */
 Value env_get(Env *env, const char *name, int *found);
 void env_set(VM *vm, Env *env, const char *name, Value v);
+/* Remove the innermost binding of name in this env only (no parent walk).
+ * Block scoping uses it to undo a `let` that newly bound a name. */
+void env_del(Env *env, const char *name);
 
 /* String helpers on GC string objects. `obj_string` returns `char *`, not
  * `const char *`: a string's bytes live inline behind the Obj and are mutable
