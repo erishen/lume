@@ -90,10 +90,14 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
     map_set(vm, m, "method", make_string_cstr(vm, req->method));
     map_set(vm, m, "path", make_string_cstr(vm, req->path));
     {
+        /* req.user is a STRING by contract (agent-httpd TODO, "req.user
+         * (string, empty when signed out)"): signed-out requests yield ""
+         * rather than null so DSL code can always treat it as a string. */
         char user_buf[64];
         map_set(vm, m, "user",
                 auth_username(req, user_buf, sizeof(user_buf))
-                    ? make_string_cstr(vm, user_buf) : val_null());
+                    ? make_string_cstr(vm, user_buf)
+                    : make_string_cstr(vm, ""));
     }
     map_set(vm, m, "remote_addr",
             req->remote_addr[0] ? make_string_cstr(vm, req->remote_addr)
