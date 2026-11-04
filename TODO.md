@@ -85,23 +85,6 @@ for a future agent-httpd pass:
       `headers` CSP entry still wins over the server-wide one. Verified
       end-to-end: `frame-ancestors http://10.0.0.1:16082` round-trips,
       so life-dash can embed the noVNC desktop again.
-- [x] **agent-httpd submodule pinned before react_prefix existed**: 
-      `lang/bridge.c` reads `cfg.react_prefix` (configurable SSR relay
-      prefix — history `server.lume` uses `react_prefix = "/"`) but the
-      submodule gitlink pointed at 195cfaf, whose `agenthttpd_config`
-      lacks the field → history's SSR Dockerfile build failed
-      (`'agenthttpd_config' has no member named 'react_prefix'`). Fixed
-      locally by checking out `win-local-chain` (47320af, includes
-      0b43aa6) and rebuilding — verified SSR relay works (home + deep
-      `/dynasty/:id` paths return 200). **Closed 2026-10-22**: the
-      react_prefix commits were cherry-picked onto agent-httpd main and
-      pushed (`b998e7f..23b1c4e`); the gitlink was bumped and committed
-      (`7e73e91`), host `make all` compiles against it, and a fresh
-      `clone --recurse-submodules` checks out 23b1c4e with the field
-      present. SSR relay is now reproducible off-machine. (Note: the
-      interim gitlink at b998e7f was briefly uncompilable for the host —
-      the submodule working copy had been masking the missing field by
-      sitting on `win-local-chain`.)
 
 
 
@@ -136,66 +119,6 @@ exits cleanly). Details and open hardening items live in:
   `asan-compile` — `--compile-text` / `--compile-llvm` /
   `native_backends.sh` under ASan+LSan; LSP doc-lifetime fixed —
   didClose + exit cleanup in `bridge_lsp.c`, `test`
-
-## P13 (host mirror) — 2026-10-30 React SSR / nsbp-lume dependency puzzle
-
-Filed 2026-10-30 from two real projects in this checkout:
-`personal/personal-site/nsbp` (React 19 + react-router-dom + `loadable`
-+ webpack) and `personal/personal-site/nsbp-lume` (React 19 +
-react-router-dom + `loadable` + esbuild, SSR via `renderToPipeableStream`).
-The host repo's job here is the **mirror discipline** and the **dependent-
-project disposition**, not to re-write lume-core's TODO — the language-side
-item is the `lume-core/TODO.md` P14 block.
-
-### Mirror + host discipline
-
-- [ ] Keep the host `lang/` mirror honest if/when the core lands the React-
-  SSR-relevant builtin/server gaps from core P14: any new builtin or server
-  behavior that nsbp-lume-style projects would want from a lume-hosted
-  React SSR site must land in **lume-core**, not in the host's `lang/` tree,
-  otherwise `make sync-lang` turns the host into DRIFT next time the core
-  and host diverge (the exact problem the host TODO already warns about).
-- [ ] Re-run `make sync-lang` discipline (commit core-mirrored content first,
-  then sync to refresh the PIN) if lume-core P14 produces a syncable change;
-  re-verify the relevant dependent project (e.g. a lume-hosted variant of
-  nsbp-lume) after the sync rather than before.
-
-### Dependent-project disposition
-
-- [ ] Decide, for `personal/personal-site/nsbp-lume`, whether it stays a
-  **parallel** React SSR project (Hono/node-server, no lume dependency —
-  current state) or becomes a **lume-hosted** variant (lume-core `server{}`
-  + the project's React SSR build step). The current code does not answer
-  this: `nsbp-lume` adds lume-core to its build/runtime picture only as a
-  comparison target, not as a dependency. Writing that decision down here
-  keeps the next README/architecture pass from reprising it.
-- [ ] If the decision is "lume-hosted variant": add a concrete path item,
-  not a vague one — e.g. "wire the nsbp-lume React SSR build step so a
-  lume-core `server{}` route serves the prebuilt shell + client chunk +
-  hydration boot, with the esbuild/ webpack `react-dom/server` polyfill
-  story from core P14 resolved first." Do **not** create a TODO item that
-  assumes `lume-core/build/lang/c/` already exists — that path does not
-  exist as a source directory today (lume-core emits C on demand, it does
-  not mirror `lang/` there).
-- [ ] If the decision is "parallel / no lume benefit": record why (e.g.
-  the React SSR dependency surface, the node-on-windows footprint, and the
-  missing esbuild polyfill already make the React SSR host a Node project;
-  lume-core's builtin server does not absorb that), so the next review does
-  not re-open it as a "gap."
-
-### node-on-windows ops note (host-side read-only)
-
-Not a lume-core language item, but relevant to anyone running these projects
-on Windows: today's working Node toolchain on this Windows box is the locally
-installed `node@22.11.0` / `npm@10.9.2`; the system `npm@9.6.x` is a known
-poison for npm-linked workspace packages and blocks `npm run build` on
-nsbp-lume. If the lume host framework ever targets a Windows developer/deployer
-picture that includes a React SSR site, the ops story must include "use a sane
-Node 20+ toolchain, not the system npm."s/lsp_smoke.sh` wired
-  into `make asan` under LSan). P11 fully closed.
-
-Host action: keep the two sub-repo TODOs in sync when picking up
-those items (they file into the sub-repos directly, not the host).
 
 ## Direction 2 (2026-10-23) — Windows smoke-bin portability + tre UBSan noise
 
