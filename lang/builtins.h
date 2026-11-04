@@ -42,6 +42,10 @@ Value b_ed25519_pubkey(VM *vm, int argc, Value *args);
 Value b_ed25519_sign(VM *vm, int argc, Value *args);
 Value b_ed25519_verify(VM *vm, int argc, Value *args);
 Value b_ed25519_keypair(VM *vm, int argc, Value *args);
+/* crypt_verify / const_time_eq (P3 2026-11-04, mirrored from lume-core;
+ * host-owned interp.c/typecheck.c registered by hand after the copy). */
+Value b_crypt_verify(VM *vm, int argc, Value *args);
+Value b_const_time_eq(VM *vm, int argc, Value *args);
 Value b_len(VM *vm, int argc, Value *args);
 Value b_keys(VM *vm, int argc, Value *args);
 Value b_get(VM *vm, int argc, Value *args);

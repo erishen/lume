@@ -487,6 +487,7 @@ static const BuiltinSig LUME_BUILTIN_SIG[] = {
     {"render",1,1}, {"sort",1,1}, {"str_match",2,2}, {"regex",2,2},
     {"sha256",1,1}, {"base64_encode",1,1}, {"base64_decode",1,1},
     {"ed25519_pubkey",1,1}, {"ed25519_sign",2,2}, {"ed25519_verify",3,3}, {"ed25519_keypair",0,0},
+    {"crypt_verify",2,2}, {"const_time_eq",2,2},
     {"pow",2,2}, {"hmac_sha256",2,2}, {"push",2,2}, {"map",2,2}, {"filter",2,2},
     {"bitor",2,2},
     {"reduce",3,3}, {"igamma",2,2}, {"ibeta",3,3}, {"tdist_cdf",2,2}, {"chisq_cdf",2,2},

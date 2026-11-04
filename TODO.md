@@ -265,13 +265,22 @@ Host-side disposition (what this repo decides for dependent projects):
       with the caveat that one forgotten call is a hole — the containment
       for that is the `is_same_origin` gate the agent-httpd P2 item adds,
       which cannot be forgotten because it lives in the framework.
-- [ ] **Builtins land in lume-core first, then `make sync-lang`.** The
+- [x] **Builtins land in lume-core first, then `make sync-lang`.** The
       warmup change below is exactly the shape that goes wrong: host-only
       edits to a synced file turn into DRIFT on the next sync. Any new
       builtin adds **five** coordinated edits — `LUME_BUILTIN_NAMES` and
       the arity contract in `typecheck.c`, the `interp.c` builtin table,
       the `b_*` wrapper in `builtins.c`, and the prototype in
       `builtins_internal.h` — plus the host mirror.
+      **Followed 2026-11-04** for `crypt_verify` / `const_time_eq`: core
+      landed first (lume-core `acbabcb`), then this host mirrored it —
+      `lang/builtins_crypt.c` copied (a synced file), and the host-owned
+      `interp.c` / `builtins.h` / `typecheck.c` registered by hand (they
+      are in `HOST_PINNED`, so `sync-lang` never touches them). Because
+      this box has no python3, `make sync-lang` itself could not run; the
+      PIN.manifest md5 for `builtins_crypt.c` was refreshed by hand. A
+      machine with python3 should still run `make sync-lang && make
+      check-sync` once to re-pin `lang/PIN` to lume-core `acbabcb`.
 
 ### In flight — macOS fork-safety TLS warmup (committed 2026-10-31, probe rework 2026-11-04)
 
