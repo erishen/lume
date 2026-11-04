@@ -24,12 +24,13 @@ expect("256 >> 4", 256 >> 4, 16); count = count + 1;
 
 // i64 环绕与符号
 expect("-1 & 0xff", -1 & 255, 255); count = count + 1;
-expect("-8 >> 1", -8 >> 1, -4); count = count + 1;          // 算术右移保留符号
+expect("-8 >> 1", -8 >> 1, 9223372036854775804); count = count + 1;  // 逻辑右移 0x7FFFFFFFFFFFFFFC
 expect("1 << 63", 1 << 63, -9223372036854775808); count = count + 1;  // 环绕到 LLONG_MIN
-expect("-1 >> 63", -1 >> 63, -1); count = count + 1;        // 全 1 算术右移仍全 1
+expect("-1 >> 63", -1 >> 63, 1); count = count + 1;        // 逻辑右移: 全 1 >> 63 = 1
 expect("(1<<62)<<2", (1 << 62) << 2, 0); count = count + 1; // x86 shl: 移出高位 → 0
 
-// 优先级(与 C/Python 一致): 移位 > 关系 > 相等 > & > ^
+// 优先级(与 core P1-7 一致, 2026-11-04 sync-lang 收敛): 移位 > & > ^ > 比较/相等。
+// `&` 高于相等: `a & b == c` 解析为 `(a & b) == c`(不再与 C/Python 一致)。
 expect("1 + 2 << 3", 1 + 2 << 3, 24); count = count + 1;    // 加法先于移位
 expect("16 >> 2 & 3", 16 >> 2 & 3, 0); count = count + 1;   // (16>>2)&3 = 0
 expect("5 & 3 ^ 1", 5 & 3 ^ 1, 0); count = count + 1;       // (5&3)^1 = 0

@@ -70,7 +70,7 @@ typedef enum {
     TOK_KW_FN,
     TOK_GET, TOK_HEAD, TOK_POST, TOK_PUT, TOK_PATCH, TOK_DELETE, TOK_OPTIONS,
     TOK_VERBS,
-    TOK_ENUM, TOK_MATCH, TOK_PIPE,
+    TOK_ENUM, TOK_MATCH, TOK_PIPE, TOK_AMP, TOK_CARET, TOK_SHL, TOK_SHR,
 
     TOK_LPAREN, TOK_RPAREN, TOK_LBRACE, TOK_RBRACE,
     TOK_LBRACKET, TOK_RBRACKET,
@@ -78,7 +78,7 @@ typedef enum {
 
     TOK_EQ, TOK_EQEQ, TOK_NEQ, TOK_LT, TOK_LE, TOK_GT, TOK_GE, TOK_ARROW,
     TOK_PLUS, TOK_MINUS, TOK_STAR, TOK_SLASH, TOK_PERCENT,
-    TOK_AMP, TOK_CARET, TOK_SHL, TOK_SHR
+    TOK_MAX                 /* sentinel: token.c asserts TOKEN_NAMES length == TOK_MAX */
 } TokenType;
 
 typedef struct {
@@ -568,9 +568,8 @@ typedef enum {
 
 typedef enum {
     OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD,
-    OP_SHL, OP_SHR,
     OP_EQ, OP_NE, OP_LT, OP_LE, OP_GT, OP_GE,
-    OP_BAND, OP_BXOR, OP_BOR,
+    OP_SHL, OP_SHR, OP_BITAND, OP_BITOR, OP_BITXOR,
     OP_AND, OP_OR, OP_NEG, OP_NOT
 } Op;
 
@@ -611,7 +610,11 @@ typedef struct Node {
     union {
         struct { struct Node **stmts; int count; } program;
         struct { struct Node **stmts; int count; } block;
-        struct { char *name; Type *annot; struct Node *init; } let;
+        /* Block scoping: parse_block stamps every let it DIRECTLY owns with
+         * the closing brace's line; 0 = not block-limited (top level,
+         * for-init). Synced parser.c (core) reads end_line. */
+        struct { char *name; Type *annot; struct Node *init;
+                 size_t end_line; } let;
         struct { char *name; Type *annot; struct Node *init; struct Node *body;
                  Type *ty; } letx;   /* ty: checker-stamped body type (SPEC 4.15) */
         struct { struct Node *cond, *then, *els; } ifs;
@@ -682,7 +685,10 @@ typedef struct Node {
                                     * SEPARATE strdup so both arrays free
                                     * independently). */
                  Type **types; int count;
-                 struct Node *init; } letpat;
+                 struct Node *init;
+                 /* Block scoping: the owning block's closing-brace line,
+                  * stamped by parse_block like N_LET's (0 = top level). */
+                 size_t end_line; } letpat;
         struct { char *name; } var;
         struct { char *name; struct Node *value; } assign;
         struct { struct Node *obj; char *name; struct Node *value; } assign_mem;

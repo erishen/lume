@@ -262,14 +262,21 @@ build:
 bin:
 	mkdir -p bin
 else
-$(shell mkdir -p build bin build/compat/regex build/compat/sha256 build/compat/sha512 build/compat/ed25519 2>/dev/null)
+# cmd 无 `mkdir -p`; build/bin 由下面编译规则里的 `if not exist` 按需创建。
 build: ;
 bin: ;
 endif
 
+ifeq ($(strip $(IS_WINDOWS)),)
 build/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build $(AH_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+else
+# cmd.exe 没有 `mkdir -p`; 目录已存在时 `mkdir` 会报错退出, 先查再建。
+build/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build
+	@if not exist "$(dir $@)" mkdir "$(dir $@)"
+	$(CC) $(CFLAGS) -c $< -o $@
+endif
 
 $(TARGET): $(OBJS) $(AH_LIB) | bin
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(AH_LIB) $(LDFLAGS) -lm

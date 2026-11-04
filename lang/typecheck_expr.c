@@ -500,7 +500,7 @@ Type *ck_expr(Checker *c, Node *n, Type *expected) {
                 return type_prim(TY_BOOL);
             }
             if (op == OP_SHL || op == OP_SHR ||
-                op == OP_BAND || op == OP_BXOR || op == OP_BOR) {
+                op == OP_BITAND || op == OP_BITOR || op == OP_BITXOR) {
                 Type *lt = ck_expr(c, n->as.binary.left, NULL);
                 Type *rt = ck_expr(c, n->as.binary.right, NULL);
                 /* 位运算只对整数定义(i64)。浮点/字符串是类型错误。 */

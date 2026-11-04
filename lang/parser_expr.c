@@ -948,8 +948,7 @@ static Node *parse_term_impl(Parser *p) {
 }
 
 static Node *parse_comparison_impl(Parser *p);
-
-Node *parse_shift(Parser *p);
+Node *parse_bitor(Parser *p);
 
 Node *parse_comparison(Parser *p) {
     if (++p->depth > PARSER_MAX_DEPTH) { p->depth--; perror_at(p, peek(p).line,
@@ -960,44 +959,19 @@ Node *parse_comparison(Parser *p) {
 }
 
 static Node *parse_comparison_impl(Parser *p) {
-    Node *left = parse_shift(p);
+    /* Bitwise (P1-7) sits just below comparison: `(a & b) == c` without
+     * parens, while `+ -` still bind tighter than any bitwise operator. */
+    Node *left = parse_bitor(p);
     if (!left) return NULL;
     while (check(p, TOK_LT) || check(p, TOK_LE) || check(p, TOK_GT) || check(p, TOK_GE)) {
-        Token t = peek(p);
-        advance(p);
-        Node *right = parse_shift(p);
-        if (!right) return NULL;
-        Node *n = nalloc(N_BINARY, t.line);
-        n->as.binary.op = (t.type == TOK_LT) ? OP_LT
-                        : (t.type == TOK_LE) ? OP_LE
-                        : (t.type == TOK_GT) ? OP_GT : OP_GE;
-        n->as.binary.left = left;
-        n->as.binary.right = right;
-        left = n;
-    }
-    return left;
-}
-
-static Node *parse_shift_impl(Parser *p);
-
-Node *parse_shift(Parser *p) {
-    if (++p->depth > PARSER_MAX_DEPTH) { p->depth--; perror_at(p, peek(p).line,
-                              "expression nests too deeply", NULL); return NULL; }
-    Node *n = parse_shift_impl(p);
-    p->depth--;
-    return n;
-}
-
-static Node *parse_shift_impl(Parser *p) {
-    Node *left = parse_term(p);
-    if (!left) return NULL;
-    while (check(p, TOK_SHL) || check(p, TOK_SHR)) {
         Token t = peek(p);
         advance(p);
         Node *right = parse_term(p);
         if (!right) return NULL;
         Node *n = nalloc(N_BINARY, t.line);
-        n->as.binary.op = (t.type == TOK_SHL) ? OP_SHL : OP_SHR;
+        n->as.binary.op = (t.type == TOK_LT) ? OP_LT
+                        : (t.type == TOK_LE) ? OP_LE
+                        : (t.type == TOK_GT) ? OP_GT : OP_GE;
         n->as.binary.left = left;
         n->as.binary.right = right;
         left = n;
@@ -1032,10 +1006,122 @@ static Node *parse_equality_impl(Parser *p) {
     return left;
 }
 
-static Node *parse_and_impl(Parser *p);
+/* Bitwise operators — language evolution proposal P1-7 (2026-11-01). They sit
+ * below the additive operators (`+ -`) and above the comparison/equality
+ * operators (`a & b == c` parses as `(a & b) == c`), so bitwise results can be
+ * compared without parens while `+` still binds tighter. Four levels: `<< >>`
+ * bind tightest (shift — migrated from lume e75d836, 2026-11-04), then `&`,
+ * then `^`, then `|`. The lone `|` token (TOK_PIPE) is shared
+ * with enum-variant separation and trailing-closure delimiters, but those are
+ * consumed in their own grammar positions (type-decl / postfix), so here it is
+ * unambiguously the bitwise OR of two expressions. */
 
-/* and 层要向下调 bxor 层, 而 bxor 定义在其后 —— 前置声明 */
-Node *parse_bxor(Parser *p);
+static Node *parse_shift_impl(Parser *p);
+static Node *parse_bitand_impl(Parser *p);
+static Node *parse_bitxor_impl(Parser *p);
+static Node *parse_bitor_impl(Parser *p);
+
+Node *parse_shift(Parser *p) {
+    if (++p->depth > PARSER_MAX_DEPTH) { p->depth--; perror_at(p, peek(p).line,
+                              "expression nests too deeply", NULL); return NULL; }
+    Node *n = parse_shift_impl(p);
+    p->depth--;
+    return n;
+}
+
+static Node *parse_shift_impl(Parser *p) {
+    Node *left = parse_term(p);
+    if (!left) return NULL;
+    while (check(p, TOK_SHL) || check(p, TOK_SHR)) {
+        Token t = peek(p);
+        advance(p);
+        Node *right = parse_term(p);
+        if (!right) return NULL;
+        Node *n = nalloc(N_BINARY, t.line);
+        n->as.binary.op = (t.type == TOK_SHL) ? OP_SHL : OP_SHR;
+        n->as.binary.left = left;
+        n->as.binary.right = right;
+        left = n;
+    }
+    return left;
+}
+
+Node *parse_bitand(Parser *p) {
+    if (++p->depth > PARSER_MAX_DEPTH) { p->depth--; perror_at(p, peek(p).line,
+                              "expression nests too deeply", NULL); return NULL; }
+    Node *n = parse_bitand_impl(p);
+    p->depth--;
+    return n;
+}
+
+static Node *parse_bitand_impl(Parser *p) {
+    Node *left = parse_shift(p);
+    if (!left) return NULL;
+    while (check(p, TOK_AMP)) {
+        Token t = peek(p);
+        advance(p);
+        Node *right = parse_shift(p);
+        if (!right) return NULL;
+        Node *n = nalloc(N_BINARY, t.line);
+        n->as.binary.op = OP_BITAND;
+        n->as.binary.left = left;
+        n->as.binary.right = right;
+        left = n;
+    }
+    return left;
+}
+
+Node *parse_bitxor(Parser *p) {
+    if (++p->depth > PARSER_MAX_DEPTH) { p->depth--; perror_at(p, peek(p).line,
+                              "expression nests too deeply", NULL); return NULL; }
+    Node *n = parse_bitxor_impl(p);
+    p->depth--;
+    return n;
+}
+
+static Node *parse_bitxor_impl(Parser *p) {
+    Node *left = parse_bitand(p);
+    if (!left) return NULL;
+    while (check(p, TOK_CARET)) {
+        Token t = peek(p);
+        advance(p);
+        Node *right = parse_bitand(p);
+        if (!right) return NULL;
+        Node *n = nalloc(N_BINARY, t.line);
+        n->as.binary.op = OP_BITXOR;
+        n->as.binary.left = left;
+        n->as.binary.right = right;
+        left = n;
+    }
+    return left;
+}
+
+Node *parse_bitor(Parser *p) {
+    if (++p->depth > PARSER_MAX_DEPTH) { p->depth--; perror_at(p, peek(p).line,
+                              "expression nests too deeply", NULL); return NULL; }
+    Node *n = parse_bitor_impl(p);
+    p->depth--;
+    return n;
+}
+
+static Node *parse_bitor_impl(Parser *p) {
+    Node *left = parse_bitxor(p);
+    if (!left) return NULL;
+    while (check(p, TOK_PIPE)) {
+        Token t = peek(p);
+        advance(p);
+        Node *right = parse_bitxor(p);
+        if (!right) return NULL;
+        Node *n = nalloc(N_BINARY, t.line);
+        n->as.binary.op = OP_BITOR;
+        n->as.binary.left = left;
+        n->as.binary.right = right;
+        left = n;
+    }
+    return left;
+}
+
+static Node *parse_and_impl(Parser *p);
 
 Node *parse_and(Parser *p) {
     if (++p->depth > PARSER_MAX_DEPTH) { p->depth--; perror_at(p, peek(p).line,
@@ -1046,72 +1132,15 @@ Node *parse_and(Parser *p) {
 }
 
 static Node *parse_and_impl(Parser *p) {
-    Node *left = parse_bxor(p);
-    if (!left) return NULL;
-    while (check(p, TOK_AND)) {
-        Token t = peek(p);
-        advance(p);
-        Node *right = parse_bxor(p);
-        if (!right) return NULL;
-        Node *n = nalloc(N_BINARY, t.line);
-        n->as.binary.op = OP_AND;
-        n->as.binary.left = left;
-        n->as.binary.right = right;
-        left = n;
-    }
-    return left;
-}
-
-static Node *parse_bxor_impl(Parser *p);
-
-/* bxor 层要向下调 band 层, 而 band 定义在其后 —— 前置声明 */
-Node *parse_band(Parser *p);
-
-Node *parse_bxor(Parser *p) {
-    if (++p->depth > PARSER_MAX_DEPTH) { p->depth--; perror_at(p, peek(p).line,
-                              "expression nests too deeply", NULL); return NULL; }
-    Node *n = parse_bxor_impl(p);
-    p->depth--;
-    return n;
-}
-
-static Node *parse_bxor_impl(Parser *p) {
-    Node *left = parse_band(p);
-    if (!left) return NULL;
-    while (check(p, TOK_CARET)) {
-        Token t = peek(p);
-        advance(p);
-        Node *right = parse_band(p);
-        if (!right) return NULL;
-        Node *n = nalloc(N_BINARY, t.line);
-        n->as.binary.op = OP_BXOR;
-        n->as.binary.left = left;
-        n->as.binary.right = right;
-        left = n;
-    }
-    return left;
-}
-
-static Node *parse_band_impl(Parser *p);
-
-Node *parse_band(Parser *p) {
-    if (++p->depth > PARSER_MAX_DEPTH) { p->depth--; perror_at(p, peek(p).line,
-                              "expression nests too deeply", NULL); return NULL; }
-    Node *n = parse_band_impl(p);
-    p->depth--;
-    return n;
-}
-
-static Node *parse_band_impl(Parser *p) {
     Node *left = parse_equality(p);
     if (!left) return NULL;
-    while (check(p, TOK_AMP)) {
+    while (check(p, TOK_AND)) {
         Token t = peek(p);
         advance(p);
         Node *right = parse_equality(p);
         if (!right) return NULL;
         Node *n = nalloc(N_BINARY, t.line);
-        n->as.binary.op = OP_BAND;
+        n->as.binary.op = OP_AND;
         n->as.binary.left = left;
         n->as.binary.right = right;
         left = n;
