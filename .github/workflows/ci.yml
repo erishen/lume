@@ -35,7 +35,7 @@ jobs:
         run: make -j4 test
       - name: Upload server log on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-logs
           path: lume/logs/
