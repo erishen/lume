@@ -3,7 +3,7 @@
 # past this number, not the number itself.
 bridge_stub.c 1
 builtins.c 81
-builtins.h 148
+builtins.h 145
 builtins_catalog.c 46
 builtins_fs.c 88
 builtins_http.c 24
@@ -13,8 +13,8 @@ builtins_sql.c 506
 interp.c 168
 lume.h 47
 main.c 356
-typecheck.c 109
+typecheck.c 108
 typecheck_expr.c 9
-typecheck_stmt.c 64
-value.c 26
+typecheck_stmt.c 45
+value.c 27
 vdom.c 1

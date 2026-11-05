@@ -36,6 +36,14 @@
 
 #include <time.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <sys/random.h>
+#elif defined(_WIN32)
+/* Windows 随机源由 os_win32.c 提供。<windows.h> 经 winnt.h 定义的
+ * TokenType 枚举成员会与 lume.h 的 TokenType 类型名在同一 TU 冲突,
+ * 所以这里只做前向声明, 不 include 任何 Windows 头(见 os_win32.c 文件头)。 */
+int lume_win32_random(unsigned char *buf, size_t n);
+#endif
 
 #ifndef HAVE_CRYPT
 /* 无 crypt() 的平台：crypt_sha512 恒报错（编译期禁用该内建行为）。 */
@@ -237,16 +245,26 @@ Value b_base64_decode(VM *vm, int argc, Value *args) {
  * 是对称的 —— 持 root 者能派生任何节点密钥, 等于能冒充任何节点。非对称之后,
  * 一台机器泄露私钥只影响它自己。
  *
- * 随机源: /dev/urandom（Windows 用 BCryptGenRandom 不在此处处理, 该平台
- * 走 vendored 路径之外的实现会 vm_set_error 明确报错, 而不是静默降级成
- * 可预测的密钥 —— 后者会让整套信任模型形同虚设）。
+ * 随机源: Linux 先 getrandom(2) 再退回 /dev/urandom, macOS 用
+ * arc4random_buf, Windows 用 BCryptGenRandom(bcrypt.dll, Vista+ 随系统提供)。
+ * 三者的共同底线: 拿不到 CSPRNG 就 vm_set_error 明确报错, 绝不静默降级成
+ * rand()/时间种子 —— 可预测的私钥会让整套 peer 信任模型形同虚设。
  */
 
 static int read_urandom(uint8_t *buf, size_t n) {
 #if defined(_WIN32)
-    (void)buf; (void)n;
-    return -1;   /* 见上方说明: 宁可不提供, 也不给可预测密钥 */
+    return lume_win32_random(buf, n);
+#elif defined(__APPLE__)
+    /* arc4random_buf: macOS guarantees it (10.7+), no /dev dependency. */
+    arc4random_buf(buf, n);
+    return 0;
 #else
+#if defined(__linux__)
+    /* getrandom(2) first: container/seccomp setups may hide or restrict
+     * /dev, but the syscall is available on any modern Linux kernel. */
+    ssize_t r = getrandom(buf, n, 0);
+    if (r == (ssize_t)n) return 0;
+#endif
     FILE *f = fopen("/dev/urandom", "rb");
     if (!f) return -1;
     size_t got = fread(buf, 1, n, f);
@@ -384,6 +402,7 @@ Value b_ed25519_keypair(VM *vm, int argc, Value *args) {
  * 供 DSL 侧 token / CSRF 比较 —— 普通 == 在首个差异字节即短路, 泄露时序。
  */
 
+/* 同 rt.c:rt_ct_eq_bytes(), 见下方 crypt_verify_impl 的 LOCKSTEP 说明。 */
 static int ct_eq_bytes(const char *a, const char *b, size_t n) {
     unsigned char acc = 0;
     for (size_t i = 0; i < n; i++)
@@ -391,7 +410,13 @@ static int ct_eq_bytes(const char *a, const char *b, size_t n) {
     return acc == 0;
 }
 
-/* -1 = 构建不支持该哈希族($2*: core 无 bcrypt), 0 = 校验失败, 1 = 通过 */
+/* -1 = 构建不支持该哈希族($2*: core 无 bcrypt), 0 = 校验失败, 1 = 通过
+ *
+ * LOCKSTEP: src/rt.c 末尾的 rt_crypt_verify_impl() / rt_ct_eq_bytes() 是这两个
+ * 函数的逐字镜像 —— native emitter 链接的是单独编译的 rt.o, 拿不到本 TU 的
+ * 符号。改这里的判定规则必须同步改 rt.c, 否则解释器与 --compile-text /
+ * --compile-llvm 会对同一个口令给出不同结论; tests/native-consistency.lume
+ * 就是这条约束的看守。 */
 static int crypt_verify_impl(const char *hash, const char *pw) {
     size_t hl = strlen(hash);
     if (hl < 4) return 0;
