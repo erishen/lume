@@ -30,7 +30,69 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Release-time sync gate. The build matrix below only compiles and stages;
+  # without this, a tag cut from a tree whose lang/ drifted from lume-core,
+  # or whose semantic baseline fixtures went stale, would still publish.
+  # ci.yml also gates v* tags now, but release.yml must be able to refuse on
+  # its own: a re-run / manually dispatched release must not skip the pin.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+        with:
+          path: lume
+          submodules: recursive
+      # check --strict resolves lang/PIN's sha with git rev-parse, and the
+      # drift leg walks lume-core history, so a shallow checkout would turn
+      # a healthy folded pin into a false STALEPIN.
+      - name: Checkout lume-core as a sibling (real drift detection)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+        with:
+          repository: erishen/lume-core
+          path: lume-core
+          fetch-depth: 0
+      - name: "Verify the pin (strict: drift, stale PIN, new lag, registry gaps)"
+        working-directory: lume
+        run: make check-sync
+      - name: "Verify builtin parity against lume-core"
+        working-directory: lume
+        run: make check-parity
+      - name: "Verify cross-repo semantic baseline is in sync"
+        working-directory: lume
+        run: |
+          set -e
+          cmp -s tests/baseline-literals-bitops.lume \
+                 ../lume-core/tests/literals-bitops-consistency.lume || {
+            echo "baseline-literals-bitops.lume drifted from lume-core";
+            diff -u ../lume-core/tests/literals-bitops-consistency.lume \
+                    tests/baseline-literals-bitops.lume | head -40; exit 1; }
+          cmp -s tests/baseline-block-scope.lume \
+                 ../lume-core/tests/p1-9-consistency.lume || {
+            echo "baseline-block-scope.lume drifted from lume-core";
+            diff -u ../lume-core/tests/p1-9-consistency.lume \
+                    tests/baseline-block-scope.lume | head -40; exit 1; }
+          echo "semantic baseline fixtures match lume-core"
+      # Makefile's LUME_VERSION is the single source for `lume --version`.
+      # Publishing vX.Y.Z while the binary still reports another version is
+      # exactly the mismatch install.sh / support cannot detect after the fact.
+      - name: "Assert release tag matches LUME_VERSION"
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: lume
+        run: |
+          set -e
+          tag="${GITHUB_REF_NAME#v}"
+          declared=$(sed -n 's/^LUME_VERSION[[:space:]]*?=[[:space:]]*//p' Makefile | head -1 | tr -d '[:space:]')
+          echo "tag=$tag Makefile LUME_VERSION=$declared"
+          [ -n "$declared" ] || { echo "could not read LUME_VERSION from Makefile"; exit 1; }
+          [ "$tag" = "$declared" ] || {
+            echo "release tag $GITHUB_REF_NAME does not match LUME_VERSION $declared";
+            echo "bump LUME_VERSION in Makefile before cutting the tag"; exit 1; }
+
   build:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -146,8 +208,11 @@ jobs:
 
       # 静态版 tarball:仅含 bin/lume(静态) + install.sh(供 LUME_STATIC=1 拉取),
       # 不含 www/examples(那些随宿主项目走, 容器里不需要)。命名 <asset>-static。
+      # Staging runs on every event (upload stays tag-only) so the *-static*
+      # branch of the tarball verifier below is exercised on main/PR instead
+      # of only on a tagged release.
       - name: Stage static release tarball
-        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
+        if: runner.os == 'Linux'
         run: |
           mkdir -p "dist/${{ matrix.asset }}-static/bin"
           cp bin/lume-static "dist/${{ matrix.asset }}-static/bin/lume"
@@ -161,17 +226,23 @@ jobs:
       # wrong slice for an x86_64 link, so the step below installs the
       # x86_64 openssl via Rosetta Homebrew and points OPENSSL_PREFIX at it.
       - name: Install x86_64 OpenSSL for darwin-x64 cross-build
-        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'macOS'
+        if: runner.os == 'macOS'
         run: |
           if [ -x /usr/local/bin/brew ]; then
-            arch -x86_64 /usr/local/bin/brew install openssl@4
+            # Non-fatal: a runner without a usable Rosetta Homebrew still
+            # cross-builds with HAVE_OPENSSL=0 (the Makefile probes the
+            # prefix), and the x64 tarball's exec smoke is skipped anyway.
+            arch -x86_64 /usr/local/bin/brew install openssl@4 || true
             echo "OPENSSL_X64_PREFIX=/usr/local/opt/openssl@4" >> "$GITHUB_ENV"
           else
             echo "OPENSSL_X64_PREFIX=" >> "$GITHUB_ENV"
           fi
 
+      # Also staged on main/PR so the *darwin-x64* branch of the verifier
+      # (checksum, unpack, payload; exec smoke skipped) is a real leg rather
+      # than dead code that only a tagged release ever reaches.
       - name: Cross-build darwin-x64 and stage tarball
-        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'macOS'
+        if: runner.os == 'macOS'
         run: |
           make clean
           make -C agent-httpd clean

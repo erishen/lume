@@ -241,14 +241,31 @@ printf '%s' "$CHAT" | grep -Fq "demo engine" || {
 pass "POST /react/api/chat (agent demo SSE)"
 
 # 4c. GC stress: many requests must not crash workers or corrupt state.
+# Responses used to be discarded unconditionally: `curl -s` hides its exit
+# status and kill -0 only sees the parent, so "every worker died mid-run"
+# still went green. Count served 200s instead. This leg enforces its own
+# contract locally — a global set -e would break the many `cmd && fail` /
+# `|| true` pairs elsewhere in this script.
+GC_OK=0
+GC_FAIL=0
 for _ in $(seq 1 150); do
-    curl -s -m 2 http://127.0.0.1:$PORT/sum > /dev/null
-    curl -s -m 2 -X POST -d '{"n":7}' http://127.0.0.1:$PORT/echo > /dev/null
+    if [ "$(curl -s -m 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/sum)" = "200" ]; then
+        GC_OK=$((GC_OK + 1))
+    else
+        GC_FAIL=$((GC_FAIL + 1))
+    fi
+    if [ "$(curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST -d '{"n":7}' http://127.0.0.1:$PORT/echo)" = "200" ]; then
+        GC_OK=$((GC_OK + 1))
+    else
+        GC_FAIL=$((GC_FAIL + 1))
+    fi
 done
 kill -0 $SERVER_PID 2>/dev/null || fail "server died under load"
 WORKERS=$(ps aux | grep -c "[b]in/lume /tmp/lume-demo-test")
 [ "$WORKERS" -ge 1 ] || fail "no server processes"
-pass "GC stress (300 requests)"
+[ "$GC_OK" -gt 0 ] || fail "GC stress: no request was served ($GC_FAIL/300 failed)"
+[ "$GC_FAIL" -le 3 ] || fail "GC stress: $GC_FAIL/300 requests failed while workers were alive"
+pass "GC stress (300 requests, $GC_OK served)"
 
 # 4d. --watch hot reload (main.c run_watch): a valid edit restarts the child
 #     and the new route is live; an invalid edit keeps the old child serving.

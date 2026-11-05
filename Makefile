@@ -229,8 +229,18 @@ ifneq ($(strip $(IS_WINDOWS)),)
 endif
 OBJS     := $(SRCS:lang/%.c=build/%.o)
 
-# 内部头:任一 * 片的共享声明变化,所有依赖它的 .o 都要重建
-INT_HDRS := $(wildcard lang/*_internal.h)
+# Header dependencies come from the compiler, not from a wildcard. The old
+# `INT_HDRS := $(wildcard lang/*_internal.h)` matched only 3 of the 8
+# lang/*.h headers - arena.h / builtins.h / iquest.h / sbuf.h were invisible,
+# so editing one of them left stale .o files behind. That is more than a
+# cosmetic miss: VM (lume.h) layout is shared by every TU, and a partially
+# rebuilt tree accesses fields at the wrong offsets and segfaults. -MMD -MP
+# writes build/<name>.d next to each object, listing every header actually
+# included (including agent-httpd/src headers pulled in via -I); -MP adds
+# phony targets for removed headers so deleting one cannot break the include.
+# The first build has no .d files yet, but every .o is compiled anyway.
+DEPFLAGS := -MMD -MP
+-include $(OBJS:.o=.d)
 
 all: bin $(TARGET)
 
@@ -283,9 +293,9 @@ bin: ;
 endif
 
 ifeq ($(strip $(IS_WINDOWS)),)
-build/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build $(AH_LIB)
+build/%.o: lang/%.c lang/lume.h | build $(AH_LIB)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 else
 # Windows 分支的 recipe 由谁执行? CI 是 MSYS2 make(base-devel), 用 /bin/sh;
 # 本地 Git Bash 的 make 同样落 sh。cmd.exe 只有 mingw32-make 会用, 而那条路
@@ -295,9 +305,9 @@ else
 #   /bin/sh: -c: line 2: syntax error: unexpected end of file from `if'
 # 收场 —— Windows (MSYS2) CI 41837945030 实证, 自 vendored-regex 分支引入
 # 起就没有一台 CI 真正编译过这个分支。
-build/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build
+build/%.o: lang/%.c lang/lume.h | build
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 endif
 
 $(TARGET): $(OBJS) $(AH_LIB) | bin
@@ -631,8 +641,17 @@ deepcheck:
 	@./scripts/check-tree-privacy.sh --history
 	@echo "==> deepcheck passed: no build-machine path in the whole object db"
 
+# `make clean` must actually leave a pristine tree. The old one-liner left
+# behind every test binary (tests/*-bin*), the release staging dir and the
+# submodule's libagenthttpd.a, so a stale test binary built against an older
+# VM layout could be rerun after a header change. Keep this in step with
+# .gitignore's artifact list.
 clean:
-	rm -rf build bin build-asan
+	rm -rf build bin build-asan dist agent-httpd/bin \
+	    tests/smoke-bin tests/smoke-bin.exe tests/smoke-bin.dSYM \
+	    tests/tools-bin tests/tools-bin.exe tests/tools-bin.dSYM \
+	    tests/smoke-bin-asan tests/smoke-bin-asan.exe tests/smoke-bin-asan.dSYM \
+	    tests/tools-bin-asan tests/tools-bin-asan.exe tests/tools-bin-asan.dSYM
 
 # --- ASan/UBSan 构建 (make asan) ------------------------------------------
 # 独立构建目录 build-asan/,不污染正常 build/。检出 lume 侧代码的
@@ -643,6 +662,8 @@ ASAN_LDFLAGS  := -fsanitize=address,undefined
 ASAN_TARGET   := bin/lume-asan
 ASAN_OBJS     := $(SRCS:lang/%.c=build-asan/%.o)
 ASAN_CORE_OBJS := $(filter-out build-asan/main.o, $(ASAN_OBJS))
+# Same generated header dependencies for the sanitizer tree.
+-include $(ASAN_OBJS:.o=.d)
 
 build-asan:
 	mkdir -p build-asan
@@ -650,9 +671,9 @@ build-asan:
 build-asan/tests:
 	mkdir -p build-asan/tests
 
-build-asan/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build-asan $(AH_LIB)
+build-asan/%.o: lang/%.c lang/lume.h | build-asan $(AH_LIB)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(ASAN_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 $(ASAN_TARGET): $(ASAN_OBJS) $(AH_LIB) | build-asan bin
 	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -o $@ $(ASAN_OBJS) $(AH_LIB) $(LDFLAGS) $(ASAN_LDFLAGS) -lm
@@ -675,7 +696,7 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 	@ASAN_OPTIONS=detect_leaks=0 ./tests/tools-bin-asan || exit 1
 	@echo "ok   ASan/UBSan all passed"
 
-.PHONY: all check dump dev dev-minimal invest hub demo-sqlite demo-sqlite-watch invest-watch hub-watch run ui ui-items vsix image image-push test clean asan sync-lang sync-lang-force check-sync treecheck
+.PHONY: all check dump dev dev-minimal invest hub demo-sqlite demo-sqlite-watch invest-watch hub-watch run ui ui-items vsix image image-push test clean asan sync-lang sync-lang-force check-sync check-parity treecheck
 # lang/ is a pinned copy of the lume-core language tree (see lang/PIN).
 # Bump the pin with `make sync-lang`; watch for drift with `make check-sync`.
 # Files listed as host_owned in lang/PIN are never overwritten.
@@ -697,6 +718,11 @@ sync-lang-force:
 
 check-sync:
 	@python3 scripts/sync-lang.py check --strict
+
+# The core and host builtin registries are deliberately different; the
+# difference is an explicit accept list. Fail when it changes unreviewed.
+check-parity:
+	@python3 scripts/check-builtin-parity.py
 
 # crypt_sha512 内建单测（glibc 生成 $6$ / macOS 平台报错 都算 PASS）。
 crypt-test: all

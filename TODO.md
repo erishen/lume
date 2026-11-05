@@ -1,11 +1,12 @@
 # TODO — lume (host)
 
 The host repo mirrors `lume-core`'s `lang/` tree via `make sync-lang`;
-interpreter/language fixes belong in lume-core and flow here (host-owned
-files — currently `typecheck_expr.c`, `typecheck.c`, and the interp.c
-minijson include block — must be hand-merged). Server-side fixes belong
-to the standalone `agent-httpd` repo (mirrored here as the
-`agent-httpd` submodule).
+interpreter/language fixes belong in lume-core and flow here. The files
+that must be hand-merged are the 17 entries under `host_owned:` in
+`lang/PIN` — that list is the source of truth, `sync-lang.py` never
+overwrites them, and `make check-sync` (strict) reports their accepted
+lag from `lang/PIN.lag`. Server-side fixes belong to the standalone
+`agent-httpd` repo (mirrored here as the `agent-httpd` submodule).
 
 ## P9 (mirror) — for-in over an inline temp value: heap corruption under agent-httpd
 
@@ -199,11 +200,13 @@ Host-side disposition (what this repo decides for dependent projects):
       landed first (lume-core `acbabcb`), then this host mirrored it —
       `lang/builtins_crypt.c` copied (a synced file), and the host-owned
       `interp.c` / `builtins.h` / `typecheck.c` registered by hand (they
-      are in `HOST_PINNED`, so `sync-lang` never touches them). Because
-      this box has no python3, `make sync-lang` itself could not run; the
-      PIN.manifest md5 for `builtins_crypt.c` was refreshed by hand. A
-      machine with python3 should still run `make sync-lang && make
-      check-sync` once to re-pin `lang/PIN` to lume-core `acbabcb`.
+      are in `HOST_PINNED`, so `sync-lang` never touches them). At the
+      time this box had no python3, so the `PIN.manifest` md5 for
+      `builtins_crypt.c` was refreshed by hand. **Resolved**: the pin was
+      later re-cut with a real `make sync-lang` (see `lang/PIN`), and
+      `check --strict` now fails on any hand-edited synced file whose md5
+      no longer matches `PIN.manifest`. Refreshing an md5 by hand is never
+      the fix — run `make sync-lang && make check-sync` instead.
 
 ### In flight — macOS fork-safety TLS warmup (committed 2026-10-31, probe rework 2026-11-04)
 

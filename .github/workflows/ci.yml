@@ -3,6 +3,12 @@ name: CI
 on:
   push:
     branches: [main]
+    # A v* tag is a release candidate. release.yml only builds and stages
+    # tarballs, so without this leg a tag could publish a binary that never
+    # passed treecheck, the full test suite, ASan, the strict pin check or
+    # the cross-repo semantic baseline. Gate tags with exactly the main set.
+    tags:
+      - 'v*'
   pull_request:
 
 # agent-httpd 是 lume 的 git submodule(见 .gitmodules),版本由 gitlink 锁定;
@@ -122,3 +128,10 @@ jobs:
       - name: "Verify the pin (strict: drift, stale PIN, new lag, registry gaps)"
         working-directory: lume
         run: make check-sync
+      # The host and core builtin registries are deliberately different
+      # (tests/builtin-parity.allow). An unreviewed change to that diff is
+      # not: a new core builtin the host never adopted makes copied fixtures
+      # fail with "undefined variable". Same sibling checkout as the pin.
+      - name: "Verify builtin parity against lume-core"
+        working-directory: lume
+        run: make check-parity

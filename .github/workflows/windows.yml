@@ -67,6 +67,28 @@ jobs:
         # the server story exists there.
         run: ./bin/lume.exe examples/lang-basics.lume
 
+      - name: Cross-repo semantic baselines
+        # lume has no native backend/emitter, so lume-core's three-backend
+        # native-consistency fixtures do not apply here (see
+        # tests/baseline.provenance). These two scripts ARE verbatim copies
+        # of two core fixtures, and their .expected files were produced by
+        # the core interpreter. Byte-comparing bin/lume.exe's output proves
+        # the Windows interpreter agrees with Linux core on literals, bit
+        # ops and block scope — a real regression leg, not just the one
+        # lang-basics smoke. tr -d '\r' on BOTH sides neutralises MSVCRT
+        # text-mode CRLF and a checkout that converted .expected to CRLF.
+        run: |
+          set -e
+          out=$(mktemp)
+          exp=$(mktemp)
+          for base in baseline-literals-bitops baseline-block-scope; do
+            ./bin/lume.exe "tests/$base.lume" | tr -d '\r' > "$out"
+            tr -d '\r' < "tests/$base.expected" > "$exp"
+            diff -u "$exp" "$out"
+            echo "ok   $base: Windows output matches lume-core"
+          done
+          rm -f "$out" "$exp"
+
       # `make test` is POSIX-only (it drives a live HTTP server through
       # libagenthttpd, and its harness uses POSIX mkdir(2)/rm shell calls).
       # It runs on the Linux `ci` job instead.

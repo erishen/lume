@@ -1,0 +1,131 @@
+# Explicit ACCEPT list for the builtin-name difference between lume-core's
+# interpreter registry (src/interp.c) and the lume host (lang/interp.c).
+#
+# Checked by scripts/check-builtin-parity.py (make check-parity), which runs in
+# the CI check-sync job with a sibling lume-core checkout. A name that appears
+# in the diff but NOT here is a hard failure: either port the builtin to the
+# host, or record the decision below. A name listed here that is no longer in
+# the diff is also a failure: the host gained (or core dropped) a builtin, so
+# the list must be refreshed instead of quietly rotting.
+#
+# Why core has 99 builtins the host does not:
+#   - trig / hyperbolic (acos..tanh), the statistics and hypothesis-test
+#     family (mean..z_test), the distribution CDF/inverse helpers (chisq_p,
+#     f_pvalue, norminv, percentile, ...), the 30+ rand_* / sim_* generators
+#     and option-pricing helpers (bs_*) are lume-core's language experiment
+#     surface. The host is a single server binary and never adopted them.
+#   - sql_tx_* come with core's OBJ_SQLTX handle object; the host uses its own
+#     app-specific sql_query/sql_write builtins and has no such object kind.
+#   - This is also why a core test fixture cannot be copied into the host's
+#     semantic baseline blindly: p1-2-consistency.lume calls cos() and fails
+#     on the host with "undefined variable 'cos'". Only fixtures made of the
+#     shared 127 builtins qualify (see tests/baseline.provenance).
+#
+# host-only names are host additions that core does not carry.
+#
+# Regenerate after an intentional change:
+#   make check-parity        # prints exactly which names to add / remove
+
+[core-only]
+acos
+acosh
+alpha_beta
+asin
+asinh
+atan
+atan2
+atanh
+autocorrelation
+avg_loss
+avg_win
+bootstrap_mean_ci
+bootstrap_median_ci
+bootstrap_se_mean
+bootstrap_stddev_ci
+bs_call
+bs_delta_call
+bs_delta_put
+bs_gamma
+bs_put
+bs_vega
+chisq_p
+chisq_stat
+cos
+cosh
+covariance
+f_pvalue
+f_stat
+ic
+information_ratio
+max_consecutive_losses
+mean
+median
+norminv
+omega_ratio
+percentile
+profit_factor
+rand
+rand_beta
+rand_binomial
+rand_binormal
+rand_bool
+rand_cauchy
+rand_chisq
+rand_dirichlet
+rand_erlang
+rand_exponential
+rand_float
+rand_gamma
+rand_gauss_copula
+rand_geometric
+rand_gumbel
+rand_int
+rand_laplace
+rand_logistic
+rand_lognormal
+rand_multinomial
+rand_negative_binomial
+rand_next
+rand_normal
+rand_pareto
+rand_poisson
+rand_range
+rand_rayleigh
+rand_student_t
+rand_t_copula
+rand_triangular
+rand_von_mises
+rand_weibull
+rand_zipf
+rank
+rolling_cvar
+rolling_sharpe
+rolling_sortino
+rolling_var
+seed
+shuffle
+sim_bridge
+sim_gbm
+sim_merton
+sim_ou
+sim_portfolio
+sin
+sinh
+sql_tx_begin
+sql_tx_commit
+sql_tx_exec
+sql_tx_query
+sql_tx_rollback
+stddev
+tan
+tanh
+treynor_ratio
+tstat
+ttest_p
+variance
+win_rate
+z_pvalue
+z_test
+
+[host-only]
+rsi_cutler

@@ -8,6 +8,8 @@ bin/
 *.o
 *.d
 build-asan/
+# release.yml stages tarballs here before upload-artifact; never committed.
+/dist/
 tests/smoke-bin
 tests/smoke-bin.exe
 tests/smoke-bin.dSYM/
@@ -100,6 +102,10 @@ logs/
 ._*
 .venv-sqlite/
 .tmpbuild/
+
+# scripts/ 是 python3 工具链; py_compile / import 会落字节码缓存。
+__pycache__/
+*.pyc
 
 # 本机测试脚手架 (mktemp/xcrun shim, 沙箱写 /tmp 被锁时用)
 .work/

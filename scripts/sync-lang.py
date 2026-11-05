@@ -349,7 +349,11 @@ def upstream_delta(name):
     except OSError:
         return None
     # unified_diff(a=upstream, b=ours): '-' lines exist upstream only.
-    diff = difflib.unified_diff(a, b, lineterm="")
+    # Materialise it first: unified_diff() returns a one-shot generator, so
+    # the second sum() used to iterate an exhausted iterator and report
+    # `ours == 0` for every file. That silently erased host-side lines from
+    # the lag note (and from accept-lag's report) without changing `up`.
+    diff = list(difflib.unified_diff(a, b, lineterm=""))
     up = sum(1 for x in diff if x.startswith("-") and not x.startswith("---"))
     ours = sum(1 for x in diff if x.startswith("+") and not x.startswith("+++"))
     return up, ours
