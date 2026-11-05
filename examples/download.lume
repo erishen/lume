@@ -16,6 +16,14 @@
 // Routes:
 //   GET /export -> text/csv download of data/export.csv (404 if missing)
 //   GET /report -> application/octet-stream download of data/report.bin
+//
+// 404 branch, two shapes (test pins both):
+//   - err != null : real VM errors try() caught (read_file's 16 MiB cap,
+//     permission refusal) — read_file DOES raise for these;
+//   - ok == null  : missing/unreadable file — read_file returns null
+//     SILENTLY for those (lang/builtins_fs.c native_read_file), no VM
+//     error, so try() takes the success path { ok: null, err: null } and
+//     the err check alone never fires (CI 41971746911).
 server {
   port = 8998;
   access_log = "./logs/download.log";
@@ -26,7 +34,7 @@ let report_bin = "./data/report.bin";
 
 get "/export", (req) => {
   let r = try(() => read_file(export_csv));
-  if (get(r, "err", null) != null) {
+  if (get(r, "err", null) != null || get(r, "ok", null) == null) {
     return { status: 404, body: "missing " + export_csv };
   }
   return { type: "text/csv", body: get(r, "ok", "") };
@@ -34,7 +42,7 @@ get "/export", (req) => {
 
 get "/report", (req) => {
   let r = try(() => read_file(report_bin));
-  if (get(r, "err", null) != null) {
+  if (get(r, "err", null) != null || get(r, "ok", null) == null) {
     return { status: 404, body: "missing " + report_bin };
   }
   return { type: "application/octet-stream", body: get(r, "ok", "") };

@@ -262,13 +262,15 @@ endif
 # $(shell) runs /bin/sh, so a bare POSIX `mkdir -p` is robust and needs no
 # quoting. The `build: ;` / `bin: ;` empty recipes keep `make -B` from
 # failing on directories that already exist.
-# Windows 的 build/bin 创建点就是下面这行 $(shell) —— 它一度在重构中丢失:
+# Windows 的 build/bin 创建点就是下面的 $(shell) —— 它一度在重构中丢失:
 # Windows 的目录目标是空 recipe, 没有它 bin/ 根本不会被创建, 链接直接报
 # "cannot open output file bin/lume.exe: No such file or directory"
 # (CI 41970028104 实证; 旧 `if not exist` 时代 link 之前就死, 一直没暴露)。
-ifeq ($(strip $(IS_WINDOWS)),)
+# 注意: 这行必须无条件执行 —— 它曾被错误地包进 `ifeq ($(strip
+# $(IS_WINDOWS)),)`(即"非 Windows"分支, CI 41971746963 实证 Windows 上
+# 依旧 bin/ 缺失)。POSIX 下 mkdir -p 幂等, 无条件执行无害; Windows 下这是
+# 唯一的创建点(空 recipe 什么都不做)。
 $(shell mkdir -p build bin 2>/dev/null)
-endif
 ifeq ($(strip $(IS_WINDOWS)),)
 build:
 	mkdir -p build
