@@ -10,11 +10,11 @@ am I built from".  See lang/PIN.
     python3 scripts/sync-lang.py check --strict   # fail on stale pin / new lag
     python3 scripts/sync-lang.py sync    # copy core's files over, refresh PIN
 
-The core tree lives next to this repo by default; override with
-LUME_CORE_DIR=<path> if it sits elsewhere.  Paths are never written into
-PIN (this repo is public).
+The core tree is located through, in order: LUME_CORE_DIR, the core_dir
+line in lang/PIN (relative to this repo), then the ../lume-core sibling.
+Paths are never written into PIN (this repo is public).
 
-check reports four things:
+check reports five things:
 
   host-owned  files the host deliberately keeps; they are never overwritten
               and *not* counted as drift.  Each one also gets an upstream
@@ -26,18 +26,24 @@ check reports four things:
               makes check fail.
   registry    a builtin seeded in interp.c that LUME_BUILTIN_NAMES[] cannot
               name - a partial hand-merge, always a failure.
+  unclassified  an upstream src/*.c|h file that is neither in lang/ nor
+              explicitly named as core-only.  lang_sources() is derived
+              from `git ls-files lang`, so without this leg a language
+              source added upstream would be invisible to both sync and
+              check: never copied, never baselined, never reported.
 
-`check --strict` also fails on a stale PIN (ahead/missing/diverged/none)
-and on any host-owned file whose upstream delta grew past lang/PIN.lag.
-A PIN that is merely folded (core moved on without touching a synced file)
-stays green, so an unrelated upstream commit cannot turn CI red.
+`check --strict` also fails on a stale PIN (ahead/missing/diverged/none),
+on any host-owned file whose upstream delta grew past lang/PIN.lag, and on
+an upstream edit that changed a host-owned file's content *without* growing
+that line count (an upstream deletion reads as `+` lines on our side, so
+the count alone cannot see it).  A PIN that is merely folded (core moved on
+without touching a synced file) stays green.
 
 The upstream comparison needs a lume-core tree next door.  Where there is
-none (CI, a checkout on its own) check falls back to the baseline in
-lang/PIN.manifest: one md5 per synced file, written by `make sync-lang`.
-That is what makes the pin verifiable without the upstream repo, and it is
-the signal CI can act on today - erishen/lume-core exists but is empty,
-so `git clone` cannot be made to resolve the pinned sha yet.
+none, check falls back to lang/PIN.manifest (one md5 per synced file,
+written by `make sync-lang`) and returns green.  LUME_REQUIRE_CORE=1 turns
+that fallback into a hard failure: CI sets it, so a broken sibling checkout
+can never quietly turn the gate into a no-op.
 """
 import hashlib
 import datetime
@@ -130,14 +136,49 @@ HOST_PINNED = {"lume.h", "main.c", "builtins_internal.h", "builtins.c",
 # below it the file is just locally edited.
 LAG_WARN = 40
 
+# Upstream src/ files that are core-specific by construction.  lang/ is the
+# interpreter front end only: the native/LLVM emitters, the LSP/MCP/serve
+# bridges, the libFuzzer driver and the runtime shim belong to lume-core's
+# CLI, not to the host build.  Naming them explicitly is what lets
+# unclassified_upstream() treat every *other* new upstream source as news.
+CORE_ONLY_PREFIXES = ("backend", "codegen", "llvm_", "irbuf", "fuzz_",
+                      "bridge_lsp", "bridge_mcp", "bridge_native", "bridge_serve")
+CORE_ONLY_NAMES = {"rt.c", "server.h", "sql_guard_internal.h"}
+
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
 RED = "\033[31m"
 OFF = "\033[0m"
 
 
+def pin_core_dir():
+    """The core_dir line in lang/PIN, resolved relative to the repo root.
+
+    This field used to be dead: write_pin() emitted it and nothing ever read
+    it, so the tree was always found via DEFAULT_CORE.  Make it the documented
+    location (LUME_CORE_DIR still wins) so a differently named sibling repo
+    can be expressed in PIN instead of silently falling back.
+    """
+    if not os.path.isfile(PIN):
+        return None
+    with open(PIN, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, _, value = line.partition(":")
+            if key.strip() == "core_dir":
+                value = value.strip()
+                if not value:
+                    return None
+                if not os.path.isabs(value):
+                    value = os.path.normpath(os.path.join(ROOT, value))
+                return value
+    return None
+
+
 def core_dir():
-    d = os.environ.get("LUME_CORE_DIR") or DEFAULT_CORE
+    d = os.environ.get("LUME_CORE_DIR") or pin_core_dir() or DEFAULT_CORE
     if not os.path.isfile(os.path.join(d, "src", "interp.c")):
         sys.exit("lume-core tree not found at %s (LUME_CORE_DIR=... to override)" % d)
     return d
@@ -180,6 +221,50 @@ def lang_sources():
 def synced_files(files):
     """The files sync actually copies, i.e. everything but host_owned."""
     return [f for f in files if f not in HOST_PINNED]
+
+
+def unclassified_upstream(files, core):
+    """Upstream language sources nobody has classified yet.
+
+    lang_sources() reads `git ls-files lang`, so a source file added upstream
+    is structurally invisible: sync never copies it, write_manifest never
+    baselines it and check never reports it as drift.  Everything core-only
+    is named in CORE_ONLY_*, so a genuinely new front-end file has nowhere
+    to hide.  It is a report, not an auto-copy: whether a new upstream file
+    belongs in lang/ is a human decision (followed by `make sync-lang`).
+    """
+    if core is None:
+        return []
+    src = os.path.join(core, "src")
+    if not os.path.isdir(src):
+        return []
+    # `files` comes from `git ls-files lang`; a freshly created but not yet
+    # staged file would look "absent" and produce a bogus UNCLASSIFIED.  The
+    # question is whether the file exists in lang/, not whether it is tracked.
+    have = set(files)
+    have |= {n for n in os.listdir(LANG)
+             if n.endswith((".c", ".h")) and os.path.isfile(os.path.join(LANG, n))}
+    out = []
+    for name in sorted(os.listdir(src)):
+        if not name.endswith((".c", ".h")) or name in have:
+            continue
+        if name in CORE_ONLY_NAMES or name.startswith(CORE_ONLY_PREFIXES):
+            continue
+        if os.path.isfile(os.path.join(src, name)):
+            out.append(name)
+    return out
+
+
+def report_unclassified(files, core):
+    unknown = unclassified_upstream(files, core)
+    if not unknown:
+        return False
+    for f in unknown:
+        print("%sUNCLASSIFIED%s upstream src/%s: not in lang/ and not named "
+              "core-only" % (RED, OFF, f))
+    print("         either sync it into lang/ (then `make sync-lang`), or add it "
+          "to CORE_ONLY_NAMES / CORE_ONLY_PREFIXES in scripts/sync-lang.py")
+    return True
 
 
 def dirty_synced(files):
@@ -293,7 +378,7 @@ def upstream_files(files, core):
 
 def write_manifest(files, core):
     """Record the current md5 of every upstream file as the new baseline."""
-    with open(MANIFEST, "w", encoding="utf-8") as fh:
+    with open(MANIFEST, "w", encoding="utf-8", newline="\n") as fh:
         fh.write("# md5 of every synced lang/ file, written by `make sync-lang`.\n")
         fh.write("# check compares lang/ against this when lume-core is not reachable.\n")
         for f in upstream_files(files, core) or []:
@@ -363,15 +448,20 @@ LAG = os.path.join(LANG, "PIN.lag")
 
 
 def read_lag():
-    """{filename: accepted upstream line count} from lang/PIN.lag.
+    """{filename: (accepted line count, accepted upstream md5)} from PIN.lag.
 
     A host-owned file is behind upstream because the two trees genuinely
     fork: lume links agent-httpd and seeds its own registry, lume-core
     links neither.  Counting those lines every time is a report that is
     always wrong in the same direction, so what is accepted gets written
     down once with `sync-lang.py accept-lag` and only *growth* past that
-    number reads as news.  Without it check ends every run with "a
-    hand-merge is owed" and the line is worth nothing.
+    number reads as news.
+
+    The md5 is the second axis.  unified_diff(a=upstream, b=ours) reports an
+    upstream *deletion* as `+` lines on our side, so `up` stays flat while
+    the host keeps dead code: the count alone cannot see it.  Two-column
+    (legacy) PIN.lag lines read back with an empty hash, which disables the
+    hash leg until the next `accept-lag` upgrades them.
     """
     out = {}
     if not os.path.isfile(LAG):
@@ -381,25 +471,34 @@ def read_lag():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            name, _, n = line.partition(" ")
-            if name:
+            name, _, rest = line.partition(" ")
+            parts = rest.split()
+            if name and parts:
                 try:
-                    out[name] = int(n)
+                    out[name] = (int(parts[0]),
+                                 parts[1] if len(parts) > 1 else "")
                 except ValueError:
                     pass
     return out
 
 
 def write_lag():
-    """Record today's upstream line count for every host-owned file."""
-    with open(LAG, "w", encoding="utf-8") as fh:
-        fh.write("# upstream line count accepted for each host-owned file,\n")
-        fh.write("# written by `sync-lang.py accept-lag`.  check reports growth\n")
-        fh.write("# past this number, not the number itself.\n")
+    """Accept today's upstream line count AND content for host-owned files."""
+    core = core_dir()
+    # newline="\n" is not cosmetic: on Windows the platform default would
+    # translate every \n to \r\n, and the committed PIN.lag (LF) would show
+    # up as a whole-file diff after every accept-lag.
+    with open(LAG, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("# accepted upstream state for each host-owned file.\n")
+        fh.write("# written by `sync-lang.py accept-lag`.  Columns:\n")
+        fh.write("#   name  upstream-only-line-count  upstream-file-md5\n")
+        fh.write("# check fails when the count grows OR the md5 changes.\n")
         for f in sorted(HOST_PINNED):
             d = upstream_delta(f)
             if d:
-                fh.write("%s %d\n" % (f, d[0]))
+                p = os.path.join(core, "src", f)
+                digest = md5(p) if os.path.isfile(p) else "-"
+                fh.write("%s %d %s\n" % (f, d[0], digest))
 
 
 def write_pin(sha, version):
@@ -423,7 +522,7 @@ def write_pin(sha, version):
     ) % (sha, version,
          datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
          " ".join(sorted(HOST_PINNED)) or "-")
-    with open(PIN, "w", encoding="utf-8") as fh:
+    with open(PIN, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(body)
 
 
@@ -507,6 +606,16 @@ def main():
                 print("%d lang/ file(s) differ from lang/PIN.manifest" % len(bad))
                 return 1
         if not core:
+            # LUME_REQUIRE_CORE=1 is what CI sets.  Without it, a broken
+            # sibling checkout (wrong path, failed checkout step, renamed
+            # repo) degrades this "strict" gate into an md5-only check that
+            # would never notice upstream drift, yet still returns green.
+            if os.environ.get("LUME_REQUIRE_CORE") == "1":
+                print("%sFAIL%s check requires a sibling lume-core tree "
+                      "(LUME_REQUIRE_CORE=1) but none was found at %s"
+                      % (RED, OFF, os.environ.get("LUME_CORE_DIR")
+                         or pin_core_dir() or DEFAULT_CORE))
+                return 1
             # Say so rather than ending on silence: the job is green because
             # the baseline holds, not because nothing was compared.
             n = len(read_manifest() or {})
@@ -528,7 +637,7 @@ def main():
                 if os.path.isfile(ls):
                     host_only.append(f)
                 continue
-            if md5(cs) != md5(ls):
+            if not os.path.isfile(ls) or md5(cs) != md5(ls):
                 drift.append(f)
         for f in host_only:
             print("host-only   %s" % f)
@@ -546,7 +655,8 @@ def main():
             note = "upstream +%d" % up
             if ours:
                 note += " / local +%d" % ours
-            base = accepted.get(f)
+            entry = accepted.get(f)
+            base = entry[0] if entry else None
             if base is None:
                 # Nothing accepted yet: fall back to the raw count, and say
                 # the baseline is what would make this line mean something.
@@ -562,6 +672,17 @@ def main():
                 lagging.append(f)
                 print("%sBEHIND%s     %-18s %s, +%d since the last acceptance"
                       % (YELLOW, OFF, f, note, grew))
+                continue
+            # An upstream deletion shows up as `+` lines on OUR side, so
+            # `up` does not grow: the host silently keeps dead code forever.
+            # The accepted md5 is what catches that (and any net-zero rewrite).
+            prev = entry[1] if len(entry) > 1 else ""
+            cur = md5(os.path.join(core, "src", f))
+            if prev and cur != prev:
+                lagging.append(f)
+                print("%sBEHIND%s     %-18s upstream content changed with no "
+                      "line growth (md5 %s -> %s); hand-merge, then "
+                      "`accept-lag`" % (YELLOW, OFF, f, prev[:8], cur[:8]))
             else:
                 print("host-owned  %-18s %s (accepted)" % (f, note))
 
@@ -580,6 +701,8 @@ def main():
         # later commit that left the synced files alone does not make the
         # pin stale.
         hard = []
+        if report_unclassified(files, core):
+            hard.append("unclassified upstream source file(s)")
         state, pin_note, suffix = pin_status(core, sha)
         if state in ("ahead", "missing", "diverged", "none"):
             print("%sSTALEPIN%s %s - run `make sync-lang`"
@@ -594,9 +717,13 @@ def main():
                  len(files) - len(HOST_PINNED), len(HOST_PINNED), len(host_only),
                  suffix))
         if lagging:
-            print("%d host-owned file(s) are %d+ lines behind upstream; "
-                  "a hand-merge is owed" % (len(lagging), LAG_WARN))
-            hard.append("%d host-owned file(s) grew past lang/PIN.lag"
+            # `lagging` covers both axes now: more upstream-only lines AND
+            # a changed upstream md5 with no line growth.  Do not call it
+            # "grew" - that made an upstream deletion look like a miscount.
+            print("%d host-owned file(s) are behind the accepted lang/PIN.lag "
+                  "baseline (extra upstream lines or changed content); "
+                  "a hand-merge is owed" % len(lagging))
+            hard.append("%d host-owned file(s) changed past lang/PIN.lag"
                         % len(lagging))
         if strict and hard:
             for h in hard:
@@ -609,12 +736,16 @@ def main():
     if mode == "accept-lag":
         core_dir()          # upstream_delta reads through the core tree
         write_lag()
-        print("%sok%s recorded the current upstream line count for %d "
-              "host-owned file(s) in lang/PIN.lag; check now reports only "
-              "growth past it" % (GREEN, OFF, len(HOST_PINNED)))
+        print("%sok%s accepted the current upstream line count and md5 for %d "
+              "host-owned file(s) in lang/PIN.lag; check now reports growth "
+              "or any content change past it" % (GREEN, OFF, len(HOST_PINNED)))
         return 0
 
     core = core_dir()
+    if report_unclassified(files, core):
+        print("%sREFUSED%s classify the upstream file(s) above before "
+              "re-pinning lang/." % (RED, OFF))
+        return 1
     sha = core_sha(core)
     # Replacing a synced file wholesale is the point of `sync`, so it must
     # not do it while someone has unstaged work in the file: uncommitted

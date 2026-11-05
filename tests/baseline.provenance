@@ -18,7 +18,8 @@ WHY THIS EXISTS
 FILES (byte-identical copies of core fixtures, do not hand-edit)
   baseline-literals-bitops.lume  <- lume-core/tests/literals-bitops-consistency.lume
   baseline-block-scope.lume     <- lume-core/tests/p1-9-consistency.lume
-  Copied at lume-core fabe9e2b8575461071e2507d9cfb2f04ce9a1876.
+  Copied at lume-core fabe9e2b8575461071e2507d9cfb2f04ce9a1876; the
+  fixtures themselves are unchanged at the current PIN (3c12df7).
   Both are pure-language fixtures: no imports, no server, no HTTP/DB/FS,
   no core-only builtins, deterministic output.
 
@@ -27,11 +28,17 @@ FILES (byte-identical copies of core fixtures, do not hand-edit)
   runs bin/lume on each fixture and diffs against these files.
 
 HOW IT IS KEPT HONEST
-  .github/workflows/ci.yml (check-sync job) cmp's the two .lume copies
-  against the sibling lume-core checkout. If core edits a fixture and the
-  host copy is not refreshed, CI fails instead of quietly testing stale
-  semantics. Re-sync by copying the core file and regenerating the matching
-  .expected with the core interpreter; verify bin/lume still matches.
+  .github/workflows/ci.yml (check-sync job) and release.yml (verify job)
+  both check lume-core out as a sibling, build bin/lume-core, and run
+  scripts/check-baseline.py through `make check-baseline`. That script
+  cmp's the two .lume copies against lume-core's fixtures, runs the core
+  interpreter on the host .lume files, and byte-compares its output with
+  the committed .expected. Hand-editing an .expected to make a wrong host
+  interpreter look green is therefore no longer possible. tests/run_all.sh
+  and windows.yml still diff bin/lume against .expected on every platform.
+
+  Re-sync by copying the core fixture, then regenerating .expected with
+  bin/lume-core (CR stripped); verify bin/lume still matches.
 
   This is deliberately NOT part of lang/PIN.manifest: these are host-owned
   test assets, not synced runtime sources.

@@ -10,8 +10,16 @@ registries against the explicit accept list and fails on any difference.
 
 With no sibling lume-core tree the check is skipped (same fallback discipline
 as sync-lang.py falling back to PIN.manifest). CI's check-sync job and the
-release verify job both check lume-core out next door, so there it is a real
-check, not a skip. Override the location with LUME_CORE_DIR.
+release verify job both check lume-core out next door AND set
+LUME_REQUIRE_CORE=1, which turns that skip into a hard failure: a broken
+checkout must never turn the gate into a no-op. Override the location with
+LUME_CORE_DIR.
+
+Only the interpreter's runtime registry is compared here. The host's
+typechecker name table is a different, deliberately smaller set; its
+internal consistency (registry - names) is gated by sync-lang.py's
+host_registry_gaps(), so duplicating it here would just be a second,
+conflicting accept list.
 """
 
 import os
@@ -56,6 +64,10 @@ def accept_list():
 
 def main():
     if not os.path.isfile(CORE_INTERP):
+        if os.environ.get("LUME_REQUIRE_CORE") == "1":
+            print("%sFAIL%s builtin parity requires a sibling lume-core tree "
+                  "(LUME_REQUIRE_CORE=1) but %s is missing" % (RED, OFF, CORE_INTERP))
+            return 1
         print("skip  builtin parity: no lume-core at %s" % CORE_INTERP)
         print("      (CI checks out lume-core as a sibling: LUME_CORE_DIR=... to override)")
         return 0

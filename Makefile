@@ -696,7 +696,7 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 	@ASAN_OPTIONS=detect_leaks=0 ./tests/tools-bin-asan || exit 1
 	@echo "ok   ASan/UBSan all passed"
 
-.PHONY: all check dump dev dev-minimal invest hub demo-sqlite demo-sqlite-watch invest-watch hub-watch run ui ui-items vsix image image-push test clean asan sync-lang sync-lang-force check-sync check-parity treecheck
+.PHONY: all check dump dev dev-minimal invest invest-watch demo-sqlite demo-sqlite-watch query-demo query-demo-watch modules modules-watch modules-ui modules-ui-watch abac abac-watch react-ssr react-ssr-watch hub hub-watch run ui ui-items vsix image image-push test clean asan sync-lang sync-lang-force check-sync check-parity check-version check-baseline treecheck deepcheck crypt-test
 # lang/ is a pinned copy of the lume-core language tree (see lang/PIN).
 # Bump the pin with `make sync-lang`; watch for drift with `make check-sync`.
 # Files listed as host_owned in lang/PIN are never overwritten.
@@ -723,6 +723,18 @@ check-sync:
 # difference is an explicit accept list. Fail when it changes unreviewed.
 check-parity:
 	@python3 scripts/check-builtin-parity.py
+
+# Release version literals must agree every day, not only when a tag is cut:
+# Dockerfile.scanner's ARG decides WHICH release tarball the scanner image
+# downloads, so a stale copy silently ships the previous binary.
+check-version:
+	@python3 scripts/check-release-version.py
+
+# Re-generate tests/baseline-*.expected with the sibling lume-core
+# interpreter (build it with `make -C ../lume-core` first).  run_all.sh only
+# diffs bin/lume against those files; this is what keeps them honest.
+check-baseline:
+	@python3 scripts/check-baseline.py
 
 # crypt_sha512 内建单测（glibc 生成 $6$ / macOS 平台报错 都算 PASS）。
 crypt-test: all
