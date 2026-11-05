@@ -103,6 +103,12 @@ ifneq ($(strip $(IS_WINDOWS)),)
     # MINGW64_NT-<ver>(不匹配 Linux), 但不把正确性押在这个假设上: mingw 的
     # sysroot 也没有 libcrypt, 一旦命中就链接失败。
     LDFLAGS := $(filter-out -lcrypt,$(LDFLAGS))
+    # lang/builtins_crypt.c 的 read_urandom 在 _WIN32 分支调 os_win32.c 的
+    # lume_win32_random()(BCryptGenRandom, core b1ef0fb 同款)。mingw 的
+    # sysroot 默认不链 bcrypt, 缺了它 Windows 链接直接报 undefined
+    # reference to `BCryptGenRandom' —— 与 lume-core Makefile 的 -lbcrypt
+    # 同口径。
+    LDFLAGS += -lbcrypt
     # POSIX regex for str_match: mingw 的 C runtime 没有 regcomp/regexec/
     # regfree, 原 -lregex(libgnurx) 已从 MSYS2 源消失。vendor 进
     # lang/compat/regex(musl/TRE, BSD 许可, 与 lume-core 的 src/compat/regex
@@ -262,7 +268,8 @@ build:
 bin:
 	mkdir -p bin
 else
-# cmd 无 `mkdir -p`; build/bin 由下面编译规则里的 `if not exist` 按需创建。
+# build/bin 已由 parse 期的 $(shell mkdir -p build bin) 创建(CI 的
+# $(shell) 同样跑 /bin/sh); 空 recipe 保住 make -B 的目录规则语义。
 build: ;
 bin: ;
 endif
@@ -272,9 +279,16 @@ build/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build $(AH_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 else
-# cmd.exe 没有 `mkdir -p`; 目录已存在时 `mkdir` 会报错退出, 先查再建。
+# Windows 分支的 recipe 由谁执行? CI 是 MSYS2 make(base-devel), 用 /bin/sh;
+# 本地 Git Bash 的 make 同样落 sh。cmd.exe 只有 mingw32-make 会用, 而那条路
+# 已被 build/build-host.py 取代 —— 所以这里用 sh 的 `mkdir -p`(MSYS2 自带
+# coreutils), 目录已存在时不报错。旧写法 `@if not exist ...` 是 cmd 语法,
+# sh 把 `if` 当保留字解析, 每个 .o 都以
+#   /bin/sh: -c: line 2: syntax error: unexpected end of file from `if'
+# 收场 —— Windows (MSYS2) CI 41837945030 实证, 自 vendored-regex 分支引入
+# 起就没有一台 CI 真正编译过这个分支。
 build/%.o: lang/%.c lang/lume.h $(INT_HDRS) | build
-	@if not exist "$(dir $@)" mkdir "$(dir $@)"
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 endif
 
