@@ -7,35 +7,47 @@ on:
 
 # agent-httpd 是 lume 的 git submodule(见 .gitmodules),版本由 gitlink 锁定;
 # checkout 带 submodules: recursive 自动按 gitlink 拉取,无需手动 checkout。
+# A new push on the same ref supersedes the previous run;
+# keep the long build/test matrices from queuing up.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # 隐私闸门独立成腿: 只扫 HEAD 的 blob, 不碰构建, 秒级完成。
   # 防的就是 2026-10-18 那次 —— serena 提交把 /Users/<真实用户> 全路径写进
   # .gitignore/Dockerfile 注释, 当时本仓无闸门, 一路滑进公开仓。
   privacy:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
       - name: treecheck (no build-machine paths in HEAD)
         run: make treecheck
 
   test:
     runs-on: ubuntu-24.04  # ubuntu-latest 自 2026-10-19 迁移 Ubuntu 26: test job 连续 6+ 笔在 "all tests passed" 后死于 make "wait: No child processes"(143), 新镜像 make/bash 组合的 jobserver 竞态; 钉回已知良好镜像
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           path: lume
           submodules: recursive
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 24
       - name: Install pnpm
         run: npm install -g pnpm@9.15.9
       - name: Build + full test suite
         working-directory: lume
+        env:
+          # This runner has outbound network, so the HTTPS egress leg is
+          # authoritative here: an offline skip must fail, not go green.
+          LUME_REQUIRE_EGRESS: "1"
         run: make -j4 test
       - name: Upload server log on failure
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
         with:
           name: test-logs
           path: lume/logs/
@@ -43,8 +55,9 @@ jobs:
 
   asan:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           path: lume
           submodules: recursive
@@ -65,13 +78,14 @@ jobs:
   # must land next to the host checkout in the runner workspace.
   check-sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           path: lume
           submodules: recursive
       - name: Checkout lume-core as a sibling (real drift detection)
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           repository: erishen/lume-core
           path: lume-core
@@ -84,6 +98,25 @@ jobs:
           # this checkout to the PIN sha would make "upstream changed a
           # synced file and lang/ did not follow" undetectable.
           fetch-depth: 0
+      # The semantic baseline fixtures are verbatim copies of two core test
+      # scripts. If core edits one and the host copy is stale, run_all.sh
+      # would happily keep testing old semantics. This sibling checkout
+      # makes that drift a hard failure instead.
+      - name: "Verify cross-repo semantic baseline is in sync"
+        working-directory: lume
+        run: |
+          set -e
+          cmp -s tests/baseline-literals-bitops.lume \
+                 ../lume-core/tests/literals-bitops-consistency.lume || {
+            echo "baseline-literals-bitops.lume drifted from lume-core";
+            diff -u ../lume-core/tests/literals-bitops-consistency.lume \
+                    tests/baseline-literals-bitops.lume | head -40; exit 1; }
+          cmp -s tests/baseline-block-scope.lume \
+                 ../lume-core/tests/p1-9-consistency.lume || {
+            echo "baseline-block-scope.lume drifted from lume-core";
+            diff -u ../lume-core/tests/p1-9-consistency.lume \
+                    tests/baseline-block-scope.lume | head -40; exit 1; }
+          echo "semantic baseline fixtures match lume-core"
       # Quoted: a bare ": " inside a plain scalar is a YAML parse error,
       # which GitHub reports as "workflow file issue" with zero jobs.
       - name: "Verify the pin (strict: drift, stale PIN, new lag, registry gaps)"

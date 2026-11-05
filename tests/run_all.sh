@@ -71,6 +71,24 @@ LUME
 ./bin/lume --check /tmp/lume-for-bad2.lume >/dev/null 2>&1 && fail "nested for-init shadow should be rejected"
 pass "for-init scoping (sibling loops + shadow rejection)"
 
+# 2e. cross-repo semantic baseline -------------------------------------------
+# lume has no native emitter, so core's three-backend consistency suite does
+# not apply here (see tests/baseline.provenance). Instead we pin observable
+# interpreter semantics byte-for-byte against lume-core: the .lume files are
+# verbatim core fixtures and the .expected files are core interpreter output.
+# This is what catches a partial hand-merge of the HOST_PINNED typecheck.c /
+# value.c / interp.c, which the synced-file md5 baseline cannot see.
+BASE_OUT=$(mktemp)
+for base in baseline-literals-bitops baseline-block-scope; do
+    ./bin/lume "tests/$base.lume" > "$BASE_OUT" 2>/dev/null || fail "run $base"
+    tr -d '\r' < "$BASE_OUT" > "$BASE_OUT.clean"
+    if ! diff -u "tests/$base.expected" "$BASE_OUT.clean"; then
+        fail "semantic baseline $base drifted from lume-core (see tests/baseline.provenance)"
+    fi
+    pass "semantic baseline: $base matches lume-core interpreter"
+done
+rm -f "$BASE_OUT" "$BASE_OUT.clean"
+
 # 3. tool registry integration (no HTTP) -------------------------------------
 ./tests/tools-bin || fail "tool integration"
 pass "tool registry + dispatch"
@@ -308,9 +326,19 @@ pkill -f "[b]in/lume /tmp/lume-min-gc-test" 2>/dev/null || true
 # lume_http_warmup() 必须在 master 单线程阶段完成 TLS 初始化, worker 里
 # 第一次出站才不崩。这里的 server 启动时不做任何出站(warmup 已无外部探测,
 # probe 走本地回环), /probe 就是整个进程的首次 HTTPS —— 预热缺失时 worker
-# 首次出站会踩闸门。无外网时跳过(CI 有网, 该段是权威)。
+# 首次出站会踩闸门。
+#
+# Offline skip is fail-closed. `curl -s` alone exits 0 for a proxy's 502 HTML
+# page, a captive portal, or any HTTP status, so the old `if curl ...; else
+# skip` silently turned this whole regression leg green on a broken network.
+# Only unambiguous transport failures may skip; everything else fails. CI sets
+# LUME_REQUIRE_EGRESS=1 so the authoritative leg can never be skipped there.
+EGRESS_ERR=$(mktemp)
+EGRESS_HTTP=$(curl -sS -o /dev/null -m 5 -w '%{http_code}' \
+    https://example.com/ 2>"$EGRESS_ERR")
+EGRESS_RC=$?
 HTTPS_PORT=8995
-if curl -s -m 5 -o /dev/null https://example.com/; then
+if [ "$EGRESS_RC" -eq 0 ] && [ "$EGRESS_HTTP" = "200" ]; then
     cat > /tmp/lume-https-first.lume <<LUME
 server {
   port = $HTTPS_PORT;
@@ -350,8 +378,28 @@ LUME
     kill $HTTPS_PID 2>/dev/null; HTTPS_PID=
     lsof -ti tcp:$HTTPS_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
 else
-    echo "skip   first-request HTTPS egress (no outbound network)"
+    # curl transport failures that unambiguously mean "no usable outbound
+    # path": 6 DNS, 7 connect, 28 timeout, 35 TLS handshake, 52 empty reply,
+    # 55 send, 56 recv. Everything else (rc=0 with a non-200 status, proxy
+    # misconfig rc=5, bad CA rc=60, missing curl rc=127) is a broken
+    # environment, not an offline one — fail instead of hiding the regression.
+    EGRESS_MSG=$(tr -d '\r\n' < "$EGRESS_ERR")
+    case "$EGRESS_RC" in
+        0)
+            fail "egress probe: example.com returned HTTP $EGRESS_HTTP (expected 200; proxy or captive portal?)"
+            ;;
+        6|7|28|35|52|55|56)
+            if [ "${LUME_REQUIRE_EGRESS:-0}" = "1" ]; then
+                fail "first-request HTTPS egress is required but host is offline (curl rc=$EGRESS_RC: $EGRESS_MSG)"
+            fi
+            echo "skip   first-request HTTPS egress (offline: curl rc=$EGRESS_RC $EGRESS_MSG)"
+            ;;
+        *)
+            fail "egress probe failed with curl rc=$EGRESS_RC (not an offline condition): $EGRESS_MSG"
+            ;;
+    esac
 fi
+rm -f "$EGRESS_ERR"
 
 # 4g. binary download envelope ----------------------------------------------
 # examples/download.lume serves file bytes via read_file + the

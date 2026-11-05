@@ -1,0 +1,37 @@
+Cross-repo semantic baseline for the lume host tree.
+
+WHY THIS EXISTS
+  lume-core's tests/*-consistency.lume suites compare THREE backends
+  (interpreter / text IR / LLVM) running the same script. The lume host has
+  no native emitter or compiler backend: it builds a single interpreter
+  binary from lang/ (a pinned copy of core), with agent-httpd for HTTP/DB.
+  There is therefore no "three-backend consistency" to test here, and
+  copying tests/native-consistency.lume (1560 lines, core-only builtins such
+  as crypt_verify / chisq_cdf) would be both wrong and unbuildable.
+
+  The real risk on the host side is different: HOST_PINNED files
+  (typecheck.c, value.c, interp.c, ...) are hand-merged from core, so a
+  partial merge can silently change language semantics without any md5
+  drift in the synced files. This baseline pins the *observable behaviour*
+  of the host interpreter byte-for-byte against core's interpreter.
+
+FILES (byte-identical copies of core fixtures, do not hand-edit)
+  baseline-literals-bitops.lume  <- lume-core/tests/literals-bitops-consistency.lume
+  baseline-block-scope.lume     <- lume-core/tests/p1-9-consistency.lume
+  Copied at lume-core fabe9e2b8575461071e2507d9cfb2f04ce9a1876.
+  Both are pure-language fixtures: no imports, no server, no HTTP/DB/FS,
+  no core-only builtins, deterministic output.
+
+  baseline-*.expected are the authoritative outputs produced by
+  bin/lume-core (the core interpreter), with CR stripped. tests/run_all.sh
+  runs bin/lume on each fixture and diffs against these files.
+
+HOW IT IS KEPT HONEST
+  .github/workflows/ci.yml (check-sync job) cmp's the two .lume copies
+  against the sibling lume-core checkout. If core edits a fixture and the
+  host copy is not refreshed, CI fails instead of quietly testing stale
+  semantics. Re-sync by copying the core file and regenerating the matching
+  .expected with the core interpreter; verify bin/lume still matches.
+
+  This is deliberately NOT part of lang/PIN.manifest: these are host-owned
+  test assets, not synced runtime sources.
