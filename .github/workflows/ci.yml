@@ -84,6 +84,8 @@ jobs:
           # this checkout to the PIN sha would make "upstream changed a
           # synced file and lang/ did not follow" undetectable.
           fetch-depth: 0
-      - name: Verify the pin (strict: drift, stale PIN, new lag, registry gaps)
+      # Quoted: a bare ": " inside a plain scalar is a YAML parse error,
+      # which GitHub reports as "workflow file issue" with zero jobs.
+      - name: "Verify the pin (strict: drift, stale PIN, new lag, registry gaps)"
         working-directory: lume
         run: make check-sync
