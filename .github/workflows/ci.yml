@@ -65,6 +65,42 @@ jobs:
           retention-days: 7
         continue-on-error: true
 
+  # The host links libagenthttpd.a, which is POSIX code that DOES build on
+  # macOS (unlike Windows, where it is stubbed out) — so this is the one CI
+  # lane that exercises the full server stack (HTTP/SQL builtins, the agent
+  # bridge, the type checker and module loading) on clang / Apple SDK before
+  # any darwin binary ships to users. The darwin-arm64 release is built on
+  # macos-14 but never test-run there, and darwin-x64 is Linux-cross-built;
+  # this job closes that coverage gap.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+        with:
+          path: lume
+          submodules: recursive
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
+      - name: Install pnpm
+        run: npm install -g pnpm@9.15.9
+      - name: Build + full test suite
+        working-directory: lume
+        env:
+          # This runner has outbound network, so the HTTPS egress leg is
+          # authoritative here too: an offline skip must fail, not go green.
+          LUME_REQUIRE_EGRESS: "1"
+        run: make test
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
+        with:
+          name: macos-test-logs
+          path: lume/logs/
+          retention-days: 7
+        continue-on-error: true
+
   asan:
     runs-on: ubuntu-latest
     timeout-minutes: 25

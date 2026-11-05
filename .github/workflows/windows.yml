@@ -94,5 +94,9 @@ jobs:
           rm -f "$out" "$exp"
 
       # `make test` is POSIX-only (it drives a live HTTP server through
-      # libagenthttpd, and its harness uses POSIX mkdir(2)/rm shell calls).
-      # It runs on the Linux `ci` job instead.
+      # libagenthttpd, and its harness uses POSIX mkdir(2)/rm shell calls),
+      # so it runs on the Linux `ci` job instead. This workflow is therefore
+      # the maximum feasible Windows coverage: the interpreter, type checker
+      # and module loading build and execute here, but serving HTTP / SQL and
+      # the agent bridge do not (they are compiled out into stubs by design).
+      # Coverage ceiling — intentional, not a gap to "fix".

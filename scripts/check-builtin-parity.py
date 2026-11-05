@@ -40,6 +40,14 @@ GREEN = "\033[32m"
 OFF = "\033[0m"
 
 
+def gh_error(msg):
+    """Emit a GitHub Actions error annotation when running in CI so gate
+    failures surface inline in PR diffs instead of only in the collapsed step
+    log. Harmless plain text outside Actions."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print("::error::%s" % msg)
+
+
 def names(path):
     with open(path, encoding="utf-8", errors="replace") as fh:
         return set(PAT.findall(fh.read()))
@@ -65,6 +73,8 @@ def accept_list():
 def main():
     if not os.path.isfile(CORE_INTERP):
         if os.environ.get("LUME_REQUIRE_CORE") == "1":
+            gh_error("check-builtin-parity: requires a sibling lume-core tree "
+                     "(LUME_REQUIRE_CORE=1) but %s is missing" % CORE_INTERP)
             print("%sFAIL%s builtin parity requires a sibling lume-core tree "
                   "(LUME_REQUIRE_CORE=1) but %s is missing" % (RED, OFF, CORE_INTERP))
             return 1
@@ -72,9 +82,11 @@ def main():
         print("      (CI checks out lume-core as a sibling: LUME_CORE_DIR=... to override)")
         return 0
     if not os.path.isfile(HOST_INTERP):
+        gh_error("check-builtin-parity: missing %s" % HOST_INTERP)
         print("%sFAIL%s missing %s" % (RED, OFF, HOST_INTERP))
         return 1
     if not os.path.isfile(ALLOW):
+        gh_error("check-builtin-parity: missing %s" % ALLOW)
         print("%sFAIL%s missing %s" % (RED, OFF, ALLOW))
         return 1
 
@@ -94,6 +106,8 @@ def main():
     if bad:
         for b in bad:
             print("%sFAIL%s %s" % (RED, OFF, b))
+        gh_error("check-builtin-parity: builtin diff changed; update "
+                 "tests/builtin-parity.allow with the explicit decision")
         print("builtin parity changed. Either port the builtin to the other tree,")
         print("or update tests/builtin-parity.allow with the explicit decision.")
         return 1

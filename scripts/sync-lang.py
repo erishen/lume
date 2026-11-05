@@ -151,6 +151,14 @@ RED = "\033[31m"
 OFF = "\033[0m"
 
 
+def gh_error(msg):
+    """Emit a GitHub Actions error annotation when running in CI so the sync
+    gate failures surface inline in PR diffs instead of only in the collapsed
+    step log. Harmless plain text outside Actions."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print("::error::%s" % msg)
+
+
 def pin_core_dir():
     """The core_dir line in lang/PIN, resolved relative to the repo root.
 
@@ -262,6 +270,8 @@ def report_unclassified(files, core):
     for f in unknown:
         print("%sUNCLASSIFIED%s upstream src/%s: not in lang/ and not named "
               "core-only" % (RED, OFF, f))
+    gh_error("sync-lang: %d unclassified upstream source file(s); classify "
+             "before sync" % len(unknown))
     print("         either sync it into lang/ (then `make sync-lang`), or add it "
           "to CORE_ONLY_NAMES / CORE_ONLY_PREFIXES in scripts/sync-lang.py")
     return True
@@ -611,6 +621,8 @@ def main():
             # repo) degrades this "strict" gate into an md5-only check that
             # would never notice upstream drift, yet still returns green.
             if os.environ.get("LUME_REQUIRE_CORE") == "1":
+                gh_error("sync-lang: strict check requires a sibling "
+                         "lume-core tree (LUME_REQUIRE_CORE=1)")
                 print("%sFAIL%s check requires a sibling lume-core tree "
                       "(LUME_REQUIRE_CORE=1) but none was found at %s"
                       % (RED, OFF, os.environ.get("LUME_CORE_DIR")
@@ -689,6 +701,9 @@ def main():
         for f in drift:
             print("%sDRIFT%s   %s" % (RED, OFF, f))
         if drift:
+            gh_error("sync-lang: %d of %d synced file(s) differ from core; "
+                     "run make sync-lang" % (len(drift),
+                                            len(files) - len(HOST_PINNED)))
             print("%d of %d synced file(s) differ from core; run `make sync-lang`"
                   % (len(drift), len(files) - len(HOST_PINNED)))
             return 1
@@ -707,6 +722,7 @@ def main():
         if state in ("ahead", "missing", "diverged", "none"):
             print("%sSTALEPIN%s %s - run `make sync-lang`"
                   % (YELLOW, OFF, pin_note))
+            gh_error("sync-lang: STALEPIN %s - run make sync-lang" % pin_note)
             hard.append("STALEPIN: %s" % pin_note)
         elif pin_note:
             # Green, but say why the pin is not HEAD anyway.  "folded" is a
@@ -726,6 +742,8 @@ def main():
             hard.append("%d host-owned file(s) changed past lang/PIN.lag"
                         % len(lagging))
         if strict and hard:
+            gh_error("sync-lang: %d host-owned file(s) changed past "
+                     "lang/PIN.lag" % len(lagging))
             for h in hard:
                 print("%sFAIL%s %s" % (RED, OFF, h))
             print("check --strict: resolve the above, then re-run; a deliberate "
@@ -743,6 +761,8 @@ def main():
 
     core = core_dir()
     if report_unclassified(files, core):
+        gh_error("sync-lang: classify the upstream file(s) above before "
+                 "re-pinning lang/")
         print("%sREFUSED%s classify the upstream file(s) above before "
               "re-pinning lang/." % (RED, OFF))
         return 1
