@@ -697,7 +697,7 @@ sync-lang-force:
 	@python3 scripts/sync-lang.py sync --force
 
 check-sync:
-	@python3 scripts/sync-lang.py check
+	@python3 scripts/sync-lang.py check --strict
 
 # crypt_sha512 内建单测（glibc 生成 $6$ / macOS 平台报错 都算 PASS）。
 crypt-test: all

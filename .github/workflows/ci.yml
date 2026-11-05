@@ -75,9 +75,15 @@ jobs:
         with:
           repository: erishen/lume-core
           path: lume-core
-      - name: Verify the md5 baseline
+          # check --strict resolves lang/PIN's sha with
+          # `git rev-parse <pin>^{commit}` to tell a genuinely stale pin
+          # from a merely folded one (core moved on without touching a
+          # synced file). The default fetch-depth:1 has only HEAD, so the
+          # pinned commit is missing and every run reports a false
+          # STALEPIN. Full history keeps the drift leg alive too: pinning
+          # this checkout to the PIN sha would make "upstream changed a
+          # synced file and lang/ did not follow" undetectable.
+          fetch-depth: 0
+      - name: Verify the pin (strict: drift, stale PIN, new lag, registry gaps)
         working-directory: lume
         run: make check-sync
-      - name: Verify the pin against the pinned core commit
-        working-directory: lume
-        run: python3 scripts/sync-lang.py check

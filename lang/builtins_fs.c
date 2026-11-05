@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <stdlib.h>   /* realpath() / strdup() / free() for LUME_FS_ROOT */
 /* Advisory file lock + mkdir portability. On POSIX these wrap flock(2) and
  * mkdir(2); on Windows (mingw-w64) they map to LockFileEx / _mkdir so the
  * same source builds a native .exe. LOCK_* are the POSIX <sys/file.h> values,
@@ -131,6 +132,83 @@ static bool fs_permitted(VM *vm, const char *what) {
     return false;
 }
 
+/* realpath(path, NULL) is POSIX and hidden under -std=c11 on mingw; the CRT
+ * _fullpath() is the Windows equivalent. Shared with main.c (declared in
+ * lume.h): main resolves the root once, the builtins resolve each path.
+ * Hand-merged from lume-core/src/builtins_fs.c (P3 2026-11-04). */
+#ifndef _WIN32
+char *lume_realpath(const char *path) { return realpath(path, NULL); }
+#else
+char *lume_realpath(const char *path) { return _fullpath(NULL, path, 0); }
+#endif
+
+/* Prefix + boundary check against base_real (the static.c resolve_within()
+ * shape): realpath has already resolved .. and symlinks, so this is not a
+ * bare strncmp allowlist. rp == base, or base + "/" -> descendant;
+ * base + "x" -> sibling, refused. Windows _fullpath emits backslashes. */
+static bool fs_within(const char *base_real, const char *rp) {
+    size_t bl = strlen(base_real);
+    if (strncmp(rp, base_real, bl) != 0) return false;
+    char c = rp[bl];
+#ifdef _WIN32
+    return c == '\0' || c == '/' || c == '\\';
+#else
+    return c == '\0' || c == '/';
+#endif
+}
+
+/* LUME_FS_ROOT allowlist: OFF unless main.c resolved a root. A path whose
+ * realpath fails (target does not exist yet) is checked through its parent,
+ * so a write can create a new file inside the root and a missing read keeps
+ * the documented null-return contract — but an escape naming a nonexistent
+ * path still resolves its parent and is refused there. */
+static bool fs_check_path(VM *vm, const char *what, const char *path) {
+    if (vm->no_fs) return fs_permitted(vm, what);   /* hard switch wins */
+    if (!vm->fs_root_real) return true;             /* allowlist off: free */
+    char *rp = lume_realpath(path);
+    if (!rp) {
+        char *dup = strdup(path);
+        if (!dup) { vm_set_error(vm, "%s(): out of memory", what); return false; }
+        char *slash = strrchr(dup, '/');
+#ifdef _WIN32
+        char *bs = strrchr(dup, '\\');
+        if (bs && (!slash || bs > slash)) slash = bs;
+#endif
+        if (!slash) {
+            free(dup);
+            vm_set_error(vm, "%s(): path is outside LUME_FS_ROOT (%s)",
+                         what, vm->fs_root);
+            return false;
+        }
+        *slash = '\0';
+        rp = lume_realpath(dup);
+        free(dup);
+        if (!rp) {
+            vm_set_error(vm, "%s(): path is outside LUME_FS_ROOT (%s)",
+                         what, vm->fs_root);
+            return false;
+        }
+    }
+    bool ok = fs_within(vm->fs_root_real, rp);
+    free(rp);
+    if (!ok) {
+        vm_set_error(vm, "%s(): path is outside LUME_FS_ROOT (%s)",
+                     what, vm->fs_root);
+        return false;
+    }
+    return true;
+}
+
+/* Write-side variant: the allowlist check plus LUME_FS_RO=1 read-only, kept
+ * separate so reads keep working under read-only. */
+static bool fs_write_ok(VM *vm, const char *what, const char *path) {
+    if (vm->fs_readonly) {
+        vm_set_error(vm, "%s(): filesystem is read-only in this run (LUME_FS_RO=1)", what);
+        return false;
+    }
+    return fs_check_path(vm, what, path);
+}
+
 /* Sorted directory listing; directories carry a trailing "/". Missing or
  * unreadable dirs yield an empty list (a discovery page should degrade).
  * One argument: single-level listing of `dir` (names only, as before). A
@@ -180,9 +258,9 @@ static void files_walk(VM *vm, Obj *list, const char *dir, const char *prefix,
 
 void native_files(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "files() needs a directory path"); return; }
-    if (!fs_permitted(vm, "files")) return;
     const char *dir = NULL;
     if (!arg_string(vm, args[0], &dir)) return;
+    if (!fs_check_path(vm, "files", dir)) return;
     int recurse = argc >= 2 && value_truthy(args[1]);
     Obj *list = AS_OBJ(make_list(vm));
     vm_push(vm, val_obj((Obj *)list)); /* root while filling */
@@ -191,12 +269,21 @@ void native_files(VM *vm, int argc, Value *args, Value *out) {
 }
 
 /* Whole file contents as a string, or null when missing/unreadable.
- * 16 MiB cap: this exists for catalog/skill inspection, not memory dumps. */
+ * 16 MiB cap: this exists for catalog/skill inspection, not memory dumps.
+ *
+ * CONTRACT (pinned by tests/smoke.c here and in lume-core): a missing or
+ * unreadable file returns null WITHOUT setting a VM error. Callers probe
+ * optional files (.env, catalogs, audit ledgers) with `read_file(p) == null`.
+ * try() therefore CANNOT catch a missing file: it takes the success path and
+ * yields { ok: null, err: null }, so a "404 if missing" handler must test
+ * `get(r, "ok", null) == null`, not `get(r, "err", null) != null`
+ * (see examples/download.lume). Do not replace this with vm_set_error():
+ * genuine errors (oversized file, --no-fs / allowlist refusal) DO raise. */
 void native_read_file(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "read_file() needs a path"); return; }
-    if (!fs_permitted(vm, "read_file")) return;
     const char *p = NULL;
     if (!arg_string(vm, args[0], &p)) return;
+    if (!fs_check_path(vm, "read_file", p)) return;
     FILE *f = fopen(p, "rb");
     if (!f) { *out = val_null(); return; }
     sbuf b = {0};
@@ -234,9 +321,9 @@ void native_read_file(VM *vm, int argc, Value *args, Value *out) {
  * and a torn write would otherwise destroy the only copy of the data. */
 void native_write_file(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 2) { vm_set_error(vm, "write_file() needs a path and content"); return; }
-    if (!fs_permitted(vm, "write_file")) return;
     const char *p = NULL;
     if (!arg_string(vm, args[0], &p)) return;
+    if (!fs_write_ok(vm, "write_file", p)) return;
     if (!IS_OBJ(args[1]) || AS_OBJ(args[1])->type != OBJ_STRING) {
         vm_set_error(vm, "write_file() content must be a string");
         return;
@@ -283,9 +370,9 @@ void native_write_file(VM *vm, int argc, Value *args, Value *out) {
  * other local users read them (matches the 0600 session files). */
 void native_mkdir(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "mkdir() needs a directory path"); return; }
-    if (!fs_permitted(vm, "mkdir")) return;
     const char *p = NULL;
     if (!arg_string(vm, args[0], &p)) return;
+    if (!fs_write_ok(vm, "mkdir", p)) return;
     if (!p[0]) { *out = val_bool(false); return; }
     char tmp[4096];
     if (strlen(p) >= sizeof tmp) { *out = val_bool(false); return; }
@@ -314,9 +401,9 @@ static int g_lock_fd = -1;
 
 void native_lock_file(VM *vm, int argc, Value *args, Value *out) {
     if (argc < 1) { vm_set_error(vm, "lock_file() needs a path"); return; }
-    if (!fs_permitted(vm, "lock_file")) return;
     const char *p = NULL;
     if (!arg_string(vm, args[0], &p)) return;
+    if (!fs_write_ok(vm, "lock_file", p)) return;
     long wait_ms = 2000;
     if (argc >= 2 && IS_NUM(args[1])) {
         wait_ms = (long)AS_NUM(args[1]);

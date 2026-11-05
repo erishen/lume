@@ -7,13 +7,14 @@ specific lume-core commit so `bin/lume` can always answer "which language
 am I built from".  See lang/PIN.
 
     python3 scripts/sync-lang.py check   # report drift, write nothing
+    python3 scripts/sync-lang.py check --strict   # fail on stale pin / new lag
     python3 scripts/sync-lang.py sync    # copy core's files over, refresh PIN
 
 The core tree lives next to this repo by default; override with
 LUME_CORE_DIR=<path> if it sits elsewhere.  Paths are never written into
 PIN (this repo is public).
 
-check reports three things:
+check reports four things:
 
   host-owned  files the host deliberately keeps; they are never overwritten
               and *not* counted as drift.  Each one also gets an upstream
@@ -23,6 +24,13 @@ check reports three things:
   host-only   files that exist here and never existed upstream.
   drift       upstream has it, this copy differs.  The only bucket that
               makes check fail.
+  registry    a builtin seeded in interp.c that LUME_BUILTIN_NAMES[] cannot
+              name - a partial hand-merge, always a failure.
+
+`check --strict` also fails on a stale PIN (ahead/missing/diverged/none)
+and on any host-owned file whose upstream delta grew past lang/PIN.lag.
+A PIN that is merely folded (core moved on without touching a synced file)
+stays green, so an unrelated upstream commit cannot turn CI red.
 
 The upstream comparison needs a lume-core tree next door.  Where there is
 none (CI, a checkout on its own) check falls back to the baseline in
@@ -36,6 +44,7 @@ import datetime
 import difflib
 import io
 import os
+import re
 import subprocess
 import sys
 
@@ -414,9 +423,39 @@ def write_pin(sha, version):
         fh.write(body)
 
 
+def host_registry_gaps():
+    """Builtins the host seeds at runtime but its typechecker cannot name.
+
+    A partial hand-merge of typecheck.c is invisible to both md5 and line-lag
+    checks: interp.c's registry and the arity table get the new name while
+    LUME_BUILTIN_NAMES[] does not, so every script using it fails --check
+    even though the runtime would have handled it (crypt_verify and
+    const_time_eq were exactly this).  The host's own interp registry is the
+    reference, not upstream's name table: the host deliberately implements
+    fewer builtins than lume-core.  Only registry - names is a gap; the
+    reverse direction holds type words and verb groups by design.
+    """
+    tc_path = os.path.join(LANG, "typecheck.c")
+    ip_path = os.path.join(LANG, "interp.c")
+    if not (os.path.isfile(tc_path) and os.path.isfile(ip_path)):
+        return []
+    with open(tc_path, encoding="utf-8") as fh:
+        tc = fh.read()
+    m = re.search(r"LUME_BUILTIN_NAMES\[\]\s*=\s*\{(.*?)\};", tc, re.S)
+    if not m:
+        return []
+    body = re.sub(r"/\*.*?\*/|//[^\n]*", "", m.group(1), flags=re.S)
+    names = set(re.findall(r'"([^"]+)"', body))
+    with open(ip_path, encoding="utf-8") as fh:
+        ip = fh.read()
+    registered = set(re.findall(r'\{\s*"([a-z_][a-z0-9_]*)"\s*,\s*b_\w+\s*\}', ip))
+    return sorted(registered - names)
+
+
 def main():
     argv = sys.argv[1:]
     force = "--force" in argv
+    strict = "--strict" in argv
     mode = next((a for a in argv if not a.startswith("-")), "check")
     if mode not in ("sync", "check", "accept-lag"):
         sys.exit("usage: sync-lang.py {sync|check|accept-lag} [--force]")
@@ -424,6 +463,17 @@ def main():
     files = lang_sources()
 
     if mode == "check":
+        # This one is host-internal, so it must run even when lume-core is
+        # not reachable and check falls back to the md5 baseline.
+        gaps = host_registry_gaps()
+        if gaps:
+            for g in gaps:
+                print("%sREGISTRY%s %s is seeded in lang/interp.c but missing "
+                      "from LUME_BUILTIN_NAMES[] (partial hand-merge)" % (RED, OFF, g))
+            print("%d builtin(s) would fail --check; finish the hand-merge in "
+                  "lang/typecheck.c" % len(gaps))
+            return 1
+
         # The upstream comparison needs lume-core next door.  CI has no such
         # tree, and one that exists but carries no commits (erishen/lume-core
         # is an empty repo today) is the same thing as far as this script is
@@ -525,12 +575,15 @@ def main():
         # silence this used to have.  Compare by ancestry, not equality: a
         # later commit that left the synced files alone does not make the
         # pin stale.
+        hard = []
         state, pin_note, suffix = pin_status(core, sha)
         if state in ("ahead", "missing", "diverged", "none"):
             print("%sSTALEPIN%s %s - run `make sync-lang`"
                   % (YELLOW, OFF, pin_note))
+            hard.append("STALEPIN: %s" % pin_note)
         elif pin_note:
-            # Green, but say why the pin is not HEAD anyway.
+            # Green, but say why the pin is not HEAD anyway.  "folded" is a
+            # note, not a failure: core moved on without touching synced files.
             print("pin         %s" % pin_note)
         print("%sok%s lang/ matches %s @ %s - %d synced, %d host-owned, %d host-only%s"
               % (GREEN, OFF, os.path.basename(core), sha[:12],
@@ -539,6 +592,14 @@ def main():
         if lagging:
             print("%d host-owned file(s) are %d+ lines behind upstream; "
                   "a hand-merge is owed" % (len(lagging), LAG_WARN))
+            hard.append("%d host-owned file(s) grew past lang/PIN.lag"
+                        % len(lagging))
+        if strict and hard:
+            for h in hard:
+                print("%sFAIL%s %s" % (RED, OFF, h))
+            print("check --strict: resolve the above, then re-run; a deliberate "
+                  "new lag needs `sync-lang.py accept-lag` after the hand-merge")
+            return 1
         return 0
 
     if mode == "accept-lag":

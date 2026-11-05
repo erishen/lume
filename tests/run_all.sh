@@ -439,6 +439,36 @@ pass "upload-spool: over-cap body 413s, within-cap spools"
 kill $UP2_PID 2>/dev/null; UP2_PID=
 rm -f "$UP_SMALL" "$UP_BIG" "$UP_HUGE"
 
+# 4j. LUME_FS_ROOT allowlist (opt-in; hand-merged from lume-core) -------------
+# Default OFF keeps the HTTP host's existing file access. When set, path-taking
+# builtins stay inside realpath-checked descendants; LUME_FS_RO=1 adds RO.
+FSR=$(mktemp -d)
+FSOUT=$(mktemp)
+printf 'inside' > "$FSR/ok.txt"
+printf 'outside' > "$FSOUT"
+cat > /tmp/lume-fs-root-inside.lume <<LUME
+print(str(read_file("$FSR/ok.txt") == "inside"));
+LUME
+cat > /tmp/lume-fs-root-escape.lume <<LUME
+print(str(read_file("$FSOUT") == "outside"));
+LUME
+[ "$(./bin/lume /tmp/lume-fs-root-inside.lume)" = "true" ] || fail "FS_ROOT: off by default"
+[ "$(LUME_FS_ROOT=$FSR ./bin/lume /tmp/lume-fs-root-inside.lume)" = "true" ] || fail "FS_ROOT: inside root readable"
+ESCAPE=$(LUME_FS_ROOT=$FSR ./bin/lume /tmp/lume-fs-root-escape.lume 2>&1); ESC_RC=$?
+[ "$ESC_RC" -ne 0 ] || fail "FS_ROOT: escape must fail"
+printf '%s' "$ESCAPE" | grep -Fq "outside LUME_FS_ROOT" || fail "FS_ROOT: escape error message"
+cat > /tmp/lume-fs-root-ro.lume <<LUME
+print(str(write_file("$FSR/new.txt", "x")));
+LUME
+RO=$(LUME_FS_ROOT=$FSR LUME_FS_RO=1 ./bin/lume /tmp/lume-fs-root-ro.lume 2>&1); RO_RC=$?
+[ "$RO_RC" -ne 0 ] || fail "FS_ROOT: read-only must refuse write"
+printf '%s' "$RO" | grep -Fq "read-only" || fail "FS_ROOT: read-only error message"
+BAD=$(LUME_FS_ROOT=$FSR/does-not-exist ./bin/lume /tmp/lume-fs-root-inside.lume 2>&1); BAD_RC=$?
+[ "$BAD_RC" -eq 2 ] || fail "FS_ROOT: unresolvable root must fail at startup (rc=$BAD_RC)"
+printf '%s' "$BAD" | grep -Fq "does not resolve" || fail "FS_ROOT: unresolvable root error message"
+pass "LUME_FS_ROOT: off by default, escape/RO/unresolvable enforced"
+rm -rf "$FSR" "$FSOUT" /tmp/lume-fs-root-*.lume
+
 echo
 echo "all tests passed"
 exit 0

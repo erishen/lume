@@ -389,6 +389,37 @@ int main(int argc, char **argv) {
         no_net = true;
     }
 
+    /* LUME_FS_ROOT allowlist (hand-merged from core P3 2026-11-04): OFF by
+     * default so the HTTP host keeps its existing file access unchanged.
+     * When set, the path-taking builtins are confined to realpath-checked
+     * descendants of this directory; LUME_FS_RO=1 adds read-only. An
+     * unresolvable root is a hard error - silently falling back to
+     * unfiltered access would be the opposite of the point. */
+    const char *fs_root = NULL;
+    char *fs_root_real = NULL;
+    bool fs_readonly = false;
+    const char *fs_root_env = getenv("LUME_FS_ROOT");
+    if (fs_root_env && fs_root_env[0]) {
+        fs_root = fs_root_env;
+        fs_root_real = lume_realpath(fs_root_env);
+        /* Windows _fullpath() normalizes a path that does not exist, unlike
+         * POSIX realpath() which fails. Without this check a typo in
+         * LUME_FS_ROOT would be accepted as a root no real file can satisfy. */
+        struct stat root_st;
+        if (!fs_root_real || stat(fs_root_real, &root_st) != 0 ||
+            !S_ISDIR(root_st.st_mode)) {
+            fprintf(stderr, "lume: LUME_FS_ROOT=%s does not resolve to a directory\n",
+                    fs_root_env);
+            free(fs_root_real);
+            return 2;
+        }
+    }
+    const char *fs_ro_env = getenv("LUME_FS_RO");
+    if (fs_ro_env && fs_ro_env[0] && strcmp(fs_ro_env, "0") != 0 &&
+        strcmp(fs_ro_env, "off") != 0 && strcmp(fs_ro_env, "false") != 0) {
+        fs_readonly = true;
+    }
+
 #ifndef _WIN32
     if (do_watch) return run_watch(argv[0], script);
 #else
@@ -425,6 +456,9 @@ int main(int argc, char **argv) {
     vm_init(&vm);
     vm.no_fs = no_fs;
     vm.no_net = no_net;
+    vm.fs_root = fs_root;
+    vm.fs_root_real = fs_root_real;
+    vm.fs_readonly = fs_readonly;
     bridge_init(&vm);
 
     /* Seed argv() with the script's trailing CLI arguments (after the script

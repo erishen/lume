@@ -482,8 +482,19 @@ struct VM {
      * LUME_NO_FS=1) and the path-taking builtins fail at runtime instead.
      * Deliberately a runtime flag rather than a root allowlist: locks the
      * language surface without breaking the product tools that legitimately
-     * write .env / report files outside the cwd. */
+     * write .env / report files outside the cwd. The middle setting between
+     * free access and this hard switch is LUME_FS_ROOT below. */
     bool no_fs;
+
+    /* LUME_FS_ROOT allowlist (hand-merged from core P3 2026-11-04): a middle
+     * setting between free access and --no-fs. OFF by default so the HTTP
+     * host keeps working unchanged; set LUME_FS_ROOT to a directory and the
+     * path-taking builtins are restricted to realpath-checked descendants.
+     * LUME_FS_RO=1 adds read-only. fs_root keeps the env value for error
+     * messages, fs_root_real caches realpath(root). */
+    const char *fs_root;   /* NULL when the allowlist is off */
+    char *fs_root_real;    /* realpath(fs_root), NULL when off */
+    bool fs_readonly;
 
     /* Same idea as no_fs, for the outbound side: http_get() is opt-out here
      * too (--no-net, LUME_NO_NET=1). A script that cannot read or write the
@@ -785,6 +796,12 @@ void node_print(Node *n, int indent);   /* debugging dump */
  * type_release_all(). */
 
 /* ===================== interpreter / bridge ===================== */
+
+/* realpath(path, NULL) / Windows _fullpath(NULL, path, 0) — malloc'd
+ * canonical path, NULL on failure. POSIX realpath is hidden under -std=c11
+ * on mingw, so the fs builtins and main.c share this wrapper (defined in
+ * builtins_fs.c). Hand-merged from lume-core for the LUME_FS_ROOT gate. */
+char *lume_realpath(const char *path);
 
 void vm_init(VM *vm);
 /* Tear the VM down: the GC heap with every Obj it still holds (and the
