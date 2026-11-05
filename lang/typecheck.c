@@ -442,6 +442,7 @@ const char *const LUME_BUILTIN_NAMES[] = {
     "sha256", "hmac_sha256", /* message digests, hex out (2026-10-15, payment signing) */
     "base64_encode", "base64_decode", /* RFC 4648, binary-safe (2026-10-16, PayPal OAuth2 Basic) */
     "ed25519_pubkey", "ed25519_sign", "ed25519_verify", "ed25519_keypair", /* RFC 8032, hex in/out (2026-10-31) */
+    "crypt_verify", "const_time_eq", /* strong-hash verify + ct compare (core dfba28c, P3) */
     /* math builtins (2026-09-28, builtins_math.c) */
     "abs", "sqrt", "exp", "log", "ln", "pow", "floor", "ceil", "round",
     "min", "max", "pi", "e",
@@ -802,6 +803,13 @@ bool type_compat(Checker *c, Type *src, Type *dst, size_t line) {
         case TY_STRUCT: {
             if (src->name && dst->name)
                 return strcmp(src->name, dst->name) == 0;
+            /* A bare `map` annotation is an empty anonymous struct: it names
+             * the dynamic map container, whose fields only exist at runtime,
+             * so any *anonymous* struct (a map literal, a map-returning
+             * builtin) satisfies it. Named structs keep their declared shape.
+             * hand-merge from core 75b8b3b: without this, `let m: map = {...}`
+             * was rejected on field-count mismatch. */
+            if (!dst->name && dst->count == 0 && !src->name) return true;
             /* need field shape comparison */
             if (src->count != dst->count) return false;
             for (int i = 0; i < src->count; i++) {
