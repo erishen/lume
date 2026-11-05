@@ -330,12 +330,22 @@ LUME
     ./bin/lume /tmp/lume-https-first.lume > "$SERVER_LOG" 2>&1 &
     HTTPS_PID=$!
     trap 'kill $SERVER_PID 2>/dev/null; kill $HTTPS_PID 2>/dev/null; lsof -ti tcp:$PORT 2>/dev/null | xargs kill -9 2>/dev/null; lsof -ti tcp:$HTTPS_PORT 2>/dev/null | xargs kill -9 2>/dev/null; rm -rf "$ACCESS_LOG" "$SERVER_LOG"' EXIT
+    READY=""
     for _ in $(seq 1 200); do
-        curl -s -m 1 http://127.0.0.1:$HTTPS_PORT/probe > /dev/null 2>&1 && break
+        if curl -s -m 1 http://127.0.0.1:$HTTPS_PORT/probe > /dev/null 2>&1; then READY=1; break; fi
         sleep 0.15
     done
     FIRST=$(curl -s -m 10 http://127.0.0.1:$HTTPS_PORT/probe)
-    [ "$FIRST" = "https-first ok" ] || fail "first-request HTTPS egress ($FIRST)"
+    if [ "$FIRST" != "https-first ok" ]; then
+        # 服务器进程的 stdout/stderr 是诊断这个 case 的唯一窗口: worker 里
+        # 首次 TLS 出站的崩溃只有 lume 自己的日志能看到, run_all 的输出里
+        # 只剩一个空 $FIRST。失败时把日志留在 CI 输出里再退出。
+        echo "------ https-first server log (failure diagnostics) ------"
+        tail -40 "$SERVER_LOG" 2>/dev/null || echo "(no server log)"
+        echo "-----------------------------------------------------------"
+        [ -n "$READY" ] || echo "(server never became ready within 30s)"
+        fail "first-request HTTPS egress ($FIRST)"
+    fi
     pass "first-request HTTPS egress (warmup before fork)"
     kill $HTTPS_PID 2>/dev/null; HTTPS_PID=
     lsof -ti tcp:$HTTPS_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
