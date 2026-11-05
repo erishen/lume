@@ -318,8 +318,8 @@ server {
 }
 
 get "/probe", (req) => {
-  let r = http_get("https://example.com/", { timeout = 5; });
-  if r["ok"] {
+  let r = http_get("https://example.com/", { timeout: 5 });
+  if (r["ok"]) {
     return "https-first ok";
   }
   return "https-first failed: " + str(r["err"]);
