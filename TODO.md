@@ -255,3 +255,95 @@ both redundant and wrong-ordered.
       — the process's first HTTPS egress, the server having done no
       outbound work at startup (the probe is loopback-only). Skips with a
       notice when outbound network is unavailable; CI is authoritative.
+
+### 2026-11-06 review — status, constraints, and the converged fix plan
+
+Read-only re-investigation from a Windows host. No product code was changed:
+the three verification blockers listed below make an unverified C edit to the
+TLS path irresponsible. Everything here is checkable in the trees as of
+host `c24178f` / lume-core `5b6fbbb`.
+
+**Where the hook lives (no sync / no agent-httpd change needed).**
+
+- `lang/builtins_http.c` is in `HOST_PINNED` (`scripts/sync-lang.py:97-100`).
+  The warmup body is host-owned: it can be edited in place and
+  `make check-sync --strict` will neither overwrite it nor report drift. No
+  lume-core edit + `make sync-lang` round-trip is required.
+- `lume_http_warmup()` (`builtins_http.c:441`) is the *strong* symbol;
+  agent-httpd's `src/core/framework.c:836` weak fallback is used only by
+  standalone builds (it `fork()`s a `curl https://example.com` child). The
+  call site (`framework.c:614`) is already correctly ordered — after
+  `agent_init()`, before `pthread_create(session_prune_thread)`, before
+  `start_worker_pool()`. Do not move it.
+
+**Why the loopback probe is a no-op.** `ssl_ctx_ready()` builds the CTX and
+calls `SSL_CTX_set_default_verify_paths()`, then the warmup dials
+`127.0.0.1:443` with a 500 ms deadline. Nothing listens there on a CI
+runner, so `open_conn_impl()` fails and `tls_attach()` is never reached —
+not one `SSL_do_handshake()` runs. `builtins_http.c:444` already records
+that building the CTX is *not* enough: the objc/Security init is reached
+inside the handshake. The 2026-11-04 "no third-party connection" change
+therefore removed the only action the warmup existed to perform.
+
+**Why the external probe is NOT the fix.** Leg 4f
+(`tests/run_all.sh:341-394`) only proves anything if the server does no
+outbound work at startup and `/probe` is the process's *first* HTTPS
+egress. A real handshake to `example.com:443` in the master would itself
+become that first egress, turning 4f green without proving a forked worker
+is safe — the same class of mistake as setting
+`OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`. Keep
+`LUME_TLS_WARMUP_PROBE` as a throwaway A/B diagnostic only, never as the
+shipped default, and do not "fix" the macOS job by exporting it for the
+whole `make test`.
+
+**Converged fix: one entirely local, self-contained TLS handshake.**
+
+1. Add a fixed self-signed cert/key as PEM string constants in
+   `builtins_http.c` (generated once, offline:
+   `openssl req -x509 -newkey rsa:2048 -nodes -days 36500 -subj /CN=lume-warmup.local`).
+   Load them with `BIO_new_mem_buf` + `PEM_read_bio_X509` /
+   `PEM_read_bio_PrivateKey` into a server `SSL_CTX` (`TLS_server_method`).
+   PEM readers are stable across OpenSSL 1.1 and 3.0, so this sidesteps the
+   `RSA_generate_key` / `EVP_RSA_gen` key-generation API split entirely.
+   The key is loopback-only, never sent to a peer, and the cert is
+   deliberately untrusted.
+2. Drive client and server **in the same single thread** — `BIO_new_bio_pair()`
+   (or `socketpair()`) plus two `SSL*` objects, alternating
+   `SSL_do_handshake()` with a bounded iteration cap / deadline. No `fork`,
+   no `pthread_create`: the pre-fork single-thread invariant is the whole
+   point of the hook.
+3. The client keeps using `g_ssl_ctx` (`SSL_VERIFY_PEER` + default verify
+   paths). Verification of the self-signed cert will fail — expected, and
+   must be ignored. A failing verification still walks `X509_verify_cert`
+   through the system CA store / Keychain lookup, which is precisely the
+   init chain the warmup needs to trip.
+4. Drop `open_conn_impl` from the warmup path; keep
+   `LUME_TLS_WARMUP_PROBE` as an explicit diagnostic opt-in. Add an
+   `HTTP_DBG` line recording whether the local handshake was attempted and
+   completed, so a macOS CI log can distinguish "no handshake" from
+   "handshake happened but the worker still crashed".
+5. All failures stay non-fatal (`return 0`), matching current semantics.
+
+**Verification blockers on this host (why no C change was committed).**
+
+- `Makefile:153` sets `HAVE_OPENSSL := 0` on Windows; no `fork`.
+- `openssl` CLI 3.5.7 (MSYS) exists but there is no `openssl/ssl.h` anywhere
+  on this machine, so `-DHAVE_OPENSSL=1 -fsyntax-only` is impossible.
+- `make check-sync` cannot run here either: Error 9009 (`python3`/`python`
+  are Windows Store stubs; `py -3` reports "No Installed Pythons Found").
+  Not blocking for this file (HOST_PINNED), but worth recording.
+- macOS lane remains `continue-on-error: true` (`ci.yml:94`) until the
+  acceptance below is actually observed on a macOS runner. No result is
+  claimed from this host.
+
+**Acceptance.** macOS job's 4f passes with `LUME_REQUIRE_EGRESS=1` (i.e. not
+an offline skip), the other ~115 tests stay green, the server log shows the
+local-handshake debug line, `OBJC_DISABLE_INITIALIZE_FORK_SAFETY` stays
+unset, and only then may `ci.yml:94` be promoted back to hard-blocking.
+
+**If 4f still fails after the local handshake:** the "Keychain read inside
+the handshake" theory is wrong. Next suspect is the first
+`getaddrinfo("example.com")` — note the pure-HTTP control path in 4f uses
+`127.0.0.1`, so *no* control request resolves a hostname either. Warm up
+DNS resolution once in the master and retest, using `HTTP_DBG` to report
+which branch ran.
