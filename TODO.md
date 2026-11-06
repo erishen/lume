@@ -294,7 +294,10 @@ is safe — the same class of mistake as setting
 `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`. Keep
 `LUME_TLS_WARMUP_PROBE` as a throwaway A/B diagnostic only, never as the
 shipped default, and do not "fix" the macOS job by exporting it for the
-whole `make test`.
+whole `make test`. Such an A/B run must happen outside the authoritative
+leg; as of 2026-11-06 `tests/run_all.sh` guard rejects any non-loopback
+`LUME_TLS_WARMUP_PROBE` with an explicit false-green diagnostic, so the two
+can no longer coexist silently.
 
 **Converged fix: one entirely local, self-contained TLS handshake.**
 

@@ -350,6 +350,22 @@ pkill -f "[b]in/lume /tmp/lume-min-gc-test" 2>/dev/null || true
 # skip` silently turned this whole regression leg green on a broken network.
 # Only unambiguous transport failures may skip; everything else fails. CI sets
 # LUME_REQUIRE_EGRESS=1 so the authoritative leg can never be skipped there.
+#
+# Guard against a FALSE GREEN: this leg is only meaningful while the server
+# does no outbound work at startup and /probe is the process's first HTTPS
+# egress. A real external warmup probe (LUME_TLS_WARMUP_PROBE=example.com:443)
+# would itself become that first egress in the master, so the forked worker
+# would never be the first to initialise TLS and 4f would pass without proving
+# anything — the same class of mistake as OBJC_DISABLE_INITIALIZE_FORK_SAFETY.
+# A loopback probe (including a local self-signed TLS listener on another
+# port) keeps the premise intact and is exactly the intended fix direction.
+case "${LUME_TLS_WARMUP_PROBE:-}" in
+    ""|127.0.0.1|127.0.0.1:*|localhost|localhost:*)
+        : ;;
+    *)
+        fail "LUME_TLS_WARMUP_PROBE=${LUME_TLS_WARMUP_PROBE} is an external probe; 4f would be a false green (warmup becomes the process's first HTTPS egress)"
+        ;;
+esac
 EGRESS_ERR=$(mktemp)
 EGRESS_HTTP=$(curl -sS -o /dev/null -m 5 -w '%{http_code}' \
     https://example.com/ 2>"$EGRESS_ERR")
