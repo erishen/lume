@@ -350,3 +350,171 @@ the handshake" theory is wrong. Next suspect is the first
 `127.0.0.1`, so *no* control request resolves a hostname either. Warm up
 DNS resolution once in the master and retest, using `HTTP_DBG` to report
 which branch ran.
+
+### Reference patch — `lume_http_warmup()` (NOT COMPILED, NOT COMMITTED)
+
+> **STATUS: reference only.** Written on a Windows host with
+> `HAVE_OPENSSL=0`, no `openssl/ssl.h` and no Python 3. This code has
+> **not been compiled against real OpenSSL headers, linked or run**. It
+> did pass `clang -std=c11 -Wall -Wextra -fsyntax-only` against stub
+> declarations (rc=0, no warnings), which rules out C syntax errors only —
+> OpenSSL API signatures, linkage and runtime behaviour remain unverified.
+> Do not paste it into `lang/builtins_http.c` and call the bug fixed — build
+> it on macOS first with `make CFLAGS_EXTRA='-DLUME_HTTP_DEBUG'` and confirm
+> the `[http] warmup:` line. It lives here so the macOS pass starts from a
+> concrete implementation instead of a prose sketch.
+
+**Why not an embedded PEM.** The first draft embedded a fixed self-signed
+cert/key as string constants — short, and immune to any API split. It was
+dropped: committing a private key (even a deliberately-untrusted,
+loopback-only, in-process test key) into a public repo is a bad default.
+Generate the key at runtime instead; the temp files from that draft were
+deleted.
+
+**Avoiding the OpenSSL 1.1 / 3.0 split.** Do **not** use
+`RSA_generate_key_ex` (deprecated in 3.0, breaks `-Werror` builds) or
+`EVP_RSA_gen` (3.0 only). `EVP_PKEY_CTX_new_id` + `EVP_PKEY_keygen_init` +
+`EVP_PKEY_CTX_set_rsa_keygen_bits` + `EVP_PKEY_keygen` is identical on
+1.1.0+ and 3.x. Everything else below (`X509_*`, `SSL_CTX_*`,
+`BIO_new_bio_pair`, `SSL_set_bio`) is likewise available in both.
+
+**Extra includes**, next to `builtins_http.c:49-50`:
+
+```c
+#include <openssl/x509.h>
+#include <openssl/evp.h>
+#include <openssl/rsa.h>   /* EVP_PKEY_CTX_set_rsa_keygen_bits */
+#include <openssl/bio.h>
+```
+
+**Replace the entire `#if defined(HAVE_OPENSSL)` arm of
+`lume_http_warmup()` (`builtins_http.c:442-487`) with:**
+
+```c
+int lume_http_warmup(void) {
+#if defined(HAVE_OPENSSL)
+    /* The business CTX must still be built in the master. */
+    if (ssl_ctx_ready() != 0) return -1;
+
+    int hs_done = 0;
+    X509 *cert = NULL;
+    EVP_PKEY *key = NULL;
+    EVP_PKEY_CTX *pctx = NULL;
+    SSL_CTX *sctx = NULL, *cctx = NULL;
+    SSL *cli = NULL, *srv = NULL;
+    BIO *cbio = NULL, *sbio = NULL;
+
+    /* 1. Ephemeral RSA key (the one API stable across 1.1 and 3.x). */
+    pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+    if (!pctx || EVP_PKEY_keygen_init(pctx) <= 0 ||
+        EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, 2048) <= 0 ||
+        EVP_PKEY_keygen(pctx, &key) <= 0) goto done;
+
+    /* 2. A 60-second self-signed cert. It never leaves this process. */
+    cert = X509_new();
+    if (!cert) goto done;
+    X509_set_version(cert, 2);
+    ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
+    X509_gmtime_adj(X509_getm_notBefore(cert), 0);
+    X509_gmtime_adj(X509_getm_notAfter(cert), 60);
+    X509_set_pubkey(cert, key);
+    {
+        X509_NAME *nm = X509_get_subject_name(cert);
+        X509_NAME_add_entry_by_txt(nm, "CN", MBSTRING_ASC,
+            (const unsigned char *)"lume-tls-warmup.invalid", -1, -1, 0);
+        X509_set_issuer_name(cert, nm);
+    }
+    if (X509_sign(cert, key, EVP_sha256()) <= 0) goto done;
+
+    /* 3. Server side. */
+    sctx = SSL_CTX_new(TLS_server_method());
+    if (!sctx) goto done;
+    if (SSL_CTX_use_certificate(sctx, cert) != 1 ||
+        SSL_CTX_use_PrivateKey(sctx, key) != 1 ||
+        SSL_CTX_check_private_key(sctx) != 1) goto done;
+
+    /* 4. Client side: a PRIVATE CTX. Never add the self-signed cert to
+     *    g_ssl_ctx -- that would make every business request trust it.
+     *    set_default_paths() loads the system CA store, which is the path
+     *    suspected of touching Keychain / CFNetwork on macOS. */
+    cctx = SSL_CTX_new(TLS_client_method());
+    if (!cctx) goto done;
+    {
+        X509_STORE *st = SSL_CTX_get_cert_store(cctx);
+        if (!st || X509_STORE_set_default_paths(st) != 1 ||
+            X509_STORE_add_cert(st, cert) != 1) goto done;
+    }
+    SSL_CTX_set_verify(cctx, SSL_VERIFY_PEER, NULL);
+    SSL_CTX_set_mode(cctx, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_AUTO_RETRY);
+
+    /* 5. One in-memory TLS handshake driven by THIS thread only: no socket,
+     *    no fork, no pthread. The pre-fork single-thread invariant is the
+     *    whole point of this hook. */
+    if (BIO_new_bio_pair(&cbio, 0, &sbio, 0) != 1) goto done;
+    cli = SSL_new(cctx);
+    srv = SSL_new(sctx);
+    if (!cli || !srv) goto done;
+    /* SSL_set_bio takes ownership; SSL_free releases the BIOs. */
+    SSL_set_bio(cli, cbio, cbio); cbio = NULL;
+    SSL_set_bio(srv, sbio, sbio); sbio = NULL;
+    SSL_set_connect_state(cli);
+    SSL_set_accept_state(srv);
+    for (int i = 0; i < 64; i++) {
+        int cr = SSL_do_handshake(cli);
+        int sr = SSL_do_handshake(srv);
+        if (cr == 1 && sr == 1) { hs_done = 1; break; }
+        /* SSL_get_error() is only meaningful on a non-1 return. */
+        int ce = (cr == 1) ? SSL_ERROR_NONE : SSL_get_error(cli, cr);
+        int se = (sr == 1) ? SSL_ERROR_NONE : SSL_get_error(srv, sr);
+        int cw = (ce == SSL_ERROR_NONE || ce == SSL_ERROR_WANT_READ ||
+                  ce == SSL_ERROR_WANT_WRITE);
+        int sw = (se == SSL_ERROR_NONE || se == SSL_ERROR_WANT_READ ||
+                  se == SSL_ERROR_WANT_WRITE);
+        if (!cw && !sw) break;
+    }
+    HTTP_DBG("warmup: local handshake %s (verify=%ld)\n",
+             hs_done ? "completed" : "incomplete",
+             hs_done ? (long)SSL_get_verify_result(cli) : -1L);
+
+done:
+    if (cli)  SSL_free(cli);
+    if (srv)  SSL_free(srv);
+    if (cbio) BIO_free(cbio);
+    if (sbio) BIO_free(sbio);
+    if (cctx) SSL_CTX_free(cctx);
+    if (sctx) SSL_CTX_free(sctx);
+    if (cert) X509_free(cert);         /* use_certificate up-ref'd it */
+    if (key)  EVP_PKEY_free(key);      /* use_PrivateKey up-ref'd it */
+    if (pctx) EVP_PKEY_CTX_free(pctx);
+    if (!hs_done) ERR_clear_error();   /* never poison the next TLS call */
+    return 0;                          /* warmup failures are never fatal */
+#else
+    return 1;
+#endif
+}
+```
+
+**Landing notes.**
+
+1. Only the **warmup body** changes. `open_conn_impl()` and `tls_attach()`
+   stay — the real `http_get()` path still uses both. Delete just the probe
+   parsing / `Url` / `Conn` block from the hook.
+2. `LUME_TLS_WARMUP_PROBE` should either be removed, or kept strictly under
+   `#ifdef LUME_TLS_WARMUP_LEGACY` for throwaway A/B diagnostics. The 4f
+   guard added in `fb09217` rejects non-loopback values on the authoritative
+   leg, so the two cannot silently coexist.
+3. The client verifies against a **private** CTX that trusts only the
+   ephemeral cert plus the system CA store. `g_ssl_ctx` is untouched — this
+   is the load-bearing security constraint; do not "simplify" by reusing it.
+4. Build with `-Werror` on macOS to catch any deprecated-API surprise, and
+   check for leaks under ASan (the `done:` path must free every allocation
+   on every early exit).
+5. The 64-iteration cap is a deadlock guard for the BIO pair. If the debug
+   line reports `incomplete`, raise the pair's buffer size (second/fourth
+   `BIO_new_bio_pair` args) before anything else — TLS 1.3 handshake records
+   can exceed the 17 KB default on some builds.
+
+**Acceptance for this patch** is the same as above: on macOS, 4f passes with
+`LUME_REQUIRE_EGRESS=1`, the `[http] warmup: local handshake completed`
+line is in the server log, the other ~115 tests stay green, and only then
+is `ci.yml:94` allowed to lose `continue-on-error: true`.
