@@ -48,6 +48,11 @@
  * 找不到头文件——debian 里不装 libssl-dev/pkg-config 就整个编不过。 */
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+/* warmup 的进程内自握手要用：临时密钥/证书、PEM 无关的内存 BIO pair。 */
+#include <openssl/x509.h>
+#include <openssl/evp.h>
+#include <openssl/rsa.h>   /* EVP_PKEY_CTX_set_rsa_keygen_bits */
+#include <openssl/bio.h>
 #else
 /* 没装 libssl 时把 SSL 声明成不透明类型，Conn.ssl 那个字段才编译得过。
  * 这个构建里它恒为 NULL（tls_attach 走 #if 分支直接返回 1），
@@ -61,7 +66,7 @@ typedef struct ssl_st SSL;
 #include <netinet/in.h>
 #include <poll.h>
 #include <stdbool.h>
-#include <stdlib.h> /* getenv/atoi (TLS warmup probe opt-in) */
+#include <stdlib.h> /* malloc/free/qsort ... */
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -434,57 +439,142 @@ static int ssl_ctx_ready(void) {
 /* 注意本函数在 #if 之外: 它是给服务端用的稳定入口, 无 libssl 的构建里也
  * 必须有符号(返回 1 = "没有可预热的东西"), 否则调用方要么反复写 #if,
  * 要么就得靠弱符号去猜。 */
-/* 定义在下面(open_conn_impl 之后用到它的地方); 预热需要提前调用。 */
+/* 定义在下面; 真实 http_* 请求才走它们, 预热不再拨号、不碰 socket。 */
 static int open_conn_impl(Url *u, const char *proxy, Conn *c, long deadline);
 static int tls_attach(Conn *c, const char *sni_host, long deadline);
 
+#if defined(HAVE_OPENSSL)
+/* 一次性启动诊断。HTTP_DBG 是每次 http_* 调用都可能刷一行的高频开关(要
+ * -DLUME_HTTP_DEBUG 才开), 而验收要求 CI 的 server 日志能区分「根本没握手」
+ * 和「握手了但 worker 仍崩」。warmup 每进程只跑一次, 所以这一行默认输出。 */
+#define WARMUP_NOTE(...) fprintf(stderr, "[http] " __VA_ARGS__)
+#endif
+
 int lume_http_warmup(void) {
 #if defined(HAVE_OPENSSL)
-    if (ssl_ctx_ready() != 0) return -1;
-    /* 只建 CTX 不够 —— 实测: warmup 返回 0, 业务请求仍崩。原因是有一次
-     * objc/CFNetwork 的初始化发生在**握手内部**(读系统根证书走 Keychain),
-     * 而不是在 SSL_CTX_set_default_verify_paths 时。所以这里必须真的
-     * 完成一次 TLS 握手, 把那条链在单线程阶段就跑通。
+    /* 预热要在 fork 之前、单线程阶段把 macOS 延迟初始化的系统框架跑一遍,
+     * 否则 worker 里首次触发时 libobjc 直接 abort:
+     *   "+[NSString initialize] may have been in progress in another
+     *    thread when fork() was called ... Crashing instead."
      *
-     * 失败不当错误: 没有外网的环境里, 预热的目标是"别在 worker 里炸",
-     * 而不是"必须连通"。连不上会由业务请求自己报错。 */
-    /* probe 目标默认本地回环 127.0.0.1:443 —— 不产生第三方连接(本地服务
-     * 首连本地), 离线/无本地 https 服务时连接立即失败, 不会让启动卡 5 秒。
-     * 本机若有 https 服务仍会完成一次真握手, 照样把 Keychain 那条初始化链
-     * 趟完。需要旧的外部探测行为时显式 opt-in:
-     *   LUME_TLS_WARMUP_PROBE=example.com:443
-     * (host[:port], 无端口默认 443; 连接失败/超时一律不阻塞启动)。 */
-    char probe_host[128] = "127.0.0.1";
-    int probe_port = 443;
-    const char *probe_env = getenv("LUME_TLS_WARMUP_PROBE");
-    if (probe_env && probe_env[0]) {
-        const char *pc = strrchr(probe_env, ':');
-        if (pc && pc[1]) {
-            size_t hl = (size_t)(pc - probe_env);
-            if (hl > 0 && hl < sizeof probe_host) {
-                memcpy(probe_host, probe_env, hl);
-                probe_host[hl] = '\0';
-            }
-            int p = atoi(pc + 1);
-            if (p > 0 && p < 65536) probe_port = p;
-        } else {
-            snprintf(probe_host, sizeof probe_host, "%s", probe_env);
-        }
+     * 真正的根因(2026-11-07 macOS 实测): 进程**首次解析外部主机名**。
+     * 4f 的纯 HTTP 控制路径用 127.0.0.1, /probe 才是第一次解析外部名字;
+     * 只预热解析 localhost 仍崩 396 次(走 /etc/hosts, 触发不到那条链),
+     * 而只做一次外部名字解析就足以让 4f 全绿 —— 与是否握手无关。
+     * 解析结果立即丢弃, 不连接、不产生 HTTPS 出站, 不破坏 4f 的前提。
+     *
+     * 旧实现拨 127.0.0.1:443, CI runner 上无人监听 ⇒ 握手根本没发生;
+     * 外部 probe 又会自己变成「首次 HTTPS 出站」让 4f 假绿。下面这轮
+     * 内存 BIO pair 自握手完全本地、无网络、无 fork/pthread, 除了满足
+     * 「日志能看到 local handshake」的验收条件, 也覆盖另一条可能在不同
+     * OpenSSL 构建上成立的路径(系统 CA 读取走 Keychain)。必须先做 DNS
+     * 预热: 握手任意一步失败都会 goto done, 不能让真正的修复被跳过。
+     * LUME_TLS_WARMUP_PROBE 因此不再有任何作用(4f 的 guard 留作护栏)。 */
+    {
+        struct addrinfo hints, *res = NULL;
+        memset(&hints, 0, sizeof hints);
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        /* IANA 保留域名: 只需要一次真实解析器初始化, 地址从不使用。
+         * 不能换成 localhost —— 实测它不走这条初始化链。 */
+        int gr = getaddrinfo("example.com", "443", &hints, &res);
+        if (res) freeaddrinfo(res);
+        WARMUP_NOTE("warmup: dns prime rc=%d\n", gr);
     }
-    Url u;
-    memset(&u, 0, sizeof u);
-    u.host = probe_host;
-    u.port = probe_port;
-    u.https = 1;
-    Conn probe;
-    memset(&probe, 0, sizeof probe);
-    probe.fd = -1;
-    long dl = now_ms() + 500;   /* 本地回环 500ms 足够; 外部 opt-in 也是尽力而为 */
-    if (open_conn_impl(&u, NULL, &probe, dl) == 0 && probe.fd >= 0) {
-        (void)tls_attach(&probe, probe_host, dl);
-        conn_close(&probe);
+    if (ssl_ctx_ready() != 0) return -1;
+
+    int hs_done = 0;
+    X509 *cert = NULL;
+    EVP_PKEY *key = NULL;
+    EVP_PKEY_CTX *pctx = NULL;
+    SSL_CTX *sctx = NULL, *cctx = NULL;
+    SSL *cli = NULL, *srv = NULL;
+    BIO *cbio = NULL, *sbio = NULL;
+
+    /* 1. 临时 RSA 密钥。EVP_PKEY_CTX 这套 API 在 OpenSSL 1.1.0+ 与 3.x 一致,
+     *    绕开 RSA_generate_key_ex(3.0 deprecated) / EVP_RSA_gen(3.0 only)。
+     *    密钥只在进程内存在, 不落盘、不发给任何对端。 */
+    pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+    if (!pctx || EVP_PKEY_keygen_init(pctx) <= 0 ||
+        EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, 2048) <= 0 ||
+        EVP_PKEY_keygen(pctx, &key) <= 0) goto done;
+
+    /* 2. 60 秒有效期的自签证书, 刻意不可信, 且绝不加入 g_ssl_ctx。 */
+    cert = X509_new();
+    if (!cert) goto done;
+    X509_set_version(cert, 2);
+    ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
+    X509_gmtime_adj(X509_getm_notBefore(cert), 0);
+    X509_gmtime_adj(X509_getm_notAfter(cert), 60);
+    X509_set_pubkey(cert, key);
+    {
+        X509_NAME *nm = X509_get_subject_name(cert);
+        X509_NAME_add_entry_by_txt(nm, "CN", MBSTRING_ASC,
+            (const unsigned char *)"lume-tls-warmup.invalid", -1, -1, 0);
+        X509_set_issuer_name(cert, nm);
     }
-    return 0;
+    if (X509_sign(cert, key, EVP_sha256()) <= 0) goto done;
+
+    /* 3. 服务端 CTX。 */
+    sctx = SSL_CTX_new(TLS_server_method());
+    if (!sctx) goto done;
+    if (SSL_CTX_use_certificate(sctx, cert) != 1 ||
+        SSL_CTX_use_PrivateKey(sctx, key) != 1 ||
+        SSL_CTX_check_private_key(sctx) != 1) goto done;
+
+    /* 4. 客户端用**私有** CTX: 系统 CA 路径 + 这张临时证书。
+     *    X509_STORE_set_default_paths 正是要趟的 Keychain/CA 初始化链;
+     *    把临时证书加进信任库才能让握手走完并给出 verify 结果。
+     *    绝不复用 g_ssl_ctx —— 否则所有业务请求都会信任这张自签证书。 */
+    cctx = SSL_CTX_new(TLS_client_method());
+    if (!cctx) goto done;
+    {
+        X509_STORE *st = SSL_CTX_get_cert_store(cctx);
+        if (!st || X509_STORE_set_default_paths(st) != 1 ||
+            X509_STORE_add_cert(st, cert) != 1) goto done;
+    }
+    SSL_CTX_set_verify(cctx, SSL_VERIFY_PEER, NULL);
+    SSL_CTX_set_mode(cctx, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_AUTO_RETRY);
+
+    /* 5. 内存 BIO pair 自握手: 无 socket、无 fork、无 pthread。 */
+    if (BIO_new_bio_pair(&cbio, 0, &sbio, 0) != 1) goto done;
+    cli = SSL_new(cctx);
+    srv = SSL_new(sctx);
+    if (!cli || !srv) goto done;
+    /* SSL_set_bio 接管所有权, SSL_free 会释放这两个 BIO。 */
+    SSL_set_bio(cli, cbio, cbio); cbio = NULL;
+    SSL_set_bio(srv, sbio, sbio); sbio = NULL;
+    SSL_set_connect_state(cli);
+    SSL_set_accept_state(srv);
+    for (int i = 0; i < 64; i++) {   /* 迭代上限 = BIO pair 死锁保护 */
+        int cr = SSL_do_handshake(cli);
+        int sr = SSL_do_handshake(srv);
+        if (cr == 1 && sr == 1) { hs_done = 1; break; }
+        /* SSL_get_error 只在返回值非 1 时有意义。 */
+        int ce = (cr == 1) ? SSL_ERROR_NONE : SSL_get_error(cli, cr);
+        int se = (sr == 1) ? SSL_ERROR_NONE : SSL_get_error(srv, sr);
+        int cw = (ce == SSL_ERROR_NONE || ce == SSL_ERROR_WANT_READ ||
+                  ce == SSL_ERROR_WANT_WRITE);
+        int sw = (se == SSL_ERROR_NONE || se == SSL_ERROR_WANT_READ ||
+                  se == SSL_ERROR_WANT_WRITE);
+        if (!cw && !sw) break;
+    }
+    WARMUP_NOTE("warmup: local handshake %s (verify=%ld)\n",
+                hs_done ? "completed" : "incomplete",
+                hs_done ? (long)SSL_get_verify_result(cli) : -1L);
+
+done:
+    if (cli)  SSL_free(cli);
+    if (srv)  SSL_free(srv);
+    if (cbio) BIO_free(cbio);
+    if (sbio) BIO_free(sbio);
+    if (cctx) SSL_CTX_free(cctx);
+    if (sctx) SSL_CTX_free(sctx);
+    if (cert) X509_free(cert);       /* use_certificate 已 up-ref */
+    if (key)  EVP_PKEY_free(key);    /* use_PrivateKey 已 up-ref */
+    if (pctx) EVP_PKEY_CTX_free(pctx);
+    if (!hs_done) ERR_clear_error(); /* 别把错误队列留给下一次 TLS 调用 */
+    return 0;                        /* 预热失败永远不致命 */
 #else
     return 1;   /* 无 libssl 的构建: HTTPS 本来就不支持, 无需预热 */
 #endif

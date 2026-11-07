@@ -340,10 +340,12 @@ pkill -f "[b]in/lume /tmp/lume-min-gc-test" 2>/dev/null || true
 
 # 4f. first-request HTTPS egress (warmup / fork-safety regression) ------------
 # 每个进程的**首次** HTTPS 出站是 macOS libobjc fork 闸门的雷区:
-# lume_http_warmup() 必须在 master 单线程阶段完成 TLS 初始化, worker 里
-# 第一次出站才不崩。这里的 server 启动时不做任何出站(warmup 已无外部探测,
-# probe 走本地回环), /probe 就是整个进程的首次 HTTPS —— 预热缺失时 worker
-# 首次出站会踩闸门。
+# lume_http_warmup() 必须在 master 单线程阶段把系统解析器与 TLS 初始化
+# 跑完, worker 里第一次出站才不崩。2026-11-07 实测根因是**首次解析外部
+# 主机名**(不是 Keychain/握手): 只预热解析 localhost 仍崩(走 /etc/hosts),
+# 只做一次外部名字解析即全绿。warmup 现在在 master 里做一次名字解析 +
+# 完全本地的内存 BIO pair 握手, 两者都不产生 HTTPS 出站, 所以 /probe 仍是
+# 整个进程的首次 HTTPS —— 预热缺失时 worker 首次出站会踩闸门。
 #
 # Offline skip is fail-closed. `curl -s` alone exits 0 for a proxy's 502 HTML
 # page, a captive portal, or any HTTP status, so the old `if curl ...; else
@@ -359,6 +361,8 @@ pkill -f "[b]in/lume /tmp/lume-min-gc-test" 2>/dev/null || true
 # anything — the same class of mistake as OBJC_DISABLE_INITIALIZE_FORK_SAFETY.
 # A loopback probe (including a local self-signed TLS listener on another
 # port) keeps the premise intact and is exactly the intended fix direction.
+# LUME_TLS_WARMUP_PROBE is no longer read by the C code (removed 2026-11-07);
+# the guard below stays as a tripwire against reintroducing an external probe.
 case "${LUME_TLS_WARMUP_PROBE:-}" in
     ""|127.0.0.1|127.0.0.1:*|localhost|localhost:*)
         : ;;

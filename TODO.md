@@ -208,7 +208,7 @@ Host-side disposition (what this repo decides for dependent projects):
       no longer matches `PIN.manifest`. Refreshing an md5 by hand is never
       the fix — run `make sync-lang && make check-sync` instead.
 
-### In flight — macOS fork-safety TLS warmup (committed 2026-10-31, probe rework 2026-11-04)
+### macOS fork-safety TLS warmup (committed 2026-10-31, probe rework 2026-11-04; FIXED 2026-11-07 — see the landed section at the end of this file)
 
 Both halves landed 2026-10-31 (agent-httpd `09050e1c` calls via the
 file-end weak fallback right after `agent_init()`, before the first
@@ -351,7 +351,7 @@ the handshake" theory is wrong. Next suspect is the first
 DNS resolution once in the master and retest, using `HTTP_DBG` to report
 which branch ran.
 
-### Reference patch — `lume_http_warmup()` (NOT COMPILED, NOT COMMITTED)
+### Reference patch — `lume_http_warmup()` (historical; compiled + landed 2026-11-07)
 
 > **STATUS: reference only.** Written on a Windows host with
 > `HAVE_OPENSSL=0`, no `openssl/ssl.h` and no Python 3. This code has
@@ -363,6 +363,12 @@ which branch ran.
 > it on macOS first with `make CFLAGS_EXTRA='-DLUME_HTTP_DEBUG'` and confirm
 > the `[http] warmup:` line. It lives here so the macOS pass starts from a
 > concrete implementation instead of a prose sketch.
+>
+> **2026-11-07 update:** this patch has now been compiled with real OpenSSL 3
+> headers under `-Werror`, linked, run and landed (plus one extra step the
+> patch was missing — see the final section). The original warning stands for
+> the *text above as written*; keep it as the historical record, do not read
+> it as the current status of `lang/builtins_http.c`.
 
 **Why not an embedded PEM.** The first draft embedded a fixed self-signed
 cert/key as string constants — short, and immune to any API split. It was
@@ -518,3 +524,77 @@ done:
 `LUME_REQUIRE_EGRESS=1`, the `[http] warmup: local handshake completed`
 line is in the server log, the other ~115 tests stay green, and only then
 is `ci.yml:94` allowed to lose `continue-on-error: true`.
+
+### 2026-11-07 — LANDED on macOS, root cause corrected
+
+Everything above this section is kept as the investigation record. The fix
+landed today in `lang/builtins_http.c`; `ci.yml` no longer has
+`continue-on-error` on the macOS job. **The 11-06 "Keychain read inside the
+handshake" theory is wrong on this host.**
+
+**Root cause.** The crash is triggered by the process's *first external
+hostname resolution* happening inside a forked worker, not by TLS. Leg 4f's
+pure-HTTP control path uses `127.0.0.1`, so nothing resolves a name until
+`/probe` calls `http_get("https://example.com/")`. Homebrew OpenSSL 3 reads
+CA files from disk, so the in-memory handshake never touches Keychain or
+CFNetwork, and `X509_STORE_set_default_paths()` alone does not trip the objc
+initialiser either.
+
+**A/B runs** (each on macOS, clean env, `LUME_REQUIRE_EGRESS=1`,
+`OBJC_DISABLE_INITIALIZE_FORK_SAFETY` unset):
+
+| warmup body | 4f | objc crashes |
+|---|---|---|
+| loopback `127.0.0.1:443` probe (old HEAD) | FAIL | 40 |
+| reference patch: local BIO-pair handshake only | FAIL | 396 in the focused leg |
+| handshake + `getaddrinfo("example.com")` | **PASS** | 0 |
+| handshake + `getaddrinfo("localhost")` | FAIL | 396 |
+| `getaddrinfo("example.com")` only, no handshake | **PASS** | 0 |
+
+So DNS priming is the load-bearing change; the local handshake is not what
+fixes this host. `localhost` is not a substitute — it resolves through
+`/etc/hosts` and never initialises the external resolver / system
+configuration path.
+
+**What shipped.** `lume_http_warmup()` now, before `ssl_ctx_ready()`:
+
+1. One `getaddrinfo()` on an IANA-reserved name, result discarded, nothing
+   connected. This is a resolver prime, not an HTTPS egress, so `/probe`
+   remains the process's first HTTPS and 4f stays authoritative (unlike the
+   old external probe, which made the master the first egress).
+2. `ssl_ctx_ready()` for the business CTX, then the reference patch's
+   in-memory BIO-pair handshake with an ephemeral RSA key + 60 s self-signed
+   cert. Kept deliberately: it is entirely local, costs milliseconds, keeps
+   the required `local handshake completed` log line, and covers the
+   Keychain path on OpenSSL builds that do use it. **DNS priming runs first**
+   because any handshake failure `goto done` would otherwise skip the actual
+   fix.
+3. `LUME_TLS_WARMUP_PROBE` is gone from the C code. `run_all.sh`'s guard
+   remains as a tripwire. `WARMUP_NOTE` is a separate one-shot startup
+   diagnostic that prints by default — `HTTP_DBG` needs
+   `-DLUME_HTTP_DEBUG`, which CI does not set, so the acceptance log line
+   would have been invisible.
+
+Only the warmup body changed. `open_conn_impl()` / `tls_attach()` /
+`g_ssl_ctx` are untouched; the client handshake uses a private CTX that
+trusts the ephemeral cert plus system CAs, never the business CTX.
+`builtins_http.c` is `HOST_PINNED` — no `make sync-lang` round-trip.
+
+**Verification** (macOS, Apple clang 21, Homebrew OpenSSL 3):
+
+- `make CFLAGS_EXTRA='-D_DARWIN_C_SOURCE -Werror' all` → rc=0, zero
+  warnings; the reference patch's OpenSSL 1.1/3.x API choices all compile.
+- Full `tests/run_all.sh` with `LUME_REQUIRE_EGRESS=1` and proxies unset →
+  **rc=0, 156 legs green, `all tests passed`, 0 objc crashes**, including
+  `ok first-request HTTPS egress (warmup before fork)`.
+- Startup log contains both `warmup: dns prime rc=0` and
+  `warmup: local handshake completed (verify=0)` (default build, no debug
+  flag). The default 17 KB BIO pair was sufficient — no buffer bump needed.
+- `done:` frees every allocation on every early-exit path and calls
+  `ERR_clear_error()` when the handshake did not complete.
+
+**Still open.** Confirm the hard-blocking macOS job on a GitHub runner after
+push; this host is representative but not identical. A dedicated ASan leak
+pass over the warmup path was not run — the repo's `make asan` sets
+`detect_leaks=0` because process-lifetime AST allocations are intentional,
+so LSan cannot isolate this function without a separate harness.
