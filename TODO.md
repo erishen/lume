@@ -594,7 +594,11 @@ trusts the ephemeral cert plus system CAs, never the business CTX.
   `ERR_clear_error()` when the handshake did not complete.
 
 **Still open.** Confirm the hard-blocking macOS job on a GitHub runner after
-push; this host is representative but not identical. A dedicated ASan leak
+push; this host is representative but not identical. A dedicated ASan/LSan
 pass over the warmup path was not run — the repo's `make asan` sets
 `detect_leaks=0` because process-lifetime AST allocations are intentional,
-so LSan cannot isolate this function without a separate harness.
+so LSan cannot isolate this function without a separate harness. As a
+lighter check, macOS `leaks` on a live server started with
+`MallocStackLogging=1` reports `0 leaks for 0 total leaked bytes` across
+25431 malloc nodes, with no `lume_http_warmup` / `SSL_CTX` / `X509` / `BIO`
+frames; that covers the success path, not every early-exit branch of `done:`.
