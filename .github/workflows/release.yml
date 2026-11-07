@@ -130,8 +130,10 @@ jobs:
           node-version: 24
       - name: Install pnpm
         run: npm install -g pnpm@9.15.9
-      - name: Privacy guard
+      - name: Privacy guard (build-machine paths + remote GC probe)
         run: make treecheck
+      - name: Privacy guard (extended byte-level patterns over HEAD)
+        run: make privacycheck
       - name: Full test suite
         env:
           LUME_REQUIRE_EGRESS: "1"

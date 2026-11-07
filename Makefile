@@ -626,6 +626,15 @@ treecheck:
 	@./scripts/check-tree-privacy.sh
 	@echo "==> treecheck passed: no build-machine path tracked in HEAD"
 
+# --- 扩展隐私闸门 (make privacycheck) --------------------------------------
+# treecheck/deepcheck 只认 /Users|/home/<name> 一种形态。2026-11-07 的审计
+# 发现公开历史里还有私有工作区名混在编译过的 CGI 二进制里, 而凭据形态与
+# 敏感文件名根本无人拦。check-repo-privacy.py 按字节扫 HEAD 全部 blob(含
+# 二进制)覆盖这四类, 且每次运行前自检正则仍生效 —— 防的是「绿但什么都没
+# 查」。只扫 HEAD; --all 为手动审计, 不挂 CI(已公开历史需重写才能清)。
+privacycheck:
+	@python3 scripts/check-repo-privacy.py
+
 # --- 全对象库隐私闸门 (make deepcheck) --------------------------------------
 # treecheck 只看 HEAD 面; deepcheck 走 batch-all-objects 扫整个对象库 ——
 # 连游离 blob(gc 前)与 git add 未提交的暂存 blob 一起拦, 这是 2026-10-21
@@ -696,7 +705,7 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 	@ASAN_OPTIONS=detect_leaks=0 ./tests/tools-bin-asan || exit 1
 	@echo "ok   ASan/UBSan all passed"
 
-.PHONY: all check dump dev dev-minimal invest invest-watch demo-sqlite demo-sqlite-watch query-demo query-demo-watch modules modules-watch modules-ui modules-ui-watch abac abac-watch react-ssr react-ssr-watch hub hub-watch run ui ui-items vsix image image-push test clean asan sync-lang sync-lang-force check-sync check-parity check-version check-baseline treecheck deepcheck crypt-test
+.PHONY: all check dump dev dev-minimal invest invest-watch demo-sqlite demo-sqlite-watch query-demo query-demo-watch modules modules-watch modules-ui modules-ui-watch abac abac-watch react-ssr react-ssr-watch hub hub-watch run ui ui-items vsix image image-push test clean asan sync-lang sync-lang-force check-sync check-parity check-version check-baseline treecheck deepcheck privacycheck crypt-test
 # lang/ is a pinned copy of the lume-core language tree (see lang/PIN).
 # Bump the pin with `make sync-lang`; watch for drift with `make check-sync`.
 # Files listed as host_owned in lang/PIN are never overwritten.

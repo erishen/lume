@@ -35,6 +35,11 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
       - name: treecheck (no build-machine paths in HEAD)
         run: make treecheck
+      # treecheck 只认 /Users|/home/<name>; 这一腿按字节补齐私有工作区名、
+      # 凭据形态与敏感文件名, 且覆盖编译过的 CGI 二进制。只扫 HEAD, 不碰
+      # 历史(已公开历史需重写才能清, 挂进 CI 只会永远红)。
+      - name: privacycheck (extended byte-level patterns over HEAD blobs)
+        run: make privacycheck
 
   test:
     runs-on: ubuntu-24.04  # ubuntu-latest 自 2026-10-19 迁移 Ubuntu 26: test job 连续 6+ 笔在 "all tests passed" 后死于 make "wait: No child processes"(143), 新镜像 make/bash 组合的 jobserver 竞态; 钉回已知良好镜像
