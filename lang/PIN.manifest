@@ -11,7 +11,7 @@ os_win32.c 7c55a5c60e6400121323b87ed7eeca3b
 parser.c c45a352f6556ae8b86aa008abc190b3c
 parser_expr.c 4b53e0c91ba8f049958c3a31f440f90a
 parser_internal.h 99a6e5cd2a5fb0e4560cf5656162c6f5
-parser_stmt.c 244de8f201a62da30e6b54659a35214d
+parser_stmt.c bb066bfe35558fd7dcc2c719dd5756a6
 sbuf.h a88370a85fe1236163292a7692f1e18c
 token.c 5a141fb7bedbc8b6e24ee7d2a2255a86
 typecheck_internal.h 30b3322313fe9d6eaefa009eac816300

@@ -11,11 +11,11 @@ builtins_http.c 24 ca3f230af007f8d2cb9c2cc3d43cdd4c
 builtins_internal.h 46 378a630deaad62e3af29a0964acd839c
 builtins_math.c 12 25bae054ea8df83bb06fa6c51f24ebea
 builtins_sql.c 506 7acac0bdff4426947d62064b5dfed35d
-interp.c 168 732dde77c0211a00595dc91a2eb219ee
+interp.c 175 d232e0e85e65277585985bd9902c4caa
 lume.h 41 6de438d1e49ec3d06c69e6b0cbee3a4f
 main.c 336 d62d1e742307296ee22a7a85c09f5585
-typecheck.c 107 a249bef3805f213c24911469386c090e
+typecheck.c 108 222b6de765d853f5cfd51924ea0733e4
 typecheck_expr.c 9 cf33d61836f64f0ad10c0be311d88ed8
-typecheck_stmt.c 45 05d44975462f85c43a3724da9b716eb8
+typecheck_stmt.c 52 ea0f01f1b8a02e4b06a0b11708beea2a
 value.c 27 92f7a5115fadd4501cb19f4a42163b09
 vdom.c 1 4e89503e4abf90ff7eedc74b4c476b4a

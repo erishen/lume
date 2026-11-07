@@ -296,13 +296,20 @@ void ck_stmt(Checker *c, Node *n) {
              * 函数局部绑定：两编译后端的局部解析是「扁平预扫描 + asg_find
              * 按行号位置感知」，嵌套同名循环会让外层 body 里位于内层声明
              * 行之后的读错接内层变量，与解释器 env_set 覆盖语义分歧；遮蔽
-             * 模块全局/内置（如 pi）则安全——故检查只走到 fn_root。for-in
+             * 模块全局/内置（如 pi）则安全——函数体内检查只走到 fn_root；
+             * 顶层脚本没有 fn_root，改在「内置层」之前停下（P1-3：内置名
+             * 由 type_check_module 单独 seeding 在最外层 scope，parent==NULL，
+             * 不是用户局部；顶层 let 落在它的子层，仍会被本检查拦住）。for-in
              * 不在此列：迭代变量是「绑定复用」（上方注释），语义保持。 */
             CScope *loop_scope = c->scope;
             if (n->as.fors.init && n->as.fors.init->type == N_LET) {
                 const char *vname = n->as.fors.init->as.let.name;
                 bool shadows_local = false;
-                for (CScope *sc = loop_scope; sc; sc = sc->parent) {
+                /* P1-3: sc->parent == NULL is the builtin-only outer scope;
+                 * its syms are not user locals, so stop before examining them.
+                 * In a function body fn_root breaks the walk even earlier.
+                 * Hand-merged from lume-core 658b10f. */
+                for (CScope *sc = loop_scope; sc && sc->parent; sc = sc->parent) {
                     for (CSym *it = sc->syms; it; it = it->next)
                         if (strcmp(it->name, vname) == 0) { shadows_local = true; break; }
                     if (shadows_local || sc->fn_root) break;
