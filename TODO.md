@@ -821,3 +821,35 @@ and its header remains authoritative.
 - P14 `spawn()` / streaming / host integration remains a ~2-week separate
   project. Historical privacy residue stays out of scope per the user's
   "不用管历史" instruction.
+
+## 2026-11-08 — remote verification after push
+
+Pushed `lume-core 57b74b8..ce7e590` and `lume 3a271a1..0efad3a`.
+`agent-httpd` was unchanged at `dbb1272`, so no gitlink bump was needed;
+all four trees still point at `dbb1272`.
+
+| run | conclusion |
+|---|---|
+| lume CI `42454199642` | 5/5 success (macos, test, asan, privacy, check-sync) |
+| lume Release `42454199719` | success, including the macos-15 darwin-arm64 lane |
+| lume Windows `42454199658` | success |
+| lume-core ci `42454195295` | 10/10 success |
+| lume-core Release `42454195304` / Windows `42454195297` | success / success |
+
+The ubuntu-24.04 `test` job (`128649624114`) ran exactly `make -j4 WERROR=1
+test`. All 32 host `lang/*.c` compiles carry `-Werror` (located via the
+`-DLUME_VERSION` marker in the job log); compiler diagnostics = 0. The only
+two `warning:` matches in the whole job come from setup-node's `punycode`
+DeprecationWarning, not from the build. `all tests passed` and `ok
+first-request HTTPS egress (warmup before fork)` are both present. The asan
+job still reports `ok warmup LSan negative control: injected leak reported`
+and `8 rounds, no leaks`; privacy reports `self-test=4/4`.
+
+Wording correction to the local claim of "no `-Wno-*` suppression": that
+meant **no new suppression was added for these fixes**. The Linux-only
+`-Wno-stringop-truncation` at `Makefile:82` predates this work (`b92c2a1`)
+and stays, with its own comment: under `_FORTIFY_SOURCE=2` it covers a safe
+`strncpy` into a zeroed 64-byte buffer with a guaranteed trailing NUL. It is
+unrelated to the two diagnostic classes fixed here (`-Wformat-truncation`
+and `-Wdangling-pointer`). The `agent-httpd` submodule carries its own two
+exemptions in its own build.
