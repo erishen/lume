@@ -593,14 +593,32 @@ trusts the ephemeral cert plus system CAs, never the business CTX.
 - `done:` frees every allocation on every early-exit path and calls
   `ERR_clear_error()` when the handshake did not complete.
 
-**Still open.** A dedicated ASan/LSan
-pass over the warmup path was not run — the repo's `make asan` sets
-`detect_leaks=0` because process-lifetime AST allocations are intentional,
-so LSan cannot isolate this function without a separate harness. As a
-lighter check, macOS `leaks` on a live server started with
-`MallocStackLogging=1` reports `0 leaks for 0 total leaked bytes` across
-25431 malloc nodes, with no `lume_http_warmup` / `SSL_CTX` / `X509` / `BIO`
-frames; that covers the success path, not every early-exit branch of `done:`.
+**Closed 2026-11-08 — dedicated ASan/LSan harness.** The earlier record
+above (macOS `leaks`, 25431 nodes / 0 leaks) only covered the success path
+on a live server. `tests/warmup_leakcheck.c` + `make warmup-leakcheck` now
+link the same ASan objects but never initialise the interpreter, so LSan can
+be enabled in isolation despite `make asan`'s global `detect_leaks=0`
+(process-lifetime Type objects). Eight consecutive `lume_http_warmup()`
+rounds each get a `__lsan_do_recoverable_leak_check()`. A separate
+`-DLUME_WARMUP_SELFTEST_LEAK` negative control must be reported by LSan
+before the green result is trusted, so a disabled sanitizer cannot fake a
+pass. The target is part of `make asan`, hence CI's ubuntu `asan` job.
+LeakSanitizer is Linux-only; on macOS (Apple clang) the same rounds still
+run under ASan/UBSan, just without the leak assertions.
+
+Why the success path covers the cleanup: `done:` is the single shared exit;
+a successful round has all nine owned pointers non-NULL, so every `free()`
+in that block executes. Each early exit is a strict subset (not-yet-created
+pointers are NULL and skipped), and no branch allocates a tenth owning
+pointer — `X509_NAME` / `X509_STORE` are borrowed handles. The remaining
+gap is branch-by-branch *execution* of every `goto done` (that would need
+OpenSSL-level fault injection), not the cleanup block's release statements.
+
+Verified: macOS 8 rounds green; Linux Ubuntu 24.04 container with GCC —
+negative control reported, 8 rounds `no leaks`, and the full CI-equivalent
+`make -j4 asan` passed. All local gates (`check-sync`, `check-parity`,
+`check-version`, `check-baseline`, `privacycheck`, `treecheck`, `check`)
+stayed green.
 
 **Confirmed on a remote runner (2026-11-07).** The now hard-blocking macOS
 job passed on GitHub Actions after push: lume CI run `42381803754` @

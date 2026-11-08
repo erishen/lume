@@ -660,7 +660,11 @@ clean:
 	    tests/smoke-bin tests/smoke-bin.exe tests/smoke-bin.dSYM \
 	    tests/tools-bin tests/tools-bin.exe tests/tools-bin.dSYM \
 	    tests/smoke-bin-asan tests/smoke-bin-asan.exe tests/smoke-bin-asan.dSYM \
-	    tests/tools-bin-asan tests/tools-bin-asan.exe tests/tools-bin-asan.dSYM
+	    tests/tools-bin-asan tests/tools-bin-asan.exe tests/tools-bin-asan.dSYM \
+	    tests/warmup-leakcheck-asan tests/warmup-leakcheck-asan.exe \
+	    tests/warmup-leakcheck-asan.dSYM \
+	    tests/warmup-leakcheck-selftest tests/warmup-leakcheck-selftest.exe \
+	    tests/warmup-leakcheck-selftest.dSYM
 
 # --- ASan/UBSan 构建 (make asan) ------------------------------------------
 # 独立构建目录 build-asan/,不污染正常 build/。检出 lume 侧代码的
@@ -693,7 +697,41 @@ tests/smoke-bin-asan: tests/smoke.c $(ASAN_CORE_OBJS) build-asan/tests | $(AH_LI
 tests/tools-bin-asan: tests/tools_driver.c $(ASAN_CORE_OBJS) build-asan/tests | $(AH_LIB)
 	$(CC) $(CFLAGS) $(ASAN_CFLAGS) -o $@ tests/tools_driver.c $(ASAN_CORE_OBJS) $(AH_LIB) $(LDFLAGS) $(ASAN_LDFLAGS) -lm
 
-asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
+# --- Isolated LSan gate for the TLS warmup path ----------------------------
+# make asan 的 detect_leaks=0 是给解释器「进程期类型对象」开的全局豁免, 会
+# 把 warmup 一起盖住。tests/warmup_leakcheck.c 链接同一批对象但从不初始化
+# 解释器, 只反复调 lume_http_warmup(), 因此可以单独开 LSan 而不引入 AST
+# 误报。Apple clang 的 ASan runtime 不含 LeakSanitizer ⇒ macOS 只跑
+# ASan/UBSan 同一批 rounds, 完整泄漏闸门在 CI 的 ubuntu asan job。
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+    WARMUP_LEAK_CFLAGS := -DLUME_WARMUP_HAS_LSAN=1
+    WARMUP_LEAK_ENV   := ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
+    WARMUP_SELFTEST   := tests/warmup-leakcheck-selftest
+else
+    WARMUP_LEAK_CFLAGS :=
+    WARMUP_LEAK_ENV   := ASAN_OPTIONS=detect_leaks=0:halt_on_error=1
+    WARMUP_SELFTEST   :=
+endif
+
+# 负例: 故意泄漏一个不可达块, 该进程必须非零退出。先断言它真被 LSan 抓到,
+# 再跑正式 harness —— 否则 ASAN_OPTIONS 被覆盖或 LSan 没编进来时会假绿。
+tests/warmup-leakcheck-selftest: tests/warmup_leakcheck.c
+	$(CC) -O0 -g $(ASAN_CFLAGS) -DLUME_WARMUP_SELFTEST_LEAK=1 -o $@ $< $(ASAN_LDFLAGS)
+
+tests/warmup-leakcheck-asan: tests/warmup_leakcheck.c $(ASAN_CORE_OBJS) build-asan/tests | $(AH_LIB)
+	$(CC) $(CFLAGS) $(ASAN_CFLAGS) $(WARMUP_LEAK_CFLAGS) -o $@ $< $(ASAN_CORE_OBJS) $(AH_LIB) $(LDFLAGS) $(ASAN_LDFLAGS) -lm
+
+warmup-leakcheck: tests/warmup-leakcheck-asan $(WARMUP_SELFTEST)
+	@if [ -n "$(WARMUP_SELFTEST)" ]; then \
+	    if $(WARMUP_LEAK_ENV) ./tests/warmup-leakcheck-selftest >/dev/null 2>&1; then \
+	        echo "FAIL warmup leakcheck: LSan negative control was not reported (false green)"; exit 1; \
+	    fi; \
+	    echo "ok   warmup LSan negative control: injected leak reported"; \
+	fi
+	@$(WARMUP_LEAK_ENV) ./tests/warmup-leakcheck-asan
+
+asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan tests/warmup-leakcheck-asan
 	@echo "==> ASan/UBSan: --check 全部示例 + lang-basics 直跑 + 单测 + 工具派发"
 	# detect_leaks=0: Type 对象生命周期=进程(AST/符号表持有,无释放函数是设计);
 	# --watch reload 走 fork+exec 子进程重启, 无累积路径。LSan 会把无主的
@@ -703,9 +741,10 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan
 	@ASAN_OPTIONS=detect_leaks=0 ./$(ASAN_TARGET) examples/lang-basics.lume >/dev/null || exit 1
 	@ASAN_OPTIONS=detect_leaks=0 ./tests/smoke-bin-asan || exit 1
 	@ASAN_OPTIONS=detect_leaks=0 ./tests/tools-bin-asan || exit 1
+	@$(MAKE) warmup-leakcheck || exit 1
 	@echo "ok   ASan/UBSan all passed"
 
-.PHONY: all check dump dev dev-minimal invest invest-watch demo-sqlite demo-sqlite-watch query-demo query-demo-watch modules modules-watch modules-ui modules-ui-watch abac abac-watch react-ssr react-ssr-watch hub hub-watch run ui ui-items vsix image image-push test clean asan sync-lang sync-lang-force check-sync check-parity check-version check-baseline treecheck deepcheck privacycheck crypt-test
+.PHONY: all check dump dev dev-minimal invest invest-watch demo-sqlite demo-sqlite-watch query-demo query-demo-watch modules modules-watch modules-ui modules-ui-watch abac abac-watch react-ssr react-ssr-watch hub hub-watch run ui ui-items vsix image image-push test clean asan warmup-leakcheck sync-lang sync-lang-force check-sync check-parity check-version check-baseline treecheck deepcheck privacycheck crypt-test
 # lang/ is a pinned copy of the lume-core language tree (see lang/PIN).
 # Bump the pin with `make sync-lang`; watch for drift with `make check-sync`.
 # Files listed as host_owned in lang/PIN are never overwritten.

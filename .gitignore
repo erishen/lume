@@ -22,6 +22,12 @@ tests/smoke-bin-asan.dSYM/
 tests/tools-bin-asan
 tests/tools-bin-asan.exe
 tests/tools-bin-asan.dSYM/
+tests/warmup-leakcheck-asan
+tests/warmup-leakcheck-asan.exe
+tests/warmup-leakcheck-asan.dSYM/
+tests/warmup-leakcheck-selftest
+tests/warmup-leakcheck-selftest.exe
+tests/warmup-leakcheck-selftest.dSYM/
 
 # --- 前端依赖与产物 ---------------------------------------------------------
 # 源码在 frontend/src/;make ui 用 esbuild/Tailwind 把 bundle 与 CSS 写进

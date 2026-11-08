@@ -126,7 +126,9 @@ jobs:
         with:
           path: lume
           submodules: recursive
-      - name: Build + run ASan/UBSan checks
+      # `make asan` also runs the isolated warmup LSan harness (with its
+      # negative control) on Linux; macOS has no LeakSanitizer runtime.
+      - name: Build + run ASan/UBSan + warmup LSan checks
         working-directory: lume
         run: |
           make -j4 asan
