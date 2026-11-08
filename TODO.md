@@ -675,6 +675,15 @@ Fixed 2026-11-08 by pinning `macos-15` (not `macos-latest`: the 2026-10
 describes the release lane. CI jobs on `macos-latest` were left alone — they
 are the hard-blocking 4f lane and still pass on `macos-26-arm64`.
 
-Acceptance after push: no `build (macos-15)` / `release-build (macos-15)`
-job should be `cancelled` with an empty step list, and Release run
-conclusions should stop showing the false red.
+Verified after push on 2026-11-08: lume CI `42442792829` and Release
+`42442792852`, lume-core ci `42442723452` and Release `42442723365` are all
+`success`, with no `cancelled` job. `build (macos-15, lume-darwin-arm64)`
+had a named runner and 25 real steps, and logged `Image: macos-15-arm64`,
+`Darwin arm64`, `bin/lume: Mach-O 64-bit executable arm64` — the product
+architecture is unchanged. lume-core's `release-build (macos-15)` really
+compiled (`arm64-apple-darwin24.6.0`), not an empty successful shell.
+
+The same CI round also green-lit the guards added in this batch:
+`ok   warmup LSan negative control: injected leak reported`,
+`ok   warmup leakcheck: 8 rounds, no leaks`, and the privacy guard's
+`scope=HEAD (HEAD + index + non-ignored worktree)` with `self-test=4/4`.
