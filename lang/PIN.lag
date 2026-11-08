@@ -12,8 +12,8 @@ builtins_internal.h 58 19578a094983842ac751b810ae44a39b
 builtins_math.c 12 25bae054ea8df83bb06fa6c51f24ebea
 builtins_sql.c 506 7acac0bdff4426947d62064b5dfed35d
 interp.c 191 7e68cdc6737d346f65957145a36f9ad6
-lume.h 51 b8727a1c5303d481cdb0de0110a8b89c
-main.c 361 2a9baa13766018d1cd9e23c29c67476f
+lume.h 58 9db1e34091cbc99723df07d4893d3cb6
+main.c 406 7b813bd867eb1d0c986889445c0052cf
 typecheck.c 115 dc0ea04e273d19a5aa8d78e0ad5d76d5
 typecheck_expr.c 9 cf33d61836f64f0ad10c0be311d88ed8
 typecheck_stmt.c 52 ea0f01f1b8a02e4b06a0b11708beea2a
