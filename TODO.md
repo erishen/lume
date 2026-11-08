@@ -351,6 +351,16 @@ the handshake" theory is wrong. Next suspect is the first
 DNS resolution once in the master and retest, using `HTTP_DBG` to report
 which branch ran.
 
+> **DO NOT COPY THIS PATCH — investigation record only.** Everything from
+> here down to the "2026-11-07 — LANDED" section records a theory that the
+> A/B test **disproved** on macOS: it blames a Keychain read during the TLS
+> handshake, and its acceptance text still mentions an external probe and
+> `HTTP_DBG`. The shipped fix primes one external hostname resolution before
+> `fork()`, does a purely in-memory BIO-pair handshake, logs through
+> `WARMUP_NOTE`, and never reads `LUME_TLS_WARMUP_PROBE`. See the LANDED
+> section for what actually landed, and `lang/builtins_http.c` for the code.
+> Kept as the reasoning trail, not as a template.
+
 ### Reference patch — `lume_http_warmup()` (historical; compiled + landed 2026-11-07)
 
 > **STATUS: reference only.** Written on a Windows host with
@@ -628,3 +638,37 @@ job passed on GitHub Actions after push: lume CI run `42381803754` @
 `all tests passed`. The same job checked out the `agent-httpd` submodule at
 `cca43ec`, so the bumped gitlink is fetchable from a clean clone.
 `continue-on-error` stays removed.
+
+### 2026-11-08 — deferred: fatal-warning gate (`-Werror`)
+
+Evaluated for the Ubuntu/GCC CI lane and deliberately NOT wired in. On
+Ubuntu 24.04 GCC with `-D_FORTIFY_SOURCE=2`, a clean full build turns two
+classes of diagnostics into hard failures: `-Wformat-truncation=` on bounded
+`snprintf` into fixed `why` buffers, and `-Wdangling-pointer=` in
+`open_conn_impl()` (`lang/builtins_http.c:721-748`, `chost` pointing at the
+stack buffer `phost`). Suppressing them one at a time would hide a real
+pointer-lifetime question; fixing them touches host-owned `builtins_http.c`
+and needs its own A/B plus a full-suite rerun. An opt-in `WERROR=1` make
+variable was prototyped and reverted — no half-working switch left behind.
+Compile warnings stay visible (`-Wall -Wextra`) and non-fatal for now.
+
+### 2026-11-08 — CI: `macos-14` label is retired (fix pending)
+
+GitHub retired the macOS 14 runner image on 2026-11-02 (changelog
+2026-10-01); `macos-14`, `macos-14-large` and `macos-14-xlarge` are gone,
+with capacity reductions in the preceding weeks. That explains the
+release/ci jobs being `cancelled` within one second, with an empty step
+list and no runner name, since 2026-11-06 — they never got a machine.
+
+Both labels are arm64, so switching does not change the
+`lume-darwin-arm64` product architecture: CI's `macos-latest` job ran on
+`macos-26-arm64` (CI run `42381803754`), and the last successful
+`macos-14` build ran on `macos-14-arm64` (Release run `42030553700`).
+
+Still to change, in its own push + CI verification round:
+`lume/.github/workflows/release.yml:166`,
+`lume-core/.github/workflows/release.yml:71`,
+`lume-core/.github/workflows/ci.yml:182`, and the `lume` `ci.yml:78`
+comment saying the darwin-arm64 release is built on macos-14. Prefer
+pinning `macos-15` over `macos-latest`: the 2026-10 `ubuntu-latest`
+migration already cost this repo a week of red test jobs.

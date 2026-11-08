@@ -1,0 +1,26 @@
+# NOTICE
+
+Lume is licensed under the MIT License (see `LICENSE`):
+
+  Copyright (c) 2026 erishen
+
+## Vendored third-party source
+
+`lang/compat/regex/` (`regcomp.c`, `regerror.c`, `regexec.c`, `tre-mem.c`,
+`regex.h`, `tre.h`) is vendored from musl libc's `src/regex/`, itself a
+trimmed version of TRE — Ville Laurikari's regex library.
+
+  Copyright (c) 2001-2009 Ville Laurikari <vl@iki.fi>
+  All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted under the BSD-style terms reproduced in full at
+the top of each of those files. The code is included only to provide the
+POSIX regex API for MinGW / Windows builds, whose C runtime has none. Keep
+the upstream headers and attribution intact when refreshing it.
+
+Other compatibility implementations under `lang/compat/` and in the
+`agent-httpd` submodule retain their own upstream copyright and license
+notices in their source headers; those notices are not duplicated here.
+System libraries such as OpenSSL and SQLite are linked at build time and are
+not distributed in this repository.
