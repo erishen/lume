@@ -12,6 +12,7 @@
 #include "minijson.h"
 
 #include <dirent.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +20,17 @@
 #include <time.h>
 
 #define IQUEST_JSON "application/json; charset=utf-8"
+
+/* err 是调用方固定 256B 缓冲,外部 %s(临时文件路径)可能远长于它。经
+ * va_list 转发后由 libc 负责 NUL 截断 —— 与 lume-core 的 set_why 同源,
+ * gcc 不再静态推导参数长度而误报 -Wformat-truncation。 */
+static void set_err(char *buf, size_t cap, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    (void)vsnprintf(buf, cap, fmt, ap);
+    va_end(ap);
+}
 
 /* 文档注释里说的两个环境变量即这两个路径。默认值只允许相对路径/空:
  * 绝不把宿主机个人绝对路径编进源码(分享/开源即泄露环境指纹)。
@@ -300,7 +312,7 @@ static int write_settings_disk(const char *allow_paid, const char *provider,
                                char *err, size_t err_len) {
     const char *path = default_env_file();
     if (!path) {
-        snprintf(err, err_len, "未配置 IQUEST_ENV_FILE,设置写回被拒绝");
+        set_err(err, err_len, "未配置 IQUEST_ENV_FILE,设置写回被拒绝");
         return -1;
     }
     err[0] = '\0';
@@ -312,7 +324,7 @@ static int write_settings_disk(const char *allow_paid, const char *provider,
         while ((got = fread(buf, 1, sizeof buf, f)) > 0) {
             if (src.len + got > (256u << 10)) {
                 fclose(f);
-                snprintf(err, err_len, ".env 超过 256KB,拒绝写回");
+                set_err(err, err_len, ".env 超过 256KB,拒绝写回");
                 return -1;
             }
             sb_mem(&src, buf, got);
@@ -362,14 +374,14 @@ static int write_settings_disk(const char *allow_paid, const char *provider,
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
     FILE *tf = fopen(tmp, "wb");
     if (!tf) {
-        snprintf(err, err_len, "无法写 %s", tmp);
+        set_err(err, err_len, "无法写 %s", tmp);
         return -1;
     }
     size_t written = out.p ? fwrite(out.p, 1, out.len, tf) : fwrite("\n", 1, 1, tf);
     int closed_ok = fclose(tf) == 0;
     if (!closed_ok || written != (out.p ? out.len : 1) || rename(tmp, path) != 0) {
         remove(tmp);
-        snprintf(err, err_len, "写回 .env 失败");
+        set_err(err, err_len, "写回 .env 失败");
         return -1;
     }
     return 0;

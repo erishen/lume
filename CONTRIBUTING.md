@@ -26,7 +26,11 @@ make privacycheck treecheck
 `make asan` adds ASan/UBSan plus the isolated warmup leak harness. Leak
 assertions are Linux-only (LeakSanitizer); macOS runs the same rounds under
 ASan/UBSan without them. CI runs the same gates on Ubuntu, macOS and
-Windows.
+Windows. The Ubuntu/GCC lane also builds with `make WERROR=1 test`, so every
+compiler warning is fatal there — run `make WERROR=1 all` (ideally in an
+Ubuntu container) before pushing. The gate is GCC-only on purpose: clang
+reports a different diagnostic set, and the ASan negative control keeps an
+intentional unused `malloc()` result.
 
 ## The `lang/` tree is pinned
 

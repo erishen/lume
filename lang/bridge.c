@@ -77,7 +77,14 @@ static int auth_username(const HttpRequest *req, char *buf, size_t buf_size) {
         if (!colon) return 0;
         *colon = '\0';
         if (!creds[0]) return 0;
-        snprintf(buf, buf_size, "%s", creds);
+        /* creds 最多 512B,用户名缓冲更小:显式截断,不要靠 snprintf 的隐式
+         * 截断(GCC 会静态判成 -Wformat-truncation,fatal-warning 构建下
+         * 直接红)。buf_size>0 由两个调用点的 sizeof 数组保证。 */
+        if (buf_size == 0) return 0;
+        size_t n = strlen(creds);
+        if (n >= buf_size) n = buf_size - 1;
+        memcpy(buf, creds, n);
+        buf[n] = '\0';
         return 1;
     }
     return 0;

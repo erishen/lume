@@ -146,7 +146,9 @@ static void check_modules(const char *name, const char *const files[][2],
     char dir[256];
     snprintf(dir, sizeof(dir), "/tmp/lume-smoke-modules/%s", name);
 #ifndef _WIN32
-    char cmd[512];
+    /* dir 是 256B 且被引用两次:固定文字 + 2*255B 已超过 512B,GCC 会报
+     * -Wformat-truncation。给 cmd 留足两份 dir 的上界,而不是加豁免。 */
+    char cmd[768];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s' && mkdir -p '%s'", dir, dir);
     if (system(cmd) != 0) {
 #else

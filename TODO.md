@@ -638,18 +638,22 @@ job passed on GitHub Actions after push: lume CI run `42381803754` @
 `cca43ec`, so the bumped gitlink is fetchable from a clean clone.
 `continue-on-error` stays removed.
 
-### 2026-11-08 — deferred: fatal-warning gate (`-Werror`)
+### 2026-11-08 — fatal-warning gate (`-Werror`): deferred in the morning, WIRED later that day
 
-Evaluated for the Ubuntu/GCC CI lane and deliberately NOT wired in. On
-Ubuntu 24.04 GCC with `-D_FORTIFY_SOURCE=2`, a clean full build turns two
-classes of diagnostics into hard failures: `-Wformat-truncation=` on bounded
-`snprintf` into fixed `why` buffers, and `-Wdangling-pointer=` in
-`open_conn_impl()` (`lang/builtins_http.c:721-748`, `chost` pointing at the
-stack buffer `phost`). Suppressing them one at a time would hide a real
-pointer-lifetime question; fixing them touches host-owned `builtins_http.c`
-and needs its own A/B plus a full-suite rerun. An opt-in `WERROR=1` make
-variable was prototyped and reverted — no half-working switch left behind.
-Compile warnings stay visible (`-Wall -Wextra`) and non-fatal for now.
+Morning evaluation (kept for the record): for the Ubuntu/GCC CI lane this
+was deliberately NOT wired in. On Ubuntu 24.04 GCC with
+`-D_FORTIFY_SOURCE=2`, a clean full build turned two classes of diagnostics
+into hard failures: `-Wformat-truncation=` on bounded `snprintf` into fixed
+`why` buffers, and `-Wdangling-pointer=` in `open_conn_impl()` (then at
+`lang/builtins_http.c:721-748`, `chost` pointing at the stack buffer
+`phost`). Suppressing them one at a time would have hidden a real
+pointer-lifetime question; an opt-in `WERROR=1` prototype was reverted
+rather than left half-working.
+
+**Closed later on 2026-11-08 — see the section at the end of this file.**
+The dangling pointer was a real use-after-scope, not a noisy diagnostic;
+it and every format-truncation site were fixed in code (no `-Wno-*`), and
+`WERROR=1` is now a real gate on the Ubuntu/GCC lane.
 
 ### 2026-11-08 — CI: `macos-14` label is retired (fixed)
 
@@ -731,3 +735,46 @@ job logged `ok warmup LSan negative control: injected leak reported`,
 success. agent-httpd CI `42446203897` is 6/6 success: its macOS job
 recompiled `framework.c` under `-Werror`, and the Ubuntu full smoke
 passed `PASS=157 FAIL=0`. Gitlink four trees all `dbb1272`.
+
+### 2026-11-08 (noon) — `phost` was a real bug; the fatal-warning gate is now live
+
+A read-only review found that the diagnostic deferred in the morning was not
+a false positive. In both `open_conn_impl()` (host `lang/builtins_http.c`)
+and `open_conn()` (core `src/builtins_http.c`), `char phost[512]` was declared
+*inside* `if (proxy && proxy[0])`, but `chost = phost` was then used after
+that block: `getaddrinfo(chost, ...)`, the connect debug path, every `c->why`
+failure reason and the CONNECT error branches. That is a read of a dead stack
+buffer — GCC's `-Wdangling-pointer` pointed at a genuine use-after-scope,
+not a formatting nit. Both trees had the identical shape. Fixed by lifting
+`phost` to function scope with a comment saying why; `builtins_http.c` is
+host-owned, so the core change was hand-merged and `lang/PIN.lag` refreshed
+with `sync-lang.py accept-lag`.
+
+The second class was a host-only lag: core already had `set_why()`, a
+`va_list` wrapper that lets libc do the NUL truncation so GCC cannot
+statically prove a truncation, while the host still used eight direct
+`snprintf(c->why /* 160B */, ...)` calls. Hand-merged `set_why()` and
+switched all eight. Three more `-Wformat-truncation` sites surfaced once
+that was gone; all fixed in code, no `-Wno-*` suppression:
+
+| site | fix |
+|---|---|
+| `lang/bridge.c:80` (`creds[512]` into a 64-byte user buffer) | explicit `strlen`/`memcpy` truncation instead of `snprintf`'s implicit one |
+| `lang/iquest.c` (4 `err` call sites) | `set_err()`, the same `va_list` shape as `set_why()` |
+| `tests/smoke.c:150` (`dir[256]` used twice in `cmd[512]`) | `cmd` widened to 768 so two 255-byte `dir`s plus the literal fit |
+
+`Makefile` now has `WERROR ?= 0` with `CFLAGS += -Werror`, and the
+ubuntu-24.04 CI lane runs `make -j4 WERROR=1 test` instead of
+`make -j4 test`. Scope is deliberately the GCC lane only: clang reports a
+different diagnostic set, and the ASan negative control keeps an intentional
+unused `malloc()` result that must not become a build failure. Release,
+Windows, ASan and macOS lanes are unchanged.
+
+Verification (local, 2026-11-08): before the last three fixes, a clean
+Ubuntu 24.04 / GCC 13.3.0 source copy failed `make -j4 CC="cc -Werror" all`
+with exactly `bridge.c:80` and `iquest.c:365`; after them, a clean copy
+builds `make -j4 WERROR=1 all tests/smoke-bin tests/tools-bin` with rc=0
+and zero diagnostics. macOS clang `make -j4 -B WERROR=1 all` is also rc=0
+with zero diagnostics. The full macOS `make test` with proxies set and
+`LUME_REQUIRE_EGRESS=1` stays green, and all seven local gates pass. The
+CI workflow change itself needs the next push for remote confirmation.

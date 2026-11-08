@@ -60,7 +60,13 @@ jobs:
           # This runner has outbound network, so the HTTPS egress leg is
           # authoritative here: an offline skip must fail, not go green.
           LUME_REQUIRE_EGRESS: "1"
-        run: make -j4 test
+        # WERROR=1 is the fatal-warning gate, deliberately scoped to this
+        # GCC lane: clang reports a different set, and the ASan negative
+        # control keeps an intentional unused malloc() result. See the
+        # 2026-11-08 section in TODO.md — the two classes of diagnostics
+        # this used to trip (format-truncation, dangling-pointer) were
+        # fixed, not suppressed.
+        run: make -j4 WERROR=1 test
       - name: Upload server log on failure
         if: failure()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5

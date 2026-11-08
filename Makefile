@@ -24,6 +24,16 @@ CC       ?= cc
 CFLAGS   ?= -std=c11 -Wall -Wextra -O2 -g
 CFLAGS   += -I lang $(addprefix -I, $(AH_INC))
 
+# Fatal-warning gate. WERROR=1 is used by the Ubuntu/GCC CI lane only:
+# clang and GCC do not report the same set, and the ASan negative control
+# deliberately keeps an unused malloc() result, so that lane is not gated.
+# Default stays 0 — a local clang build must not turn a diagnostic into a
+# hard failure before the GCC lane has had its say.
+WERROR   ?= 0
+ifeq ($(WERROR),1)
+    CFLAGS += -Werror
+endif
+
 # 版本号: lume --version 读这个宏(单一来源)。默认值取最近一次发布 tag;
 # 打 release 前在此递增值, 保证二进制自报与 GitHub Release tag 一致。
 LUME_VERSION ?= 0.12.2
