@@ -20,6 +20,13 @@
 #     semantic baseline blindly: p1-2-consistency.lume calls cos() and fails
 #     on the host with "undefined variable 'cos'". Only fixtures made of the
 #     shared 127 builtins qualify (see tests/baseline.provenance).
+#   - spawn / proc_read / proc_wait / proc_kill are P14 step 1 (2026-11-08):
+#     gated, allowlisted child processes that landed in lume-core's
+#     interpreter only. The host has no spawn gate, and P14's native-emitter
+#     and host-integration legs are still open (see lume-core/TODO.md P14 and
+#     the CORE_ONLY_NAMES note in scripts/sync-lang.py). TRANSITIONAL: when
+#     host integration lands these names must leave this list, and the
+#     accepted PIN.lag / registry decisions must be revisited with them.
 #
 # host-only names are host additions that core does not carry.
 #
@@ -63,6 +70,9 @@ median
 norminv
 omega_ratio
 percentile
+proc_kill
+proc_read
+proc_wait
 profit_factor
 rand
 rand_beta
@@ -111,6 +121,7 @@ sim_ou
 sim_portfolio
 sin
 sinh
+spawn
 sql_tx_begin
 sql_tx_commit
 sql_tx_exec
