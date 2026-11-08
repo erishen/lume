@@ -20,13 +20,17 @@
 #     semantic baseline blindly: p1-2-consistency.lume calls cos() and fails
 #     on the host with "undefined variable 'cos'". Only fixtures made of the
 #     shared 127 builtins qualify (see tests/baseline.provenance).
-#   - spawn / proc_read / proc_wait / proc_kill are P14 step 1 (2026-11-08):
-#     gated, allowlisted child processes that landed in lume-core's
-#     interpreter only. The host has no spawn gate, and P14's native-emitter
-#     and host-integration legs are still open (see lume-core/TODO.md P14 and
-#     the CORE_ONLY_NAMES note in scripts/sync-lang.py). TRANSITIONAL: when
-#     host integration lands these names must leave this list, and the
-#     accepted PIN.lag / registry decisions must be revisited with them.
+#   - spawn / proc_read / proc_wait / proc_kill are lume-core-only by
+#     decision (a), 2026-11-08 (P14). They are gated, allowlisted child
+#     processes that live in lume-core's interpreter; its native emitters
+#     have no spawn helper (a compiled binary has no VM policy to consult),
+#     enforced by lume-core's `make check` -> spawn-native-gate. This host
+#     has no spawn gate and no use for a child-process surface, so merging
+#     the registration chain would add an UNGATED process primitive.
+#     PERMANENT, not a pending port: these names leave this list only if
+#     the host first lands an equivalent fail-closed gate, then also
+#     updates CORE_ONLY_NAMES in scripts/sync-lang.py, lang/PIN.lag and
+#     TODO.md P14. See lume-core/TODO.md P14 for the full decision.
 #
 # host-only names are host additions that core does not carry.
 #

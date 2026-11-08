@@ -818,9 +818,11 @@ and its header remains authoritative.
 - `agent-httpd/TODO.md` P2 security review re-read: zero unchecked items
   remain (same-origin gate, Secure cookie, login limiter, roles/audit,
   ALLOWED_HOSTS, session entropy — all Done 2026-11-04).
-- P14 `spawn()` / streaming / host integration remains a ~2-week separate
-  project. Historical privacy residue stays out of scope per the user's
-  "不用管历史" instruction.
+- P14 `spawn()` landed in lume-core (gate + rooted exec), the emitter
+  decision is closed, and host integration is deliberately closed as a
+  permanent core-only boundary (see the P14 mirror section below). Only
+  **streaming / long-lived reads** remains a separate project. Historical
+  privacy residue stays out of scope per the user's "不用管历史" instruction.
 
 ## 2026-11-08 — remote verification after push
 
@@ -853,3 +855,55 @@ and stays, with its own comment: under `_FORTIFY_SOURCE=2` it covers a safe
 unrelated to the two diagnostic classes fixed here (`-Wformat-truncation`
 and `-Wdangling-pointer`). The `agent-httpd` submodule carries its own two
 exemptions in its own build.
+
+## P14 (mirror) — `spawn` stays a lume-core-only capability (decided 2026-11-08)
+
+`lume-core` P14 landed `spawn` / `proc_read` / `proc_wait` / `proc_kill`
+behind an opt-in gate (`--spawn` / `LUME_SPAWN=1` **plus** a mandatory
+`LUME_SPAWN_ALLOW`), realpath-checked `LUME_SPAWN_ROOT` directories and a
+filtered `env`. This host does **not** adopt them. The decision is recorded
+here so a later `make sync-lang` pass does not mistake the accepted
+`PIN.lag` delta for an unfinished merge.
+
+**Decision (a): interpreter-only, permanently.** A compiled lume binary has
+no `VM` (the gate lives in `VM.spawn_enabled` / `spawn_allow` /
+`spawn_root`) and `src/rt.c` has no `getenv` gate of its own.
+`codegen_call.c` and `llvm_codegen_internal.h` have no spawn row in their
+`BUILTINS[]` tables; `--compile-text` on a `spawn()` call exits 1 with
+"call to unknown function 'spawn'". That is the safe default, so the native
+emitters stay that way. lume-core's `make check` now runs
+`tests/spawn-native-gate.sh` on every CI lane: it fails if a spawn token
+appears in `rt.c` or either emitter, asserts the native rejection, and
+(POSIX) asserts the interpreter can still spawn when gated. Two replayed
+negatives (injected token / blinded matcher) keep it from going falsely
+green.
+
+**Why the host does not merge the chain.** `lang/`'s seven host_owned files
+(`typecheck.c`, `interp.c`, `builtins.c`, `lume.h`, `main.c`,
+`builtins_internal.h`, `builtins.h`) carry upstream-only lines for the spawn
+registrations, accepted into `lang/PIN.lag` on 2026-11-08. Hand-merging
+them would put a process primitive in a server binary with **no gate** —
+the exact failure mode the P14 "gate first" rule exists to prevent. Those
+lag entries are intentionally retained, not a TODO.
+
+**Bookkeeping that changed with this decision (no product C edits here):**
+
+- `scripts/sync-lang.py`: `builtins_spawn.c` moved from a transient
+  `CORE_ONLY_NAMES.add(...)` with a "REVISIT" note into the permanent set,
+  with the conditions for re-admission spelled out.
+- `tests/builtin-parity.allow`: the four spawn names are now marked
+  PERMANENT rather than TRANSITIONAL; the list is no longer a promise to
+  port them.
+- `lang/PIN.lag`: left numerically unchanged on purpose. Re-run
+  `sync-lang.py accept-lag` only if the accepted upstream-only deltas
+  actually move.
+
+**If a future host really needs child processes:** land an equivalent
+fail-closed gate in `lang/` first (opt-in + mandatory allowlist + realpath
+roots), then sync `builtins_spawn.c` and the registration chain, remove the
+`CORE_ONLY_NAMES` entry, drop the four parity-allow names, refresh
+`PIN.lag`, and replace this section. Do not start by copying the builtin.
+
+Remaining P14 work (lume-core side, not this repo): streaming /
+long-lived reads for `task.delegate` — a separate project. P16
+(0.12 lib compatibility, static ETag/304) is independent and still open.

@@ -143,17 +143,26 @@ LAG_WARN = 40
 # unclassified_upstream() treat every *other* new upstream source as news.
 CORE_ONLY_PREFIXES = ("backend", "codegen", "llvm_", "irbuf", "fuzz_",
                       "bridge_lsp", "bridge_mcp", "bridge_native", "bridge_serve")
-CORE_ONLY_NAMES = {"rt.c", "server.h", "sql_guard_internal.h"}
-# P14 transitional classification (2026-11-08). builtins_spawn.c is a
-# POSIX-only front-end builtin added upstream, but the host has neither the
-# spawn gate in lang/lume.h nor a use for a child-process surface, and the
-# native-emitter half that P14 says to hand-merge has not landed yet. Copying
-# the file into lang/ now would only add an uncompiled, unregistered source.
-# Keep it explicitly classified (so `check` can still see it as news if the
-# name changes) and REVISIT at P14 host integration: either sync it with the
-# gate, or move it to a CORE_ONLY_PREFIXES rule if the host decides never to
-# expose spawn. TODO.md P14 tracks this debt.
-CORE_ONLY_NAMES.add("builtins_spawn.c")
+# P14 decision (a), 2026-11-08 — PERMANENT boundary, not transitional debt.
+# lume-core's spawn / proc_* builtins are interpreter-only: a compiled lume
+# binary has no VM (spawn_enabled / spawn_allow / spawn_root are VM fields)
+# and rt.c has no gate of its own, so the native emitters were deliberately
+# left without a spawn helper (enforced by lume-core's `make check` ->
+# spawn-native-gate). This host has neither that gate nor a use for a
+# child-process surface; copying builtins_spawn.c, or the registration chain
+# into the host-owned interp/typecheck/builtins files, would add an UNGATED
+# process primitive to a server binary. Do not hand-merge the P14 delta in
+# lang/PIN.lag on sync: those accepted upstream-only lines are intentionally
+# retained.
+#
+# Re-admitting spawn here requires, in order: (1) an equivalent fail-closed
+# gate in lang/ (opt-in + mandatory allowlist + realpath roots), (2) the full
+# registration chain plus this file synced, (3) removing this entry,
+# (4) dropping the four names from tests/builtin-parity.allow, (5) refreshing
+# lang/PIN.lag with `sync-lang.py accept-lag`, (6) documenting the policy in
+# TODO.md P14. See lume-core/TODO.md P14 and this repo's TODO.md P14 mirror.
+CORE_ONLY_NAMES = {"rt.c", "server.h", "sql_guard_internal.h",
+                   "builtins_spawn.c"}
 
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
