@@ -652,7 +652,7 @@ and needs its own A/B plus a full-suite rerun. An opt-in `WERROR=1` make
 variable was prototyped and reverted — no half-working switch left behind.
 Compile warnings stay visible (`-Wall -Wextra`) and non-fatal for now.
 
-### 2026-11-08 — CI: `macos-14` label is retired (fix pending)
+### 2026-11-08 — CI: `macos-14` label is retired (fixed)
 
 GitHub retired the macOS 14 runner image on 2026-11-02 (changelog
 2026-10-01); `macos-14`, `macos-14-large` and `macos-14-xlarge` are gone,
@@ -660,15 +660,21 @@ with capacity reductions in the preceding weeks. That explains the
 release/ci jobs being `cancelled` within one second, with an empty step
 list and no runner name, since 2026-11-06 — they never got a machine.
 
-Both labels are arm64, so switching does not change the
-`lume-darwin-arm64` product architecture: CI's `macos-latest` job ran on
-`macos-26-arm64` (CI run `42381803754`), and the last successful
-`macos-14` build ran on `macos-14-arm64` (Release run `42030553700`).
+`actions/runner-images` README confirms `macos-15` is the arm64 GA label
+(`macos-15`, `macos-15-xlarge`), while `macos-15-intel` / `-large` are x64,
+and that all macOS 14 images retired from GitHub Actions on 2026-11-02.
+So switching does not change the `lume-darwin-arm64` architecture: CI's
+`macos-latest` job ran on `macos-26-arm64` (CI run `42381803754`), and the
+last successful `macos-14` build ran on `macos-14-arm64` (Release run
+`42030553700`).
 
-Still to change, in its own push + CI verification round:
-`lume/.github/workflows/release.yml:166`,
-`lume-core/.github/workflows/release.yml:71`,
-`lume-core/.github/workflows/ci.yml:182`, and the `lume` `ci.yml:78`
-comment saying the darwin-arm64 release is built on macos-14. Prefer
-pinning `macos-15` over `macos-latest`: the 2026-10 `ubuntu-latest`
-migration already cost this repo a week of red test jobs.
+Fixed 2026-11-08 by pinning `macos-15` (not `macos-latest`: the 2026-10
+`ubuntu-latest` migration already cost this repo a week of red test jobs):
+`lume/.github/workflows/release.yml`, `lume-core/.github/workflows/release.yml`,
+`lume-core/.github/workflows/ci.yml`, plus the `lume` `ci.yml` comment that
+describes the release lane. CI jobs on `macos-latest` were left alone — they
+are the hard-blocking 4f lane and still pass on `macos-26-arm64`.
+
+Acceptance after push: no `build (macos-15)` / `release-build (macos-15)`
+job should be `cancelled` with an empty step list, and Release run
+conclusions should stop showing the false red.

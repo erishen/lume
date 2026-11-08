@@ -75,7 +75,7 @@ jobs:
   # lane that exercises the full server stack (HTTP/SQL builtins, the agent
   # bridge, the type checker and module loading) on clang / Apple SDK before
   # any darwin binary ships to users. The darwin-arm64 release is built on
-  # macos-14 but never test-run there, and darwin-x64 is Linux-cross-built;
+  # macos-15 but never test-run there, and darwin-x64 is Linux-cross-built;
   # this job closes that coverage gap.
   #
   # Hard-blocking again as of 2026-11-07. The 4f "first-request HTTPS
