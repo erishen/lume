@@ -19,8 +19,19 @@ the top of each of those files. The code is included only to provide the
 POSIX regex API for MinGW / Windows builds, whose C runtime has none. Keep
 the upstream headers and attribution intact when refreshing it.
 
-Other compatibility implementations under `lang/compat/` and in the
-`agent-httpd` submodule retain their own upstream copyright and license
-notices in their source headers; those notices are not duplicated here.
-System libraries such as OpenSSL and SQLite are linked at build time and are
-not distributed in this repository.
+## Other compatibility code
+
+Not every tree under `lang/compat/` is vendored. `sha256/sha256.c` records
+in its header that it was "Written fresh for lume-core (2026-10-15) ... no
+upstream file was copied", public domain / CC0-style, no attribution
+required; `ed25519/ed25519.c` is a from-scratch pure-C implementation of RFC
+8032. Neither carries a third-party copyright notice; both are covered by
+this repository's MIT license. Keep those headers intact when refreshing.
+For the other `lang/compat/` directories, each source header remains
+authoritative for its own status — this file makes no claim about them
+either way.
+
+The `agent-httpd` submodule is a separate repository with its own license
+and notices, which are not duplicated here. System libraries such as OpenSSL
+and SQLite are linked at build time and are not distributed in this
+repository.

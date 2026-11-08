@@ -778,3 +778,46 @@ and zero diagnostics. macOS clang `make -j4 -B WERROR=1 all` is also rc=0
 with zero diagnostics. The full macOS `make test` with proxies set and
 `LUME_REQUIRE_EGRESS=1` stays green, and all seven local gates pass. The
 CI workflow change itself needs the next push for remote confirmation.
+
+## 2026-11-08 — post-fix verification and compliance closeout
+
+### `WERROR=1 test` is verified end-to-end locally
+
+The note above left the workflow change itself unproven. Re-ran the exact
+CI command on a forced full rebuild: `LUME_REQUIRE_EGRESS=1 make -j4 -B
+WERROR=1 test` → rc=0, zero compiler diagnostics, `all tests passed`, `ok
+first-request HTTPS egress (warmup before fork)`. `tests/run_all.sh`
+issues exactly one build call — the bare `make` on line 26, the default
+`all` target, already built by the outer `test` prerequisite — so it opens
+no compilation path outside `all`, `smoke-bin` and `tools-bin`. `ui` is a
+pnpm frontend build and never consumes `CFLAGS`.
+
+Together with the clean Ubuntu 24.04 / GCC 13.3 copy build, the only
+untested part of this lane is the GitHub runner — remote confirmation still
+needs the next push.
+
+### NOTICE corrected: not every `lang/compat/` tree is vendored
+
+The old text said all the other compatibility implementations "retain their
+own upstream copyright and license notices". Their headers disagree:
+`sha256/sha256.c` is a fresh public-domain / CC0-style implementation with
+no upstream file copied, and `ed25519/ed25519.c` is a from-scratch pure-C
+RFC 8032 implementation. `lang/compat/regex/` is the only vendored
+third-party tree, and its BSD attribution stays. NOTICE now separates
+original code, the `agent-httpd` submodule and system libraries. The
+`sha512/` header was not read this round (an environment approval timed
+out); under the no-retry / no-inference rule it is not claimed either way,
+and its header remains authoritative.
+
+### Deliberately left alone
+
+- `lume_http_warmup()` primes DNS with a blocking `getaddrinfo()` and has no
+  timeout. A portable timeout needs a worker thread or SIGALRM around a libc
+  resolver call — more machinery than a rare slow-DNS startup warrants.
+  Recorded here so it stops resurfacing as an open TODO.
+- `agent-httpd/TODO.md` P2 security review re-read: zero unchecked items
+  remain (same-origin gate, Secure cookie, login limiter, roles/audit,
+  ALLOWED_HOSTS, session entropy — all Done 2026-11-04).
+- P14 `spawn()` / streaming / host integration remains a ~2-week separate
+  project. Historical privacy residue stays out of scope per the user's
+  "不用管历史" instruction.
