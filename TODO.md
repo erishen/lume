@@ -719,3 +719,15 @@ passed (the 10 `warning:` lines are the known `-Wformat-truncation`
 baseline plus the negative control's intentional unused `malloc` — no
 new warnings from the removed includes); standalone agent-httpd
 `make test` → `PASS=169 FAIL=0`; all seven local gates PASS.
+
+Confirmed on remote runners after push (2026-11-08): lume CI
+`42446280766` (5/5 success) — the hard-blocking macOS job logged
+`ok first-request HTTPS egress (warmup before fork)` and `all tests
+passed`, so removing the handshake did not regress 4f; the ubuntu `asan`
+job logged `ok warmup LSan negative control: injected leak reported`,
+8 × `[http] warmup: dns prime rc=0`, `8 rounds, no leaks` and no
+`local handshake` line. lume Release `42446280780` (including
+`build (macos-15, lume-darwin-arm64)`) and Windows `42446280733` are
+success. agent-httpd CI `42446203897` is 6/6 success: its macOS job
+recompiled `framework.c` under `-Werror`, and the Ubuntu full smoke
+passed `PASS=157 FAIL=0`. Gitlink four trees all `dbb1272`.
