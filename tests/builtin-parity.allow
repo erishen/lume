@@ -31,6 +31,23 @@
 #     the host first lands an equivalent fail-closed gate, then also
 #     updates CORE_ONLY_NAMES in scripts/sync-lang.py, lang/PIN.lag and
 #     TODO.md P14. See lume-core/TODO.md P14 for the full decision.
+#   - http_stream_open / http_stream_read / http_stream_close are
+#     lume-core-only by decision (a), 2026-11-08 (P17). They are an inbound
+#     SSE client — the deferred half of P14's streaming work: a generation-
+#     tagged slot handle table plus an incremental SSE line parser, reusing
+#     the bare-socket HTTP/1.1 transport (url_parse, the host_blocked SSRF
+#     gate, open_conn proxy+TLS, read_head) and the shared vm->no_net gate.
+#     Like spawn they register only in the interpreter (src/interp.c /
+#     typecheck.c / builtins.c / builtins_internal.h / builtins.h) and never
+#     reach codegen_call.c or llvm_codegen_internal.h's BUILTINS[], so
+#     --compile-text fails with "call to unknown function". rt.c has no
+#     stream helper, so a compiled binary simply has no such primitive.
+#     This host has no inbound-SSE need and no gate of its own; merging the
+#     registration chain would add an UNGATED network primitive to a server
+#     binary. PERMANENT, not a pending port: these names leave this list
+#     only if the host first lands an equivalent fail-closed gate, then also
+#     updates CORE_ONLY_NAMES in scripts/sync-lang.py, lang/PIN.lag and
+#     TODO.md P17. See lume-core/TODO.md P17 for the full decision.
 #
 # host-only names are host additions that core does not carry.
 #
@@ -66,6 +83,9 @@ cosh
 covariance
 f_pvalue
 f_stat
+http_stream_close
+http_stream_open
+http_stream_read
 ic
 information_ratio
 max_consecutive_losses

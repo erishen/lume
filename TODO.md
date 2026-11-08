@@ -907,3 +907,60 @@ roots), then sync `builtins_spawn.c` and the registration chain, remove the
 Remaining P14 work (lume-core side, not this repo): streaming /
 long-lived reads for `task.delegate` — a separate project. P16
 (0.12 lib compatibility, static ETag/304) is independent and still open.
+
+## 2026-11-08 — P17 (mirror) — `http_stream` stays a lume-core-only capability (decided 2026-11-08)
+
+`lume-core` P17 landed `http_stream_open` / `http_stream_read` /
+`http_stream_close` as an inbound SSE client — the deferred half of P14's
+streaming work: a generation-tagged slot handle table plus an incremental
+SSE line parser, reusing the bare-socket HTTP/1.1 transport (`url_parse`,
+the `host_blocked` SSRF gate, `open_conn` proxy+TLS, `read_head`) and the
+shared `vm->no_net` gate. This host does **not** adopt them. The decision
+is recorded here so a later `make sync-lang` pass does not mistake the
+accepted `PIN.lag` delta for an unfinished merge.
+
+**Decision (a): interpreter-only, permanently.** Like `spawn`, the
+registrations live only in the interpreter (`src/interp.c` / `typecheck.c`
+/ `builtins.c` / `builtins_internal.h` / `builtins.h`) and never reach
+`codegen_call.c` or `llvm_codegen_internal.h`'s `BUILTINS[]`;
+`--compile-text` on an `http_stream_open()` call exits 1 with "call to
+unknown function 'http_stream_open'". The native emitters stay that way
+(and `rt.c` has no stream helper), enforced by lume-core's `make check` ->
+`tests/stream-native-gate.sh`. That is the safe default: a compiled lume
+binary simply has no inbound-SSE primitive. `http_stream_read` returns one
+parsed SSE event per call (`{ok, event, data, id, eof, err}`); v1 does not
+auto-reconnect — the last event id is handed back so a script can reconnect
+itself.
+
+**Why the host does not merge the chain.** `lang/`'s host_owned files
+(`typecheck.c`, `interp.c`, `builtins.c`, `builtins_internal.h`,
+`builtins.h`, plus `builtins_http.c` which is `HOST_PINNED`) carry
+upstream-only lines for the http_stream registrations, accepted into
+`lang/PIN.lag` on 2026-11-08. Hand-merging them would put an UNGATED
+network primitive (the `vm->no_net` gate lives in the VM, which a compiled
+binary has none of) into a server binary — the exact failure mode the P14
+"gate first" rule exists to prevent. Those lag entries are intentionally
+retained, not a TODO.
+
+**Bookkeeping that changed with this decision (no product C edits here):**
+
+- `scripts/sync-lang.py`: no new `CORE_ONLY_NAMES` entry was needed —
+  `http_stream_*` is appended to `src/builtins_http.c`, which is already
+  `HOST_PINNED`, not a separate core-only file like `builtins_spawn.c`.
+- `tests/builtin-parity.allow`: the three http_stream names are now in
+  `[core-only]`, marked PERMANENT (see the header note) rather than
+  TRANSITIONAL; the list is no longer a promise to port them.
+- `lang/PIN.lag`: refreshed via `sync-lang.py accept-lag` on 2026-11-08 to
+  record the accepted upstream-only delta for the five host_owned files
+  that grew (interp.c, typecheck.c, builtins.c, builtins_internal.h,
+  builtins.h). Re-run accept-lag only if those deltas actually move again.
+
+**If a future host really needs inbound SSE:** land an equivalent
+fail-closed gate in `lang/` first (the `vm->no_net` policy, or its
+compiled-binary equivalent), then sync the registration chain, remove the
+three parity-allow names, refresh `PIN.lag`, and replace this section. Do
+not start by copying the builtin.
+
+Remaining P17 work (lume-core side, this repo-irrelevant): cross-platform
+verification on Linux `gcc:13-bookworm` (dash `/bin/sh`) and the Windows
+`LUME_HAS_HTTP=0` lane; both are independent of the host mirror.
