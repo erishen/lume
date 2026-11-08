@@ -4,6 +4,17 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# Local loopback probes must bypass http(s)_proxy / all_proxy. Hosts that set
+# a proxy without NO_PROXY make curl hand 127.0.0.1 requests to the proxy,
+# which answers 502 with rc=0: ready-loops then claim the server is up before
+# it is, and every assertion compares against the proxy's 502 HTML (a mass
+# false red that looks like a server or 4f crash). Only loopback is exempted;
+# the external https://example.com egress probe keeps its original network
+# path, so do NOT replace this with a global `env -u http_proxy` in CI.
+NO_PROXY_BASE="127.0.0.1,localhost"
+export NO_PROXY="${NO_PROXY_BASE}${NO_PROXY:+,$NO_PROXY}"
+export no_proxy="$NO_PROXY"
+
 PORT=8999
 SERVER_LOG=$(mktemp)
 ACCESS_LOG=$(mktemp -d)
