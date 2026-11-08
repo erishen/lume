@@ -3,18 +3,18 @@
 #   name  upstream-only-line-count  upstream-file-md5
 # check fails when the count grows OR the md5 changes.
 bridge_stub.c 1 258c9e4f0367c00afc78a2f63e46ba2f
-builtins.c 81 326a1ba2dcc7bc50256e2f273fb2d8b5
-builtins.h 145 4639d61d0f22f3b808e00282088c04e3
+builtins.c 107 4a49d9eafb55d30be78714409fd0d9f2
+builtins.h 151 def9874e6244ecfe7585672b977d4c5c
 builtins_catalog.c 46 8020c1791dada91d0e84cd810a8c1159
 builtins_fs.c 40 35c7d40d550229176e3f162e4708f6ce
 builtins_http.c 7 cfd599b7a981bb5a0a5a04b2c2b0f3cf
-builtins_internal.h 46 378a630deaad62e3af29a0964acd839c
+builtins_internal.h 58 19578a094983842ac751b810ae44a39b
 builtins_math.c 12 25bae054ea8df83bb06fa6c51f24ebea
 builtins_sql.c 506 7acac0bdff4426947d62064b5dfed35d
-interp.c 175 d232e0e85e65277585985bd9902c4caa
-lume.h 41 6de438d1e49ec3d06c69e6b0cbee3a4f
-main.c 336 d62d1e742307296ee22a7a85c09f5585
-typecheck.c 108 222b6de765d853f5cfd51924ea0733e4
+interp.c 191 7e68cdc6737d346f65957145a36f9ad6
+lume.h 51 b8727a1c5303d481cdb0de0110a8b89c
+main.c 361 2a9baa13766018d1cd9e23c29c67476f
+typecheck.c 115 dc0ea04e273d19a5aa8d78e0ad5d76d5
 typecheck_expr.c 9 cf33d61836f64f0ad10c0be311d88ed8
 typecheck_stmt.c 52 ea0f01f1b8a02e4b06a0b11708beea2a
 value.c 27 92f7a5115fadd4501cb19f4a42163b09
