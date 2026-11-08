@@ -83,9 +83,11 @@ jobs:
   # loopback (no listener on CI runners ⇒ no handshake), and because the
   # process's first *external hostname resolution* happened inside a forked
   # worker, tripping libobjc's +[NSString initialize] fork guard. The warmup
-  # now does one resolver priming call plus a fully in-memory BIO-pair TLS
-  # handshake in the master before any fork/thread; neither is an HTTPS
-  # egress, so /probe remains the worker's first one and 4f stays honest.
+  # now does one resolver priming call (getaddrinfo on an IANA-reserved
+  # name, result discarded) plus ssl_ctx_ready() in the master before any
+  # fork/thread; neither is an HTTPS egress, so /probe remains the worker's
+  # first one and 4f stays honest. The 2026-11-07 in-memory BIO-pair
+  # handshake was removed 11-08 after A/B showed DNS priming alone fixes it.
   # Verified on macOS with LUME_REQUIRE_EGRESS=1: all 156 run_all.sh legs
   # green, 0 objc crashes. Never paper over a failure with
   # OBJC_DISABLE_INITIALIZE_FORK_SAFETY — that neuters the regression.

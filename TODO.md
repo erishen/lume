@@ -356,10 +356,11 @@ which branch ran.
 > A/B test **disproved** on macOS: it blames a Keychain read during the TLS
 > handshake, and its acceptance text still mentions an external probe and
 > `HTTP_DBG`. The shipped fix primes one external hostname resolution before
-> `fork()`, does a purely in-memory BIO-pair handshake, logs through
-> `WARMUP_NOTE`, and never reads `LUME_TLS_WARMUP_PROBE`. See the LANDED
-> section for what actually landed, and `lang/builtins_http.c` for the code.
-> Kept as the reasoning trail, not as a template.
+> `fork()`, calls `ssl_ctx_ready()`, logs through `WARMUP_NOTE`, and never
+> reads `LUME_TLS_WARMUP_PROBE`. The 11-07 in-memory BIO-pair handshake was
+> itself removed 2026-11-08 (A/B: not load-bearing). See the LANDED section
+> and `lang/builtins_http.c` for what actually landed. Kept as the reasoning
+> trail, not as a template.
 
 ### Reference patch — `lume_http_warmup()` (historical; compiled + landed 2026-11-07)
 
@@ -566,29 +567,28 @@ fixes this host. `localhost` is not a substitute — it resolves through
 `/etc/hosts` and never initialises the external resolver / system
 configuration path.
 
-**What shipped.** `lume_http_warmup()` now, before `ssl_ctx_ready()`:
+**What shipped.** `lume_http_warmup()` now, before any fork or thread:
 
 1. One `getaddrinfo()` on an IANA-reserved name, result discarded, nothing
    connected. This is a resolver prime, not an HTTPS egress, so `/probe`
    remains the process's first HTTPS and 4f stays authoritative (unlike the
    old external probe, which made the master the first egress).
-2. `ssl_ctx_ready()` for the business CTX, then the reference patch's
-   in-memory BIO-pair handshake with an ephemeral RSA key + 60 s self-signed
-   cert. Kept deliberately: it is entirely local, costs milliseconds, keeps
-   the required `local handshake completed` log line, and covers the
-   Keychain path on OpenSSL builds that do use it. **DNS priming runs first**
-   because any handshake failure `goto done` would otherwise skip the actual
-   fix.
+2. `ssl_ctx_ready()` for the business CTX — its lazy initialisation also
+   touches system frameworks, so it must not first happen in a worker.
 3. `LUME_TLS_WARMUP_PROBE` is gone from the C code. `run_all.sh`'s guard
    remains as a tripwire. `WARMUP_NOTE` is a separate one-shot startup
-   diagnostic that prints by default — `HTTP_DBG` needs
-   `-DLUME_HTTP_DEBUG`, which CI does not set, so the acceptance log line
-   would have been invisible.
+   diagnostic that prints `warmup: dns prime rc=N` by default.
 
-Only the warmup body changed. `open_conn_impl()` / `tls_attach()` /
-`g_ssl_ctx` are untouched; the client handshake uses a private CTX that
-trusts the ephemeral cert plus system CAs, never the business CTX.
-`builtins_http.c` is `HOST_PINNED` — no `make sync-lang` round-trip.
+**Simplified 2026-11-08.** The 11-07 build additionally did an ephemeral
+RSA key + 60 s self-signed cert + in-memory BIO-pair handshake after the
+DNS prime, as insurance for a hypothetical Keychain read path. The A/B
+table above already showed `getaddrinfo("example.com")` **alone** passes
+with 0 objc crashes, and Homebrew OpenSSL 3 reads CA files from disk, so
+that insurance was never load-bearing. Removing it drops ~0.1 s of startup
+work (more under ASan), nine short-lived OpenSSL objects and four now-dead
+`<openssl/*.h>` includes. `open_conn_impl()` / `tls_attach()` /
+`g_ssl_ctx` remain untouched; `builtins_http.c` is `HOST_PINNED`, so no
+`make sync-lang` round-trip is involved.
 
 **Verification** (macOS, Apple clang 21, Homebrew OpenSSL 3):
 
@@ -597,11 +597,11 @@ trusts the ephemeral cert plus system CAs, never the business CTX.
 - Full `tests/run_all.sh` with `LUME_REQUIRE_EGRESS=1` and proxies unset →
   **rc=0, 156 legs green, `all tests passed`, 0 objc crashes**, including
   `ok first-request HTTPS egress (warmup before fork)`.
-- Startup log contains both `warmup: dns prime rc=0` and
-  `warmup: local handshake completed (verify=0)` (default build, no debug
-  flag). The default 17 KB BIO pair was sufficient — no buffer bump needed.
-- `done:` frees every allocation on every early-exit path and calls
-  `ERR_clear_error()` when the handshake did not complete.
+- Startup log contains `warmup: dns prime rc=0` (default build, no debug
+  flag). As of 2026-11-08 there is no `local handshake` line — that
+  diagnostic went away with the removed BIO-pair handshake.
+- No per-call owned allocations remain: the `addrinfo` chain is freed in
+  the same block, and the business `SSL_CTX` is static.
 
 **Closed 2026-11-08 — dedicated ASan/LSan harness.** The earlier record
 above (macOS `leaks`, 25431 nodes / 0 leaks) only covered the success path
@@ -616,13 +616,12 @@ pass. The target is part of `make asan`, hence CI's ubuntu `asan` job.
 LeakSanitizer is Linux-only; on macOS (Apple clang) the same rounds still
 run under ASan/UBSan, just without the leak assertions.
 
-Why the success path covers the cleanup: `done:` is the single shared exit;
-a successful round has all nine owned pointers non-NULL, so every `free()`
-in that block executes. Each early exit is a strict subset (not-yet-created
-pointers are NULL and skipped), and no branch allocates a tenth owning
-pointer — `X509_NAME` / `X509_STORE` are borrowed handles. The remaining
-gap is branch-by-branch *execution* of every `goto done` (that would need
-OpenSSL-level fault injection), not the cleanup block's release statements.
+**2026-11-08 update.** The `done:` label and its nine owned OpenSSL objects
+no longer exist. The harness now checks a smaller surface: the `addrinfo`
+chain returned by `getaddrinfo()` must be freed every round, and the static
+business `SSL_CTX` must not be rebuilt per round. Eight repetitions make a
+per-call leak visible as a growing allocation. The negative control is
+unchanged and still the guard against a disabled LSan faking a pass.
 
 Verified: macOS 8 rounds green; Linux Ubuntu 24.04 container with GCC —
 negative control reported, 8 rounds `no leaks`, and the full CI-equivalent
@@ -687,3 +686,36 @@ The same CI round also green-lit the guards added in this batch:
 `ok   warmup LSan negative control: injected leak reported`,
 `ok   warmup leakcheck: 8 rounds, no leaks`, and the privacy guard's
 `scope=HEAD (HEAD + index + non-ignored worktree)` with `self-test=4/4`.
+
+### 2026-11-08 — P2: warmup slimmed, submodule fallback fixed
+
+Host `lang/builtins_http.c`: `lume_http_warmup()` dropped the 11-07
+ephemeral RSA key + 60 s self-signed cert + in-memory BIO-pair handshake.
+The A/B table above already showed `getaddrinfo("example.com")` alone
+fixes the libobjc fork guard, and Homebrew OpenSSL 3 reads CA files from
+disk, so that insurance was never load-bearing. Warmup is now DNS prime +
+`ssl_ctx_ready()` only; four now-dead OpenSSL includes went with it.
+`WARMUP_NOTE` still prints `warmup: dns prime rc=N`, and
+`local handshake completed` is no longer an acceptance line. The 4f
+comment, CI job comment, LANDED section and `warmup_leakcheck.c` rationale
+were all updated to match — no stale "we still handshake" text left.
+
+Submodule `agent-httpd/src/core/framework.c`: the weak
+`lume_http_warmup()` fallback (used when agent-httpd is built standalone)
+used to `fork()` a `curl https://example.com --max-time 3` child. That was
+a startup HTTPS egress, could block 3 s, and — decisively — performed the
+TLS/resolver initialisation in an `exec`'d child, so the parent had still
+never resolved an external name. It now does one `getaddrinfo()` +
+`freeaddrinfo()` in the master, no fork, no egress, no timeout. `fcntl.h`
+was dead after removing the child's `/dev/null` redirect; `netdb.h` added.
+
+Verification (all local, before push): macOS full `tests/run_all.sh` with
+proxies set and `LUME_REQUIRE_EGRESS=1` → rc=0, `all tests passed`,
+`ok first-request HTTPS egress`; macOS `make warmup-leakcheck` → 8 ×
+`[http] warmup: dns prime rc=0`, `8 rounds, no leaks`, zero
+`local handshake` lines; Linux Ubuntu 24.04 / GCC `make -j4 asan` →
+rc=0, LSan negative control reported, 8 rounds no leaks, all ASan/UBSan
+passed (the 10 `warning:` lines are the known `-Wformat-truncation`
+baseline plus the negative control's intentional unused `malloc` — no
+new warnings from the removed includes); standalone agent-httpd
+`make test` → `PASS=169 FAIL=0`; all seven local gates PASS.

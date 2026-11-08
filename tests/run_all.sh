@@ -354,9 +354,10 @@ pkill -f "[b]in/lume /tmp/lume-min-gc-test" 2>/dev/null || true
 # lume_http_warmup() 必须在 master 单线程阶段把系统解析器与 TLS 初始化
 # 跑完, worker 里第一次出站才不崩。2026-11-07 实测根因是**首次解析外部
 # 主机名**(不是 Keychain/握手): 只预热解析 localhost 仍崩(走 /etc/hosts),
-# 只做一次外部名字解析即全绿。warmup 现在在 master 里做一次名字解析 +
-# 完全本地的内存 BIO pair 握手, 两者都不产生 HTTPS 出站, 所以 /probe 仍是
-# 整个进程的首次 HTTPS —— 预热缺失时 worker 首次出站会踩闸门。
+# 只做一次外部名字解析即全绿。warmup 现在在 master 里只做这一次名字解析
+# (外加提前建好业务 SSL_CTX), 结果立即丢弃、不产生 HTTPS 出站, 所以
+# /probe 仍是整个进程的首次 HTTPS —— 预热缺失时 worker 首次出站会踩闸门。
+# 2026-11-08 移除了画蛇添足的内存 BIO pair 自握手(A/B 证明它不修根因)。
 #
 # Offline skip is fail-closed. `curl -s` alone exits 0 for a proxy's 502 HTML
 # page, a captive portal, or any HTTP status, so the old `if curl ...; else

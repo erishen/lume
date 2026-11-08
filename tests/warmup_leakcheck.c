@@ -8,16 +8,15 @@
  * initialises the interpreter -- it only calls lume_http_warmup() -- so
  * LeakSanitizer can be enabled here in isolation, with no AST/type noise.
  *
- * Why the success path is the meaningful one: lume_http_warmup() has a
- * single shared `done:` cleanup label, and every early exit jumps to it.
- * A successful round is the worst case -- all nine owned pointers (cli,
- * srv, cbio, sbio, cctx, sctx, cert, key, pctx) are non-NULL, so every
- * free() in that block executes. An early exit is a strict subset of that
- * same block (the not-yet-created pointers are NULL and skipped), and no
- * branch allocates an owning pointer outside those nine locals: the
- * X509_NAME and X509_STORE handles are borrowed, not owned. Repeating the
- * call also catches accumulation -- the business SSL_CTX is static and
- * must be created once, not once per round.
+ * Why repeating the call is the meaningful check: lume_http_warmup() now
+ * does one getaddrinfo() on an external name and pre-builds the static
+ * business SSL_CTX. The addrinfo chain must be freed on every round (or
+ * LSan sees a leak growing with ROUNDS), and the SSL_CTX must be created
+ * once, not once per round. The 2026-11-07 build also ran an in-memory
+ * BIO-pair handshake with nine owned OpenSSL objects behind a shared
+ * `done:` label; that code was removed 11-08 after A/B showed DNS priming
+ * alone fixes the fork guard. This harness now covers the smaller remaining
+ * allocation surface, with the same negative control against a false green.
  *
  * LeakSanitizer ships with the Linux ASan runtime only (Apple clang has no
  * LSan), so on macOS this degrades to an ASan/UBSan exercise of the same
