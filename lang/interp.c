@@ -1521,6 +1521,21 @@ static void seed_verb_groups(VM *vm) {
 #define LUME_HAS_HTTP 1
 #endif
 
+/* Host mirror of the lume-core 2026-11-09 diagnostic fix (TODO.md P17,
+ * "Found during the Windows lane"). LUME_HAS_HTTP is a LINK-level opt-out:
+ * a downstream reusing this file must not need any HTTP wrapper symbol.
+ * typecheck.c registers the five verbs unconditionally, so seeding them
+ * against a stub defined HERE keeps --check and the interpreter consistent
+ * without breaking that opt-out. No inbound SSE names in the host:
+ * http_stream_* stays a permanent core-only boundary. */
+#if !LUME_HAS_HTTP
+static Value b_http_unavailable(VM *vm, int argc, Value *args) {
+    (void)argc; (void)args;
+    vm_set_error(vm, "http_* unavailable: this build was compiled without LUME_HAS_HTTP");
+    return val_null();
+}
+#endif
+
 void bridge_seed_builtins(VM *vm) {
     struct { const char *name; NativeFn fn; } built[] = {
         {"run", b_run},
@@ -1588,6 +1603,13 @@ void bridge_seed_builtins(VM *vm) {
         {"http_put", b_http_put},
         {"http_patch", b_http_patch},
         {"http_delete", b_http_delete},
+#else
+        /* Names stay type-checkable and diagnosable; see the stub above. */
+        {"http_get", b_http_unavailable},
+        {"http_post", b_http_unavailable},
+        {"http_put", b_http_unavailable},
+        {"http_patch", b_http_unavailable},
+        {"http_delete", b_http_unavailable},
 #endif
         /* 数值内建 (2026-09-28, builtins_math.c) */
         {"abs", b_abs},

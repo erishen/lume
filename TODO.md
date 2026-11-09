@@ -985,3 +985,26 @@ recorded in `lume-core/TODO.md` P17 as a coverage note, not a
 correctness gap. Both lanes are independent of the host mirror; the
 Windows lane did surface one pre-existing diagnostic gap (unreachable
 `native_http_unavailable` stubs), filed in that same section.
+
+**Host-side follow-up 2026-11-09 — that diagnostic gap is closed here too.**
+The core fix (see `lume-core/TODO.md` P17, "Fixed 2026-11-09") did **not**
+port `http_stream_*`: what the Windows lane actually exposed was that the
+host's own five outbound verbs were unregistered under `LUME_HAS_HTTP=0`
+and died with `undefined variable 'http_get'`. `lang/interp.c` now seeds
+those five names against a self-contained `b_http_unavailable` stub (no
+external `b_http_*` symbol, so the link-level opt-out survives), and the
+`lang/builtins.c` stub comment was corrected to say the native stubs only
+close the link. `http_stream_open` still answers `undefined variable` in
+the host — that is the permanent core-only boundary above, **not** a new
+gap — and `tests/http-unavailable-gate.sh`, wired into the Windows
+`make check`, asserts both halves.
+
+`lang/PIN.lag` was refreshed again (`sync-lang.py accept-lag`):
+`builtins.c` 113 -> 115, `interp.c` 194 -> 221, `builtins_http.c`
+406 -> 410. The last one absorbs the pre-existing +4 drift from core
+`5b15f16` (the `[dbg]` TLS handshake print gated behind `NDEBUG`, which
+the host copy deliberately omits); before this refresh `make check-sync`
+was red on `main` because of it. After the hand-merge, `make check`,
+`make check-sync` and `make check-parity` are green locally. `lang/PIN`'s
+sha stays at `f101133` — folded, because no synced file changed — so no
+pin bump was needed.

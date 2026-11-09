@@ -522,9 +522,11 @@ Value b_http_delete(VM *vm, int argc, Value *args) { return vm_native(vm, argc, 
 
 /* When the build opts out of HTTP (LUME_HAS_HTTP=0 — the Windows/mingw port
  * excludes src/builtins_http.c), the five native_http_* symbols still have to
- * exist so the always-compiled b_http_* wrappers above link. They resolve at
- * type-check time (LUME_BUILTIN_NAMES carries the names) but fail clearly at
- * runtime instead of crashing on a missing symbol. */
+ * exist so the always-compiled b_http_* wrappers above link. Those wrappers
+ * are unreferenced in that build: interp.c seeds the same names against its
+ * own diagnostic stub (no external wrapper symbol needed), which is what
+ * produces the clear runtime error. These implementations exist purely to
+ * keep the link closed. */
 #if !LUME_HAS_HTTP
 static void native_http_unavailable(VM *vm, int argc, Value *args, Value *out) {
     (void)argc; (void)args; (void)out;

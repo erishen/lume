@@ -323,8 +323,22 @@ endif
 $(TARGET): $(OBJS) $(AH_LIB) | bin
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(AH_LIB) $(LDFLAGS) -lm
 
-check: all crypt-test
+# Windows forces LUME_HAS_HTTP=0, so only that lane has an opted-out builtin
+# diagnostic to assert. POSIX builds carry the real HTTP implementations.
+ifneq ($(strip $(IS_WINDOWS)),)
+HTTP_UNAVAILABLE_GATE := http-unavailable-gate
+else
+HTTP_UNAVAILABLE_GATE :=
+endif
+
+check: all crypt-test $(HTTP_UNAVAILABLE_GATE)
 	@for f in $(EXAMPLES); do ./$(TARGET) --check $$f || exit 1; done
+
+# Windows lane regression for the host mirror of the 2026-11-09 diagnostic
+# fix: the five HTTP verbs must fail clearly, and the P17 SSE names must stay
+# core-only. See TODO.md P17 and tests/http-unavailable-gate.sh.
+http-unavailable-gate: all
+	@sh tests/http-unavailable-gate.sh
 
 dump: all
 	./$(TARGET) --dump $(DEMO)
@@ -754,7 +768,7 @@ asan: $(ASAN_TARGET) tests/smoke-bin-asan tests/tools-bin-asan tests/warmup-leak
 	@$(MAKE) warmup-leakcheck || exit 1
 	@echo "ok   ASan/UBSan all passed"
 
-.PHONY: all check dump dev dev-minimal invest invest-watch demo-sqlite demo-sqlite-watch query-demo query-demo-watch modules modules-watch modules-ui modules-ui-watch abac abac-watch react-ssr react-ssr-watch hub hub-watch run ui ui-items vsix image image-push test clean asan warmup-leakcheck sync-lang sync-lang-force check-sync check-parity check-version check-baseline treecheck deepcheck privacycheck crypt-test
+.PHONY: all check dump dev dev-minimal invest invest-watch demo-sqlite demo-sqlite-watch query-demo query-demo-watch modules modules-watch modules-ui modules-ui-watch abac abac-watch react-ssr react-ssr-watch hub hub-watch run ui ui-items vsix image image-push test clean asan warmup-leakcheck sync-lang sync-lang-force check-sync check-parity check-version check-baseline treecheck deepcheck privacycheck crypt-test http-unavailable-gate
 # lang/ is a pinned copy of the lume-core language tree (see lang/PIN).
 # Bump the pin with `make sync-lang`; watch for drift with `make check-sync`.
 # Files listed as host_owned in lang/PIN are never overwritten.
