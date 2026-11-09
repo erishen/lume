@@ -973,6 +973,15 @@ compiled-binary equivalent), then sync the registration chain, remove the
 three parity-allow names, refresh `PIN.lag`, and replace this section. Do
 not start by copying the builtin.
 
-Remaining P17 work (lume-core side, this repo-irrelevant): cross-platform
-verification on Linux `gcc:13-bookworm` (dash `/bin/sh`) and the Windows
-`LUME_HAS_HTTP=0` lane; both are independent of the host mirror.
+Remaining P17 work (lume-core side, this repo-irrelevant): **closed
+2026-11-09**. The Windows `LUME_HAS_HTTP=0` lane is green locally
+(`make -j4 check`, MinGW gcc 14.2, both native gates) and in CI (run
+`42553136470`); the Linux dash `/bin/sh` leg is green in CI (run
+`42553136496`, `test (ubuntu-latest)` -> `make test` ->
+`==> http_stream 流式单测通过 (stream + locked)`), with macOS green too.
+The literal `gcc:13-bookworm` container has no CI lane and could not be
+run here (no docker; WSL launch blocked by local security policy) —
+recorded in `lume-core/TODO.md` P17 as a coverage note, not a
+correctness gap. Both lanes are independent of the host mirror; the
+Windows lane did surface one pre-existing diagnostic gap (unreachable
+`native_http_unavailable` stubs), filed in that same section.
