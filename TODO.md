@@ -1064,12 +1064,21 @@ Remaining P17 work (lume-core side, this repo-irrelevant): **closed
 `42553136470`); the Linux dash `/bin/sh` leg is green in CI (run
 `42553136496`, `test (ubuntu-latest)` -> `make test` ->
 `==> http_stream 流式单测通过 (stream + locked)`), with macOS green too.
-The literal `gcc:13-bookworm` container has no CI lane and could not be
+The literal `gcc:13-bookworm` container had no CI lane and could not be
 run here (no docker; WSL launch blocked by local security policy) —
 recorded in `lume-core/TODO.md` P17 as a coverage note, not a
-correctness gap. Both lanes are independent of the host mirror; the
-Windows lane did surface one pre-existing diagnostic gap (unreachable
-`native_http_unavailable` stubs), filed in that same section.
+correctness gap. **Update 2026-11-09:** lume-core added a `bookworm:`
+container job running `make check` + `make test`, so that coverage note
+is now closed; this host mirror is unaffected. Both lanes are
+independent of the host mirror; the Windows lane did surface one
+pre-existing diagnostic gap (unreachable `native_http_unavailable`
+stubs), filed in that same section. The bookworm lane also surfaced a
+core-only `serve()` SIGPIPE defect (an aborted client could kill the
+whole single-threaded server, so every later curl saw `code=000`);
+that code lives in `src/bridge_serve.c` / `src/bridge_native.c`, neither
+of which this host mirror ships — HTTP serving here is agent-httpd's,
+so no host-side change was needed. See `lume-core/TODO.md` P17,
+"Fixed 2026-11-09".
 
 **Host-side follow-up 2026-11-09 — that diagnostic gap is closed here too.**
 The core fix (see `lume-core/TODO.md` P17, "Fixed 2026-11-09") did **not**
