@@ -165,7 +165,7 @@ real engineering item. Per-repo detail lives in the two sub-TODOs:
 
 Host-side disposition (what this repo decides for dependent projects):
 
-- [ ] **File uploads are out of scope until a multipart parser exists.**
+- [x] **File uploads are out of scope until a multipart parser exists.**
       Original 2026-10-30 assessment (kept as the reasoning record):
       `MAX_REQUEST_SIZE` was 64 KiB and the body had to fit one read
       buffer (`agent-httpd/src/httpd.h:8`, `http.c` 413 path force-closes),
@@ -181,6 +181,25 @@ Host-side disposition (what this repo decides for dependent projects):
       `{type, headers, body}` envelope serves bytes). Decision for
       fastapi-web-style services is unchanged: no uploads, and do not
       bolt a parser on before item (a) is scheduled.
+
+      **Closed 2026-11-09:** item (a) landed — `multipart(body,
+      content_type)` is a three-backend builtin returning a list of
+      `{name, filename, type, body}` maps (see lume-core `TODO.md` P13
+      for the full design, the `""` convention for absent headers and
+      the compiled-backend binary-string boundary). This host
+      hand-merges the interpreter half into `lang/typecheck.c`,
+      `lang/interp.c`, `lang/builtins.c` and `lang/builtins.h`, so
+      `make check-parity` keeps it in the shared builtin set.
+      `lang/bridge.c` now builds `req.body` from `req->content_length`
+      rather than `strlen()`, so a file part containing NUL is not
+      truncated before the parser sees it; spooled bodies still come in
+      through `req.body_temp_path` + `read_file()`.
+      `examples/upload-multipart.lume` is the working pattern (both
+      buffered and spooled bodies) and is parse-checked by `make
+      check`. The precondition in the heading is satisfied, so the
+      "no uploads" decision is reversed: uploads are in scope for
+      services that need them. The old 64 KiB / 413 reasoning stays
+      above as the record of why the parser was deliberately delayed.
 - [ ] **Redis is not adopted.** The tree has zero Redis support, and the
       DSL gives nothing that a SQLite table cannot do at this scale.
       Porting a `redis_client.py` module should become "cache/queue tables

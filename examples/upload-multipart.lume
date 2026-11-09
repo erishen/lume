@@ -1,0 +1,51 @@
+// examples/upload-multipart.lume — parse multipart/form-data uploads.
+//
+// multipart(body, content_type) -> list of {name, filename, type, body} maps.
+// `filename` / `type` are "" when the part carries no such header (not null:
+// the native anon-row getter collapses a null slot to the empty string, so
+// "" keeps the same handler correct on every backend).
+//
+// agent-httpd spools Content-Length bodies above the 64 KiB read buffer to a
+// temp file; for those req.body is null and req.body_temp_path names the file
+// (read_file() is length-aware and capped at 16 MiB). Handle both paths
+// before calling the parser — this is the transport half that landed
+// 2026-11-04, and the parser half that landed 2026-11-09 (P13 item (a)).
+//
+//   curl -F user=alice -F doc=@report.txt http://127.0.0.1:8992/upload
+//
+// POST /upload -> "user:5,doc:1234" (name:body length per part)
+server {
+  port = 8992;
+  access_log = "./logs/upload-multipart.log";
+}
+
+func body_bytes(req) {
+  let raw = get(req, "body", null);
+  if (raw != null) { return raw; }
+  let p = get(req, "body_temp_path", null);
+  if (p == null) { return ""; }
+  let r = try(() => read_file(p));
+  if (get(r, "err", null) != null) { return ""; }
+  return get(r, "ok", "");
+}
+
+func parts_of(req) {
+  let r = try(() => multipart(body_bytes(req), get(req, "content_type", "")));
+  if (get(r, "err", null) != null) { return []; }
+  return get(r, "ok", []);
+}
+
+post "/upload", (req) => {
+  let parts = parts_of(req);
+  let out = "";
+  let i = 0;
+  while (i < len(parts)) {
+    let p = get(parts, i);
+    if (i > 0) { out = out + ","; }
+    out = out + get(p, "name") + ":" + str(len(get(p, "body")));
+    i = i + 1;
+  }
+  return { type: "text/plain", body: out };
+};
+
+run();

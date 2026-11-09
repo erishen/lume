@@ -452,10 +452,9 @@ rm -f "$EGRESS_ERR"
 
 # 4g. binary download envelope ----------------------------------------------
 # examples/download.lume serves file bytes via read_file + the
-# { type, headers, body } response envelope. The server caps request bodies
-# at 64 KiB (MAX_REQUEST_SIZE), so downloads already work today while
-# uploads are a transport project (lume-core TODO, multipart section);
-# this pins the download shape and the try()/err 404 branch.
+# { type, headers, body } response envelope. Downloads already work today;
+# uploads need examples/upload-multipart.lume plus the body-spool path
+# pinned below. This pins the download shape and the try()/err 404 branch.
 DL_PORT=8998
 DL_CSV=/tmp/lume-dl-export.csv
 DL_BIN=/tmp/lume-dl-report.bin

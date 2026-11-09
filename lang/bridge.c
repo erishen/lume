@@ -153,8 +153,18 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
     map_set(vm, m, "user_agent",
             req->user_agent[0] ? make_string_cstr(vm, req->user_agent)
                                : val_null());
+    /* Body bytes are not C-string data: a multipart file part may contain
+     * NUL. agent-httpd NUL-terminates req->body, but req->content_length is
+     * the exact byte count (declared length for CL bodies, decoded length
+     * for chunked ones). Pass it explicitly: strlen() would hand the
+     * multipart() parser a body truncated at the first NUL. Lume VM strings
+     * carry a length, so the whole payload survives to the builtin. */
     map_set(vm, m, "body",
-            req->body ? make_string(vm, req->body, strlen(req->body)) : val_null());
+            req->body
+              ? make_string(vm, req->body,
+                            req->content_length > 0
+                              ? (size_t)req->content_length : 0)
+              : val_null());
     /* Bodies above MAX_REQUEST_SIZE are spooled to a temp file by the
      * transport (req->body stays null); this names that file so a handler
      * can read_file() it. Null when the body was buffered in memory. */
