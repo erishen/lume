@@ -882,6 +882,72 @@ unrelated to the two diagnostic classes fixed here (`-Wformat-truncation`
 and `-Wdangling-pointer`). The `agent-httpd` submodule carries its own two
 exemptions in its own build.
 
+### P13 addendum (2026-11-09) — re-review after fastapi-web's compliance hardening
+
+A second look at `personal/web-services/fastapi-web` on 2026-11-09, this
+time against the hardening that landed **that day** (field-level PII
+encryption, mandatory consent, retention cleanup, fail-closed error
+bodies, suppressed `Server` header) rather than the 10-30 baseline P13
+was filed against. Per-repo detail: lume-core `TODO.md` **P18**
+(language gap + erratum), agent-httpd `TODO.md` **P3** (HTTP-side items).
+
+**Erratum to the 11-09 verbal evaluation**, recorded so the next review
+does not repeat it: the stack is **not** SQLite-only and **does** have
+password auth. agent-httpd has real libmysqlclient / libpq backends
+(`src/agent/db_layer.c:355`, `ubuntu-db` CI leg), htpasswd + bcrypt +
+session cookies (`src/security/`), and core landed `crypt_verify` /
+`const_time_eq` on 2026-11-04. `bridge_serve.c` is the single-threaded
+standalone harness, not the production front end (which is agent-httpd's
+multi-worker pool). The earlier "only SQLite / no password hashing / no
+concurrency" claims conflated the DSL builtin table with the deployed
+stack. JWT is a different auth *design* (session cookies), not a missing
+capability.
+
+Host-side disposition for dependent projects:
+
+- [ ] **Keep the 10-30 P13 verdict: a 1:1 port stays parked.** The
+      "Deliberately not filed" list in lume-core P13 (no ORM, no schema
+      migrations, no OpenAPI, no Redis client, no middleware chain) is an
+      intentional zero-dependency trade — do not re-file those as gaps.
+      The 11-09 review adds one genuine new blocker instead: core has no
+      symmetric encrypt/decrypt builtin, so a DSL handler cannot
+      round-trip stored PII (see lume-core P18). Until that is decided,
+      any port that collects names/phone numbers would store them in
+      plaintext — a compliance regression against the current service.
+- [ ] **If a port is ever attempted, port the compliance layer as
+      handler conventions, not new builtins.** Mandatory `consent`,
+      privacy notice in the response **body**, PII masking
+      (`138****5678` / `re***@example.com`), and retention/erasure are
+      all expressible today with existing string/JSON/SQL builtins —
+      the same `guard(req)` convention P13 already accepted in place of
+      middleware. The one item that needs a framework decision is the
+      retention scheduler (lume-core P18 / agent-httpd P3).
+- [ ] **Do not put non-ASCII text in response headers.** fastapi-web's
+      11-09 bug was a Chinese privacy notice in `X-Data-Protection`
+      raising `UnicodeEncodeError` *after* the row committed ("saved but
+      500"). agent-httpd copies `extra_headers` verbatim
+      (`src/http/http_resp.c:165`), so the failure mode there is a
+      malformed response rather than an exception — same partial-failure
+      shape. Decision: notices in the body, ASCII markers in headers.
+- [x] **Builtins still land in lume-core first, then `make sync-lang`.**
+      Re-affirmed, not changed: `sync-lang` + `check --strict` is the
+      gate. The P18 AEAD decision, if option (a) is chosen, must follow
+      the same five coordinated edits and host mirror, and must refresh
+      `PIN.manifest` with a real sync — never by hand.
+- [ ] **P18 AEAD research (2026-11-09)**: see lume-core
+      `docs/PII_AT_REST.md`. Corrigendum to the line above: the real
+      builtin surface is 10 files / 11+ points, and `sync-lang.py`'s
+      HOST_PINNED list means `interp.c` / `typecheck.c` / `builtins.h`
+      must still be hand-merged in the host. The research recommends
+      **conditional (b)** as policy (pure-lume/SQLite services must not
+      collect PII; TDE only covers agent-httpd + remote DB with an
+      operator assertion) and a framework-layer **option (c)** ahead of
+      (a), which fits the `guard(req)`-not-builtin disposition above.
+      **Verdict recorded 2026-11-09: conditional (b)** — now written into
+      this repo's `SECURITY.md` ("Encryption at rest and personal data")
+      and lume-core P18. (c) stays the preferred fallback before (a);
+      both remain open future options, not closed work.
+
 ## P14 (mirror) — `spawn` stays a lume-core-only capability (decided 2026-11-08)
 
 `lume-core` P14 landed `spawn` / `proc_read` / `proc_wait` / `proc_kill`
