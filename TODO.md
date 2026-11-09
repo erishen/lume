@@ -165,15 +165,22 @@ real engineering item. Per-repo detail lives in the two sub-TODOs:
 
 Host-side disposition (what this repo decides for dependent projects):
 
-- [ ] **File uploads are out of scope until the body path is redesigned.**
-      `MAX_REQUEST_SIZE` is 64 KiB and the body must fit one read buffer
-      (`agent-httpd/src/httpd.h:8`, `http.c` 413 path force-closes), and
-      there is no multipart parser anywhere in either tree. The download
-      direction works today (Lume strings are NUL-safe, so `read_file` +
-      a `{type, headers, body}` envelope serves bytes). Decision for
-      fastapi-web-style services: no uploads; if a use case truly needs
-      them, schedule the buffer redesign, do not bolt a parser onto a
-      64 KiB ceiling.
+- [ ] **File uploads are out of scope until a multipart parser exists.**
+      Original 2026-10-30 assessment (kept as the reasoning record):
+      `MAX_REQUEST_SIZE` was 64 KiB and the body had to fit one read
+      buffer (`agent-httpd/src/httpd.h:8`, `http.c` 413 path force-closes),
+      so there was no multipart parser anywhere in either tree.
+      **Update 2026-11-09:** the transport half of that redesign landed
+      on 2026-11-04 — bodies above the 64 KiB read buffer are now spooled
+      to a `mkstemp` temp file up to `MAX_BODY_SPOOL_BYTES` (default
+      8 MiB, `BODY_SPOOL_DIR`), `req->body_temp_path` names the file,
+      and CGI/FastCGI consume it. The architectural blocker is gone;
+      what remains is the `multipart(req.body, req.content_type)` builtin
+      (lume-core `TODO.md` P13, item (a)). The download direction works
+      today (Lume strings are NUL-safe, so `read_file` + a
+      `{type, headers, body}` envelope serves bytes). Decision for
+      fastapi-web-style services is unchanged: no uploads, and do not
+      bolt a parser on before item (a) is scheduled.
 - [ ] **Redis is not adopted.** The tree has zero Redis support, and the
       DSL gives nothing that a SQLite table cannot do at this scale.
       Porting a `redis_client.py` module should become "cache/queue tables
@@ -904,9 +911,14 @@ roots), then sync `builtins_spawn.c` and the registration chain, remove the
 `CORE_ONLY_NAMES` entry, drop the four parity-allow names, refresh
 `PIN.lag`, and replace this section. Do not start by copying the builtin.
 
-Remaining P14 work (lume-core side, not this repo): streaming /
-long-lived reads for `task.delegate` — a separate project. P16
-(0.12 lib compatibility, static ETag/304) is independent and still open.
+Remaining P14 work (lume-core side, not this repo): wiring the streamed
+reads into `task.delegate`'s `observe_delegate` — the `proc_read`
+primitive itself landed as `649f2df` (2026-11-08; 8 assertions green on
+macOS/clang and a clean gcc:13-bookworm copy), which proved a live child
+is tailed rather than collected at exit. P16 (0.12 lib compatibility,
+static ETag/304) is **closed** — `33e68e3` and `5a904e8` landed
+2026-11-08. This note originally said P16 was "independent and still
+open" and P14 streaming was entirely outstanding; corrected 2026-11-09.
 
 ## 2026-11-08 — P17 (mirror) — `http_stream` stays a lume-core-only capability (decided 2026-11-08)
 
