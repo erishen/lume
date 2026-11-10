@@ -888,7 +888,7 @@ A second look at `personal/web-services/fastapi-web` on 2026-11-09, this
 time against the hardening that landed **that day** (field-level PII
 encryption, mandatory consent, retention cleanup, fail-closed error
 bodies, suppressed `Server` header) rather than the 10-30 baseline P13
-was filed against. Per-repo detail: lume-core `TODO.md` **P18**
+was filed against. Per-repo detail: lume-core `TODO.md` **P19**
 (language gap + erratum), agent-httpd `TODO.md` **P3** (HTTP-side items).
 
 **Erratum to the 11-09 verbal evaluation**, recorded so the next review
@@ -911,7 +911,7 @@ Host-side disposition for dependent projects:
       intentional zero-dependency trade — do not re-file those as gaps.
       The 11-09 review adds one genuine new blocker instead: core has no
       symmetric encrypt/decrypt builtin, so a DSL handler cannot
-      round-trip stored PII (see lume-core P18). Until that is decided,
+      round-trip stored PII (see lume-core P19). Until that is decided,
       any port that collects names/phone numbers would store them in
       plaintext — a compliance regression against the current service.
 - [ ] **If a port is ever attempted, port the compliance layer as
@@ -921,7 +921,7 @@ Host-side disposition for dependent projects:
       all expressible today with existing string/JSON/SQL builtins —
       the same `guard(req)` convention P13 already accepted in place of
       middleware. The one item that needs a framework decision is the
-      retention scheduler (lume-core P18 / agent-httpd P3).
+      retention scheduler (lume-core P19 / agent-httpd P3).
 - [ ] **Do not put non-ASCII text in response headers.** fastapi-web's
       11-09 bug was a Chinese privacy notice in `X-Data-Protection`
       raising `UnicodeEncodeError` *after* the row committed ("saved but
@@ -931,10 +931,10 @@ Host-side disposition for dependent projects:
       shape. Decision: notices in the body, ASCII markers in headers.
 - [x] **Builtins still land in lume-core first, then `make sync-lang`.**
       Re-affirmed, not changed: `sync-lang` + `check --strict` is the
-      gate. The P18 AEAD decision, if option (a) is chosen, must follow
+      gate. The P19 AEAD decision, if option (a) is chosen, must follow
       the same five coordinated edits and host mirror, and must refresh
       `PIN.manifest` with a real sync — never by hand.
-- [ ] **P18 AEAD research (2026-11-09)**: see lume-core
+- [ ] **P19 AEAD research (2026-11-09)**: see lume-core
       `docs/PII_AT_REST.md`. Corrigendum to the line above: the real
       builtin surface is 10 files / 11+ points, and `sync-lang.py`'s
       HOST_PINNED list means `interp.c` / `typecheck.c` / `builtins.h`
@@ -945,7 +945,7 @@ Host-side disposition for dependent projects:
       (a), which fits the `guard(req)`-not-builtin disposition above.
       **Verdict recorded 2026-11-09: conditional (b)** — now written into
       this repo's `SECURITY.md` ("Encryption at rest and personal data")
-      and lume-core P18. (c) stays the preferred fallback before (a);
+      and lume-core P19. (c) stays the preferred fallback before (a);
       both remain open future options, not closed work.
 
 ## P14 (mirror) — `spawn` stays a lume-core-only capability (decided 2026-11-08)

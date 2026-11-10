@@ -33,7 +33,7 @@ elevated flags such as `LUME_FS_ROOT`.
 
 ## Encryption at rest and personal data (policy, 2026-11-09)
 
-Verdict from lume-core `docs/PII_AT_REST.md` (research) and `TODO.md` P18:
+Verdict from lume-core `docs/PII_AT_REST.md` (research) and `TODO.md` P19:
 **encryption at rest belongs to the storage layer, with an explicit
 deployment boundary.** The language has no symmetric `encrypt`/`decrypt`
 builtin, and adding one is deliberately not the default answer — see the
