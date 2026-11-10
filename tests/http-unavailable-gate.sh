@@ -70,4 +70,37 @@ if ! grep -Fq "undefined variable 'http_stream_open'" "${tmp}/stream.out"; then
 fi
 echo "ok   http-unavailable-gate: http_stream_* stays core-only"
 
-echo "==> http-unavailable-gate: opted-out HTTP fails clearly, SSE stays absent"
+
+# P18 server-side SSE push is the same class as the P17 inbound SSE client:
+# interpreter-only, POSIX-only, and it drives the socket bridge_serve.c seeds
+# per request. This host serves through agent-httpd and has no such loop, so
+# the three names must stay unknown here too (TODO.md P18 mirror).
+for name in sse_open sse_close; do
+    printf '%s\n' "let r = ${name}();" > "${tmp}/push-${name}.lume"
+    if "${BIN}" "${tmp}/push-${name}.lume" > "${tmp}/push-${name}.out" 2>&1; then
+        echo "FAIL http-unavailable-gate: ${name} unexpectedly available in the host"
+        cat "${tmp}/push-${name}.out"
+        exit 1
+    fi
+    if ! grep -Fq "undefined variable '${name}'" "${tmp}/push-${name}.out"; then
+        echo "FAIL http-unavailable-gate: P18 core-only boundary changed for ${name}; re-review the decision:"
+        cat "${tmp}/push-${name}.out"
+        exit 1
+    fi
+    echo "ok   http-unavailable-gate: ${name} stays core-only"
+done
+
+printf '%s\n' 'let r = sse_send("x");' > "${tmp}/push-send.lume"
+if "${BIN}" "${tmp}/push-send.lume" > "${tmp}/push-send.out" 2>&1; then
+    echo "FAIL http-unavailable-gate: sse_send unexpectedly available in the host"
+    cat "${tmp}/push-send.out"
+    exit 1
+fi
+if ! grep -Fq "undefined variable 'sse_send'" "${tmp}/push-send.out"; then
+    echo "FAIL http-unavailable-gate: P18 core-only boundary changed for sse_send; re-review the decision:"
+    cat "${tmp}/push-send.out"
+    exit 1
+fi
+echo "ok   http-unavailable-gate: sse_send stays core-only"
+
+echo "==> http-unavailable-gate: opted-out HTTP fails clearly, SSE client + push stay absent"

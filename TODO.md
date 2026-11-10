@@ -1093,3 +1093,63 @@ was red on `main` because of it. After the hand-merge, `make check`,
 `make check-sync` and `make check-parity` are green locally. `lang/PIN`'s
 sha stays at `f101133` — folded, because no synced file changed — so no
 pin bump was needed.
+
+## 2026-11-10 — P18 (mirror) — server-side SSE push stays a lume-core-only capability (decided 2026-11-10)
+
+`lume-core` P18 landed `sse_open` / `sse_send` / `sse_close`: a route
+handler can push events to the live connection **while it is still running**
+instead of computing every event up front and returning `{ sse: [...] }`.
+The VM gains five SSE fields (`sse_fd` / `sse_accept` / `sse_open` /
+`sse_broken` / `sse_streamed`), `bridge_serve.c` exports
+`lume_serve_sse_head/_send/_close` and seeds those fields per request, and
+after the handler the serve loop short-circuits on `sse_streamed` so an
+incrementally-streamed response is never double-written or double-closed.
+This host does **not** adopt them, for the same reason as P17's inbound
+client.
+
+**Decision (a): interpreter-only, POSIX-only, permanently.** The
+registrations live only in the interpreter (`src/interp.c` / `typecheck.c`
+/ `builtins.c` / `builtins_internal.h` / `builtins.h`) and never reach
+`codegen_call.c` or `llvm_codegen_internal.h`'s `BUILTINS[]`;
+`--compile-text` on an `sse_open()` call exits 1 with "call to unknown
+function", enforced by lume-core's `make check` -> `tests/sse-native-gate.sh`.
+They are POSIX-only as well: they drive the socket `bridge_serve.c` seeds as
+`vm->sse_fd` for the request in flight. A compiled binary has no live
+connection to seed, and the Windows port excludes `src/builtins_http.c`
+entirely.
+
+**Why the host does not merge the chain.** This host serves through
+agent-httpd (`lang/bridge.c`), not through `bridge_serve.c`'s single-threaded
+serve loop, so there is no per-request `sse_fd` / `sse_accept` /
+`sse_streamed` to seed and no `lume_serve_sse_*` to call. Hand-merging the
+registration chain would leave a streaming write path that never gets a gate
+or a live-connection guard — the P14 "gate first" failure mode, one layer
+worse. The upstream-only lines in the six host_owned files that grew
+(`builtins.c` 115 -> 122, `builtins.h` 154 -> 158, `builtins_http.c`
+410 -> 483, `builtins_internal.h` 68 -> 79, `interp.c` 221 -> 235,
+`lume.h` 58 -> 102, `typecheck.c` 120 -> 125) are accepted into
+`lang/PIN.lag` on 2026-11-10, intentionally retained, not a TODO.
+
+**Bookkeeping that changed with this decision (no product C edits here):**
+
+- `tests/builtin-parity.allow`: `sse_open` / `sse_send` / `sse_close` in
+  `[core-only]`, marked PERMANENT with the rationale in the header note.
+- `tests/http-unavailable-gate.sh` (Windows `make check` lane): now also
+  asserts that all three names answer `undefined variable 'sse_*'` in the
+  host, so a future `sync-lang` cannot quietly turn them into real
+  primitives.
+- `lang/PIN.lag`: refreshed via `sync-lang.py accept-lag`; the seven entries
+  above are the only ones that moved.
+
+**If a future host really needs incremental SSE push:** land an equivalent
+fail-closed gate over agent-httpd's response path first (accept check,
+disconnect detection, single-write ownership), then sync the registration
+chain, remove the three parity-allow names, refresh `PIN.lag`, and replace
+this section. Do not start by copying the builtin.
+
+Before this pass `make check-sync` and `make check-parity` were both red on
+`main` (7 host-owned files past the accepted baseline; three core-only
+builtins not accepted). After the decisions above and the lag refresh both
+are green: `ok lang/ matches lume-core @ b18ffc3 — 33 synced, 17 host-owned,
+6 host-only` and `ok builtin parity: 109 core-only / 1 host-only accepted,
+128 shared builtins`.

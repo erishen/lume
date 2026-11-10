@@ -48,6 +48,23 @@
 #     only if the host first lands an equivalent fail-closed gate, then also
 #     updates CORE_ONLY_NAMES in scripts/sync-lang.py, lang/PIN.lag and
 #     TODO.md P17. See lume-core/TODO.md P17 for the full decision.
+#   - sse_open / sse_send / sse_close are lume-core-only by decision (a),
+#     2026-11-10 (P18). They are server-side SSE push — the twin of
+#     http_stream_*: a route handler streams events to the live connection
+#     *while it is still running*, instead of computing every event up front
+#     and returning { sse: [...] }. They register only in the interpreter
+#     (src/interp.c / typecheck.c / builtins.c / builtins_internal.h /
+#     builtins.h) and never reach codegen_call.c or llvm_codegen_internal.h's
+#     BUILTINS[], so --compile-text refuses them (lume-core's
+#     tests/sse-native-gate.sh); they are POSIX-only too, because they drive the
+#     socket bridge_serve.c seeds as vm->sse_fd per request. This host serves
+#     through agent-httpd (lang/bridge.c) and has no bridge_serve serve loop,
+#     so there is no live socket to seed and no gate to inherit — merging the
+#     chain would hand a server binary an UNGATED streaming write path.
+#     PERMANENT, not a pending port: these names leave this list only if the
+#     host first lands an equivalent fail-closed gate over agent-httpd's
+#     response path, then also refreshes lang/PIN.lag and replaces the P18
+#     mirror section in TODO.md. See lume-core/TODO.md P18 for the decision.
 #
 # host-only names are host additions that core does not carry.
 #
@@ -151,6 +168,9 @@ sql_tx_commit
 sql_tx_exec
 sql_tx_query
 sql_tx_rollback
+sse_close
+sse_open
+sse_send
 stddev
 tan
 tanh
