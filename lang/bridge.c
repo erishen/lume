@@ -259,6 +259,13 @@ static Value request_to_value(VM *vm, const HttpRequest *req, const char *label)
     map_set(vm, m, "headers", val_obj((Obj *)hm));
     vm_pop(vm);
 
+    /* Parser-dedicated fields the generic header map cannot carry: the
+     * framework keeps Range and Origin in their own slots (httpd.h
+     * HttpRequest.range / .origin), so they never reach extra_headers.
+     * Expose them verbatim; "" (absent) maps to null so scripts can tell
+     * "no Range" from "Range: ...". */
+    if (req->range[0]) map_set(vm, m, "range", make_string_cstr(vm, req->range));
+
     /* Path params from dynamic route segments (":name"), captured by the
      * framework route matcher into the request. Empty map for literal
      * routes. Exposed as req.params (segment name -> decoded value). */
@@ -306,6 +313,7 @@ static const char *status_text_for(int code) {
         case 201: return "Created";
         case 202: return "Accepted";
         case 204: return "No Content";
+        case 206: return "Partial Content";
         case 301: return "Moved Permanently";
         case 302: return "Found";
         case 304: return "Not Modified";
@@ -315,7 +323,9 @@ static const char *status_text_for(int code) {
         case 404: return "Not Found";
         case 405: return "Method Not Allowed";
         case 409: return "Conflict";
+        case 416: return "Range Not Satisfiable";
         case 422: return "Unprocessable Entity";
+        case 429: return "Too Many Requests";
         case 500: return "Internal Server Error";
         case 502: return "Bad Gateway";
         case 503: return "Service Unavailable";
@@ -663,7 +673,8 @@ static int route_shim(HttpRequest *req, HttpResponse *res) {
         RouteRec *r = &vm->routes[i];
         /* HEAD falls through to GET routes (RFC 9110 9.3.2): the handler runs,
          * the framework drops the body but keeps Content-Length. */
-        if (strcmp(r->method, req->method) != 0 &&
+        if (strcmp(r->method, "*") != 0 &&
+            strcmp(r->method, req->method) != 0 &&
             !(strcmp(req->method, "HEAD") == 0 && strcmp(r->method, "GET") == 0)) continue;
         if (!route_pattern_match(r->path, req->path)) continue;
 
