@@ -249,6 +249,14 @@ OBJS     := $(SRCS:lang/%.c=build/%.o)
 # included (including agent-httpd/src headers pulled in via -I); -MP adds
 # phony targets for removed headers so deleting one cannot break the include.
 # The first build has no .d files yet, but every .o is compiled anyway.
+# The default goal must be `all`, stated explicitly. The -include below pulls
+# in the compiler-generated .d files, and the FIRST rule inside an included
+# file (build/main.o: ...) becomes make's default goal when that file is read
+# before `all:`. Without this line, a plain `make` in a tree that already has
+# .d files compiles exactly one object and stops — the project silently does
+# not build (only `make all` / `make dev` did).
+.DEFAULT_GOAL := all
+
 DEPFLAGS := -MMD -MP
 -include $(OBJS:.o=.d)
 

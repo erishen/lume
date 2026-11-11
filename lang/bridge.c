@@ -317,6 +317,8 @@ static const char *status_text_for(int code) {
         case 301: return "Moved Permanently";
         case 302: return "Found";
         case 304: return "Not Modified";
+        case 307: return "Temporary Redirect";
+        case 308: return "Permanent Redirect";
         case 400: return "Bad Request";
         case 401: return "Unauthorized";
         case 403: return "Forbidden";
@@ -665,6 +667,17 @@ static int route_pattern_match(const char *pattern, const char *path) {
     }
 }
 
+/* HEAD 是否隐式复用 GET 路由（RFC 9110 9.3.2）。默认开启以保持历史行为；
+ * `AGENT_HEAD_AS_GET=0` 时只匹配显式 HEAD 路由（FastAPI 默认不发 HEAD，复刻用）。 */
+static int head_get_fallback(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *v = getenv("AGENT_HEAD_AS_GET");
+        cached = (v == NULL || strcmp(v, "0") != 0);
+    }
+    return cached;
+}
+
 /* C callback registered via agenthttpd_route. A single shim serves every DSL
  * route; it finds its handler by matching (method, path) against the table. */
 static int route_shim(HttpRequest *req, HttpResponse *res) {
@@ -675,7 +688,8 @@ static int route_shim(HttpRequest *req, HttpResponse *res) {
          * the framework drops the body but keeps Content-Length. */
         if (strcmp(r->method, "*") != 0 &&
             strcmp(r->method, req->method) != 0 &&
-            !(strcmp(req->method, "HEAD") == 0 && strcmp(r->method, "GET") == 0)) continue;
+            !(head_get_fallback() && strcmp(req->method, "HEAD") == 0 &&
+              strcmp(r->method, "GET") == 0)) continue;
         if (!route_pattern_match(r->path, req->path)) continue;
 
         request_to_value(vm, req, r->label);   /* request map pushed */
@@ -935,6 +949,12 @@ void bridge_run(VM *vm) {
     cfg.port = env_int_or("PORT", 0);
     cfg.workers = env_int_or("WORKERS", 0);
     cfg.docroot = env_str_or("DOCROOT", NULL);
+    /* stdio transport: AGENTHTTPD_STDIO=1 makes the host speak the
+     * stdin/stdout protocol instead of listening on a TCP port (agent-httpd
+     * src/http/stdio_serve.h). It stays an env-level switch on purpose — the
+     * transport is a host concern, not a language one, so the DSL and every
+     * .lume script keep working unchanged over either carrier. */
+    cfg.stdio_mode = env_int_or("AGENTHTTPD_STDIO", 0);
 
     if (vm->server_config) {
         Obj *m = vm->server_config;
@@ -990,11 +1010,17 @@ void bridge_run(VM *vm) {
 
     vm->run_called = true;
     iquest_register(); /* 产品 API 路由(POST /api/settings 等),fork 前注册 */
-    printf("[lume] run(): port=%d workers=%d docroot=%s\n",
-           cfg.port > 0 ? cfg.port : DEFAULT_PORT,
-           cfg.workers, /* 0 = fork-per-connection (framework default) */
-           cfg.docroot ? cfg.docroot : "./www");
-    fflush(stdout);
+    /* stdio transport: stdout carries the protocol, so this banner must not
+     * land there — it would be read as frame noise by the client. */
+    if (cfg.stdio_mode) {
+        fprintf(stderr, "[lume] run(): stdio transport (no port bound)\n");
+    } else {
+        printf("[lume] run(): port=%d workers=%d docroot=%s\n",
+               cfg.port > 0 ? cfg.port : DEFAULT_PORT,
+               cfg.workers, /* 0 = fork-per-connection (framework default) */
+               cfg.docroot ? cfg.docroot : "./www");
+        fflush(stdout);
+    }
 
     agenthttpd_run(&cfg);
 }

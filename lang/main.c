@@ -38,6 +38,10 @@ static void usage(const char *prog) {
             "            every edit of <script.lume> (SIGUSR1 = force reload);\n"
             "            invalid edits keep the old process running\n"
             "\n"
+            "  --stdio   speak the stdio transport instead of listening: one\n"
+            "            JSON request per line on stdin, SSE frames on stdout;\n"
+            "            no port is bound\n"
+            "\n"
             "The script is Lume source: type/struct declarations, server {},\n"
             "route/tool declarations plus expressions with static type\n"
             "checking; run() starts the embedded agent-httpd server\n"
@@ -347,6 +351,7 @@ int main(int argc, char **argv) {
     int cli_argc = 0;
     bool no_fs = false;
     bool no_net = false;
+    bool do_stdio = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--check") == 0) do_check = true;
@@ -354,6 +359,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--no-net") == 0) no_net = true;
         else if (strcmp(argv[i], "--dump") == 0) do_dump = true;
         else if (strcmp(argv[i], "--watch") == 0) do_watch = true;
+        else if (strcmp(argv[i], "--stdio") == 0) do_stdio = true;
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(argv[0]);
             return 0;
@@ -369,6 +375,12 @@ int main(int argc, char **argv) {
         else { usage(argv[0]); return 2; }
     }
     if (!script) { usage(argv[0]); return 2; }
+
+    /* --stdio: the host speaks the stdin/stdout protocol instead of
+     * listening on a TCP port (agent-httpd src/http/stdio_serve.h). It is
+     * handed down through the environment so the language and every .lume
+     * script stay unchanged — the transport is a host-level concern. */
+    if (do_stdio) setenv("AGENTHTTPD_STDIO", "1", 1);
 
     /* LUME_NO_FS is the same switch as --no-fs, so a supervisor can lock the
      * language down without rewriting the argv it execs. Anything but the
