@@ -106,6 +106,7 @@ http_stream_read
 ic
 information_ratio
 max_consecutive_losses
+matmul
 mean
 median
 norminv
