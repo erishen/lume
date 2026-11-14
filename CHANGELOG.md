@@ -31,7 +31,7 @@ All notable changes to Lume are documented here. The format follows
   `debian:bookworm-slim` (116 MB → 19 MB). Only `curl`, CA certs and a
   non-root user are needed; the rest was Debian's base system.
 
-## [Unreleased]
+## [0.13.0] - 2026-11-14
 
 ### Added
 
