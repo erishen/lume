@@ -4,6 +4,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #ifndef _WIN32
 #include <sys/wait.h>
@@ -340,6 +342,97 @@ static void vm_teardown(VM *vm) {
 }
 #endif
 
+/* lume_load_dotenv: 启动时把 .env 里的 KEY=VALUE 补进进程环境（setenv 不
+ * 覆盖已存在的环境变量——进程 env 优先，.env 只补缺），供 env() 读到 .env
+ * 配置。让隐私配置（访客统计 PIN / 排除 IP / 保留期、API 密钥等）集中到
+ * .env（gitignored），而不是散落在 run_args / 部署参数里。
+ *
+ * 路径: $LUME_ENV_FILE 显式指定；否则 <脚本所在目录>/.env；脚本无目录成分
+ * 时退回 CWD 的 ./.env。LUME_NO_ENV=1/off/false 之外的任意值显式关闭。
+ * 缺失/读失败/解析错误全部静默——没有 .env 是常态，不算错误。 */
+static void lume_load_dotenv(const char *script) {
+    const char *no_env = getenv("LUME_NO_ENV");
+    if (no_env && no_env[0] && strcmp(no_env, "0") != 0 &&
+        strcmp(no_env, "off") != 0 && strcmp(no_env, "false") != 0) {
+        return;
+    }
+    char path[4096];
+    const char *env_file = getenv("LUME_ENV_FILE");
+    if (env_file && env_file[0]) {
+        if (strlen(env_file) >= sizeof(path)) return;
+        snprintf(path, sizeof(path), "%s", env_file);
+    } else {
+        const char *slash = strrchr(script, '/');
+        if (slash) {
+            size_t dlen = (size_t)(slash - script);
+            if (dlen == 0) {
+                snprintf(path, sizeof(path), ".env");
+            } else {
+                if (dlen + 6 >= sizeof(path)) return;
+                memcpy(path, script, dlen);
+                path[dlen] = '/';
+                path[dlen + 1] = '\0';
+                strncat(path, ".env", sizeof(path) - strlen(path) - 1);
+            }
+        } else {
+            snprintf(path, sizeof(path), ".env");
+        }
+    }
+    size_t len = 0;
+    char *buf = read_file(path, &len);
+    if (!buf) return;
+
+    char *p = buf;
+    char *end = buf + len;
+    while (p < end) {
+        char *nl = memchr(p, '\n', (size_t)(end - p));
+        size_t n = nl ? (size_t)(nl - p) : (size_t)(end - p);
+        char *q = p;
+        size_t m = n;
+        if (m > 0 && q[m - 1] == '\r') m--;              /* 剥 CRLF */
+        while (m > 0 && (*q == ' ' || *q == '\t')) { q++; m--; }
+        if (m > 0 && *q == '#') goto next_line;          /* 注释 */
+        if (m >= 7 && memcmp(q, "export ", 7) == 0) {    /* export KEY=VALUE */
+            q += 7; m -= 7;
+            while (m > 0 && (*q == ' ' || *q == '\t')) { q++; m--; }
+        }
+        char *eq = memchr(q, '=', m);
+        if (!eq) goto next_line;                          /* 无 = 跳过 */
+        size_t kraw = (size_t)(eq - q);
+        size_t klen = kraw;
+        while (klen > 0 && (q[klen - 1] == ' ' || q[klen - 1] == '\t')) klen--;
+        if (klen == 0) goto next_line;
+        char *v = eq + 1;
+        size_t vlen = m - kraw - 1;
+        while (vlen > 0 && (*v == ' ' || *v == '\t')) { v++; vlen--; }
+        /* 行内注释: 未引号包裹时遇 ' #' 截断（引号内的 # 保留，如 "a # b"）。 */
+        bool quoted = vlen >= 2 &&
+            ((v[0] == '"' && v[vlen - 1] == '"') ||
+             (v[0] == '\'' && v[vlen - 1] == '\''));
+        if (!quoted) {
+            for (size_t i = 1; i < vlen; i++) {
+                if (v[i] == '#' && (v[i - 1] == ' ' || v[i - 1] == '\t')) {
+                    vlen = i;
+                    break;
+                }
+            }
+        }
+        while (vlen > 0 && (v[vlen - 1] == ' ' || v[vlen - 1] == '\t')) vlen--;
+        if (vlen >= 2 &&
+            ((v[0] == '"' && v[vlen - 1] == '"') ||
+             (v[0] == '\'' && v[vlen - 1] == '\''))) { v++; vlen -= 2; }
+        if (klen >= 256 || vlen >= 4096) goto next_line;
+        char key[256], val[4096];
+        memcpy(key, q, klen); key[klen] = '\0';
+        memcpy(val, v, vlen); val[vlen] = '\0';
+        setenv(key, val, 0);   /* 不覆盖已有环境变量 */
+    next_line:
+        if (!nl) break;
+        p = nl + 1;
+    }
+    free(buf);
+}
+
 int main(int argc, char **argv) {
     bool do_check = false;
     bool do_dump = false;
@@ -381,6 +474,11 @@ int main(int argc, char **argv) {
      * handed down through the environment so the language and every .lume
      * script stay unchanged — the transport is a host-level concern. */
     if (do_stdio) setenv("AGENTHTTPD_STDIO", "1", 1);
+
+    /* 启动时加载 .env（$LUME_ENV_FILE 或 <脚本目录>/.env）：把 KEY=VALUE 补进
+     * 进程环境供 env() 读——隐私配置（访客统计 PIN / 排除 IP / 保留期、API
+     * 密钥等）集中到 .env，而不是散落在 run_args / 部署参数。 */
+    lume_load_dotenv(script);
 
     /* LUME_NO_FS is the same switch as --no-fs, so a supervisor can lock the
      * language down without rewriting the argv it execs. Anything but the
