@@ -378,7 +378,7 @@ jobs:
             rm -rf "$work"
           done
 
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: ${{ matrix.asset }}
@@ -386,7 +386,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
         with:
           name: ${{ matrix.asset }}-static
@@ -394,7 +394,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         if: startsWith(github.ref, 'refs/tags/') && runner.os == 'macOS'
         with:
           name: lume-darwin-x64
