@@ -220,7 +220,7 @@ SRCS     := lang/main.c lang/lexer.c lang/parser.c lang/parser_stmt.c lang/parse
             lang/arena.c \
             lang/value.c lang/typecheck.c lang/typecheck_expr.c lang/typecheck_stmt.c \
             lang/interp.c lang/builtins.c lang/builtins_sql.c lang/builtins_fs.c \
-            lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/loader.c lang/vdom.c \
+            lang/builtins_catalog.c lang/builtins_hof.c lang/builtins_str.c lang/builtins_math.c lang/builtins_crypt.c lang/builtin_visits.c lang/loader.c lang/vdom.c \
             lang/builtins_http.c lang/bridge.c lang/token.c lang/iquest.c \
             lang/localfns.c \
             lang/compat/sha256/sha256.c lang/compat/sha512/sha512.c \

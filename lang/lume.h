@@ -548,6 +548,12 @@ typedef struct Module {
  * nonzero + errbuf on failure. */
 int loader_run(VM *vm, const char *entry_path, bool check_only,
                char *errbuf, size_t errbuf_size);
+int load_module_source(VM *vm, const char *name, const char *source,
+                       char *errbuf, size_t errbuf_size);
+/* Built-in visitor stats (builtin_visits.c): LUME_VISITS=1 enables auto-load
+ * of the embedded builtin://visits module (POST /api/visit + GET /api/visits). */
+bool lume_builtin_visits_enabled(void);
+const char *lume_builtin_visits_src(void);
 /* Registry lookup by canonical path; NULL if not loaded. */
 Module *loader_find(VM *vm, const char *canon_path);
 /* Tear the loader down: every module, its AST, its export table and the

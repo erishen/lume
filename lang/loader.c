@@ -182,7 +182,8 @@ static char *resolve_import(const char *from_dir, const char *rel,
 
 /* ---------- module loading ---------- */
 
-static int load_module(VM *vm, const char *path, char *errbuf, size_t errbuf_size);
+static int load_module(VM *vm, const char *path, const char *source_in,
+                       char *errbuf, size_t errbuf_size);
 
 /* Collect N_IMPORT statements from a freshly parsed program into the module,
  * rewriting each node's path to its canonical absolute path. */
@@ -237,7 +238,8 @@ static Module *module_new(const char *path) {
     return m;
 }
 
-static int load_module(VM *vm, const char *path, char *errbuf, size_t errbuf_size) {
+static int load_module(VM *vm, const char *path, const char *source_in,
+                       char *errbuf, size_t errbuf_size) {
     Module *found = loader_find(vm, path);
     if (found) {
         if (found->loading) {
@@ -259,7 +261,8 @@ static int load_module(VM *vm, const char *path, char *errbuf, size_t errbuf_siz
     if (!m) { snprintf(errbuf, errbuf_size, "out of memory"); return -1; }
 
     size_t len = 0;
-    char *source = read_file(path, &len);
+    /* source_in != NULL: in-memory module (builtin), no file read. */
+    char *source = source_in ? strdup(source_in) : read_file(path, &len);
     if (!source) {
         snprintf(errbuf, errbuf_size, "cannot read %s", path);
         free(m->path);
@@ -295,7 +298,7 @@ static int load_module(VM *vm, const char *path, char *errbuf, size_t errbuf_siz
 
     /* depth-first: dependencies load + type-check first */
     for (int i = 0; i < m->import_count; i++) {
-        if (load_module(vm, m->import_paths[i], errbuf, errbuf_size) != 0)
+        if (load_module(vm, m->import_paths[i], NULL, errbuf, errbuf_size) != 0)
             return -1;
     }
 
@@ -309,6 +312,15 @@ static int load_module(VM *vm, const char *path, char *errbuf, size_t errbuf_siz
         return -1;
     m->typechecked = true;
     return 0;
+}
+
+/* Public: load a module from an in-memory source (builtin modules that live
+ * as embedded C strings — e.g. the built-in visitor-stats routes). The name
+ * is the module's canonical path/identity (loader_find key), so it must be
+ * unique and stable across runs (use a "builtin://" scheme). */
+int load_module_source(VM *vm, const char *name, const char *source,
+                       char *errbuf, size_t errbuf_size) {
+    return load_module(vm, name, source, errbuf, errbuf_size);
 }
 
 /* ---------- execution (topological, once each) ---------- */
@@ -413,7 +425,7 @@ int loader_run(VM *vm, const char *entry_path, bool check_only,
         return 1;
     }
 
-    if (load_module(vm, canon, errbuf, errbuf_size) != 0) return 1;
+    if (load_module(vm, canon, NULL, errbuf, errbuf_size) != 0) return 1;
     if (check_only) return 0;
 
     Module *entry = loader_find(vm, canon);
@@ -421,6 +433,22 @@ int loader_run(VM *vm, const char *entry_path, bool check_only,
      * builtins seeded by bridge_seed_builtins stay visible */
     entry->env = vm->globals;
     entry->is_entry = true;   /* only its `main()` call sets the exit status */
+    /* Built-in visitor stats (LUME_VISITS=1): load + exec the embedded
+     * builtin://visits module BEFORE the entry script so its /api/visit and
+     * /api/visits routes register first (opted-in projects must remove their
+     * own visits routes to avoid a duplicate-route conflict). */
+    if (lume_builtin_visits_enabled()) {
+        if (load_module_source(vm, "builtin://visits",
+                               lume_builtin_visits_src(),
+                               errbuf, errbuf_size) != 0)
+            return 1;
+        Module *bv = loader_find(vm, "builtin://visits");
+        if (!bv) {
+            snprintf(errbuf, errbuf_size, "builtin visits: module not loaded");
+            return 1;
+        }
+        if (exec_module(vm, bv, errbuf, errbuf_size) != 0) return 1;
+    }
     if (exec_module(vm, entry, errbuf, errbuf_size) != 0) return 1;
     return 0;
 }
