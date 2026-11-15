@@ -4,6 +4,42 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
+## [0.13.1] - 2026-11-15
+
+### Added
+
+- **Startup `.env` loader.** `main.c` now reads `$LUME_ENV_FILE` (or
+  `<script-dir>/.env` when unset) before the script runs and seeds `env()`
+  with it, so per-deployment configuration (PINs, exclude lists, retention)
+  can live in a gitignored file instead of scattered `run_args`. Set
+  `LUME_NO_ENV=1` to disable; existing process environment variables are
+  never overwritten (`setenv(..., 0)`). Plain `KEY=value`, quoted values,
+  `export`, inline comments, `#` inside quotes, blank lines, and CRLF
+  line endings are all handled.
+
+- **Built-in visitor stats (`LUME_VISITS=1`).** The engine now embeds a
+  `builtin://visits` DSL module (SQLite-backed) and auto-registers it before
+  the entry script when `LUME_VISITS` is set:
+  - `POST /api/visit` — record a visit (body `{path,referrer,visitor,ua,wd}`);
+    drops the request's own IP / exclude-list IPs up front (privacy), and
+    dedupes the same visitor within 60s.
+  - `GET /api/visits?pin=` — `{total,today,uv,days,recent}` summary, gated
+    by PIN (fail-closed: unset PIN or wrong PIN returns 403). Filters bots,
+    private/loopback IPs and exclude-list IPs during aggregation.
+
+  Configuration via `env()`/`.env`: `VISIT_PIN`, `VISIT_EXCLUDE_IPS`
+  (comma-separated exact IPs or CIDRs), `VISIT_RETENTION_DAYS` (default 90),
+  `VISIT_DB` (default `.data/visits.db`). The contract matches the
+  per-project implementations (nsbp / specpulse / tnsbp / lume-crm /
+  lume-fastapi-web), so an opted-in project can drop its own visits routes
+  and gain the built-in ones. Unset `LUME_VISITS` leaves existing projects
+  untouched (routes not registered).
+
+  Internally `loader.c` grew an in-memory source loader
+  (`load_module_source()`) and a pre-entry injection point; `loader.c` is
+  now host-pinned in `scripts/sync-lang.py` (the hook calls host-only
+  `builtin_visits.c` symbols).
+
 ## [0.13.0] - 2026-11-14
 
 ### Added

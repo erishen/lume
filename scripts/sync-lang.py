@@ -130,7 +130,16 @@ HOST_PINNED = {"lume.h", "main.c", "builtins_internal.h", "builtins.c",
                # value.c wholesale and break the build, so pin it and track the
                # gap as BEHIND; the GC/mark logic beyond the OBJ_SQLTX block
                # stays hand-merged with upstream when it changes.
-               "value.c"}
+               "value.c",
+               # loader.c: host's loader_run() injects the built-in visitor-stats
+               # module (builtin_visits.c) before the entry script, calling
+               # lume_builtin_visits_enabled()/lume_builtin_visits_src() and
+               # load_module_source() — symbols that only exist in this host
+               # (builtin_visits.c is host-only, lume-core has no built-in
+               # visits). Upstream's loader.c has no such hook; syncing the
+               # upstream copy over would drop the hook and silently disable
+               # LUME_VISITS. Pin it and let the lag report track upstream.
+               "loader.c"}
 
 # Upstream lines behind in a pinned file stop being news at about this many;
 # below it the file is just locally edited.
