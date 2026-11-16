@@ -4,6 +4,82 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Built-in visitor stats: retention was never enforced.** `cleanup_visits`
+  set `visit_last_cleanup` only *after* a successful delete, while the
+  trigger guarded on `visit_last_cleanup > 0` — so on a fresh process the
+  condition was false and the cleanup call was unreachable. `VISIT_RETENTION_DAYS`
+  (default 90) therefore never deleted anything and the DB only grew. The
+  timestamp is now stamped before the delete (a failed attempt is rate-limited
+  to one per 24h instead of retrying on every request), `0` = "never cleaned"
+  triggers one pass on the first visit, and `VISIT_RETENTION_DAYS<=0` skips it
+  entirely.
+
+- **Built-in visitor stats: 172.20–172.29 were counted as public.** The
+  private-address check only enumerated `172.16–19` and `172.30–31`, so ten
+  `/16`s inside `172.16.0.0/12` were treated as real visitors and inflated
+  `total`/`uv`. Detection is now a numeric octet test over the whole `/12`
+  (`is_172_private()`), shared with the new `ip_is_local()` helper.
+
+- **Built-in visitor stats: `X-Forwarded-For` was trusted unconditionally.**
+  The header is client-controlled, so anyone could spoof an IP to slip past
+  `VISIT_EXCLUDE_IPS` (their own visits counted again) or inflate `uv`. New
+  `VISIT_TRUST_XFF` policy: `auto` (default) honours XFF only when the peer
+  itself is loopback/private — i.e. the request really came from a local
+  reverse proxy; `1`/`0` force it on/off. Deployments exposed directly should
+  set `0`.
+
+- **Built-in visitor stats: duplicate routes shadow silently.** The module
+  registers before the entry script and `agenthttpd_route()` does not check
+  for duplicates (dispatch is first-registered-wins), so a project that keeps
+  its own `/api/visit` is not rejected — the built-in handler quietly takes
+  over and the project's own fields/dedup rules stop running. Documented as
+  a hard migration step in `builtin_visits.c` and the config header.
+
+### Changed
+
+Privacy hardening for the built-in visitor stats (audited against the
+minimum-necessity principle; IP + UA + path are personal information):
+
+- **`path` no longer stores query strings and is capped at 200 chars.**
+  Previously `path` was written verbatim, so a site sending `location.href`
+  persisted `?email=…&q=…` into the analytics DB (verified against a live
+  server). It is now cut at `?`/`#`, must be an in-site path (`/`-prefixed),
+  and truncated to 200; `visitor` is capped at 64. The summary endpoint
+  re-sanitizes on read so rows written before this change don't keep leaking
+  query strings. `referrer` was already stripped.
+
+- **`POST /api/visit` rejects malformed bodies instead of storing a phantom
+  row.** A body that failed `json()` (or lacked `path`) used to fall back to
+  defaults, insert `anon|/`, and answer `recorded:true` — a public, unauthenticated
+  endpoint that anyone could use to inflate the table. Now it returns
+  `{ok:null,err:…}` and writes nothing.
+
+- **Loopback visits are dropped at record time.** The header claimed
+  "self-visits never land on disk", but with no exclude list a `127.0.0.1`
+  visit was stored (it was merely filtered during aggregation). Recording now
+  drops loopback alongside `VISIT_EXCLUDE_IPS`. Note the interaction documented
+  in the header: `VISIT_TRUST_XFF=0` plus a local reverse proxy leaves only
+  the loopback peer, so stats would be empty — keep the default `auto` there.
+
+- **`recent` masks client IPs by default** (IPv4 keeps its /24, IPv6 its first
+  two groups) and only returns raw addresses when `VISIT_SHOW_RAW_IP=1`. The
+  PIN is the only gate on this endpoint, and a PIN in a query string lands in
+  upstream nginx/CDN access logs, so the blast radius of a leaked PIN is now
+  bounded.
+
+- **Per-IP throttle on the public beacon**: `VISIT_RATE_LIMIT_PER_MIN`
+  (default 20, `0` disables). `visitor` is client-supplied, so the existing
+  60s dedupe could be bypassed by changing it; the IP cap closes that path.
+
+- **`Authorization: Bearer` is the documented way to pass `VISIT_PIN`.** The
+  `?pin=` form still works for backward compatibility with existing dashboards
+  (the contract is shared with nsbp / specpulse / tnsbp / lume-crm /
+  lume-fastapi-web), but new callers should use the header.
+
 ## [0.13.1] - 2026-11-15
 
 ### Added
