@@ -80,6 +80,24 @@ minimum-necessity principle; IP + UA + path are personal information):
   (the contract is shared with nsbp / specpulse / tnsbp / lume-crm /
   lume-fastapi-web), but new callers should use the header.
 
+- **Default retention lowered from 90 to 30 days.** Site analytics does not
+  need a quarter of IP-level history. This applies to deployments that never
+  set `VISIT_RETENTION_DAYS`: on their first beacon after upgrading, the
+  cleanup prunes everything older than 30 days. Back up `visits.db` first if
+  that history matters; set the variable explicitly to keep a longer window.
+
+### Added
+
+- **Optional IP de-identification: `VISIT_HASH_IP=1` + `VISIT_IP_SALT`.**
+  With a salt configured, the table stores `sha256(salt + ":" + ip)` truncated
+  to 16 hex chars instead of the address, and `uv` counts distinct hashes.
+  The salt is mandatory on purpose — IPv4 is small enough that an unsalted
+  digest is reversible by enumeration, i.e. fake anonymisation; without a salt
+  the switch stays off and storage remains plaintext (documented fallback).
+  Consequences, also documented: private/loopback peers are dropped **before**
+  hashing (they can no longer be classified in the summary), and neither
+  `VISIT_EXCLUDE_IPS` matching nor raw-IP lookback works on hashed rows.
+
 ## [0.13.1] - 2026-11-15
 
 ### Added

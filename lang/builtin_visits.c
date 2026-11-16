@@ -16,8 +16,11 @@
  * 配置（env/.env，.env 加载见 main.c lume_load_dotenv）:
  *   VISIT_PIN            owner-only PIN；未配置 /api/visits 一律 403（fail closed）
  *   VISIT_EXCLUDE_IPS    记录时丢弃 + 汇总时过滤（精确 IP / CIDR，逗号分隔）
- *   VISIT_RETENTION_DAYS 保留期（默认 90；<=0 不清理）
+ *   VISIT_RETENTION_DAYS 保留期（默认 30；<=0 不清理）
  *   VISIT_DB             SQLite 路径（默认 .data/visits.db）
+ *   VISIT_HASH_IP        IP 去标识化开关（1 = 库内只存哈希）。需同时配
+ *                        VISIT_IP_SALT；盐为空则本开关不生效（无盐哈希可被穷举）
+ *   VISIT_IP_SALT        哈希盐。启用哈希后换盐 = 换标识空间（旧行不再与新行去重）
  *   VISIT_TRUST_XFF      X-Forwarded-For 采信策略（默认 auto：仅对端为回环/内网时
  *                        采信；1/0 强制开/关。直连暴露时置 0，否则任何人可伪造
  *                        IP 绕过 VISIT_EXCLUDE_IPS 或刷 UV）
@@ -63,7 +66,7 @@ const char *lume_builtin_visits_src(void) {
 "if (visit_pin == null) { visit_pin = \"\"; }\n"
 "let visit_db = env(\"VISIT_DB\");\n"
 "if (visit_db == null or visit_db == \"\") { visit_db = \".data/visits.db\"; }\n"
-"let visit_retention = 90;\n"
+"let visit_retention = 30;\n"
 "let _vr = env(\"VISIT_RETENTION_DAYS\");\n"
 "if (_vr != null and _vr != \"\") {\n"
 "  let n = int(_vr);\n"
@@ -85,6 +88,17 @@ const char *lume_builtin_visits_src(void) {
 "  return n.ok;\n"
 "}\n"
 "func q(sql, params) { let r = try(() => sql_query(visit_db, sql, params)); if (r.ok == null) { return []; } return r.ok; }\n"
+"\n"
+"// IP 去标识化（可选）：VISIT_HASH_IP=1 且 VISIT_IP_SALT 非空时，库内只存\n"
+"// sha256(salt + \":\" + ip) 前 16 位 hex。盐必须显式配置——IPv4 空间小，\n"
+"// 无盐哈希可被穷举还原，等于假脱敏；盐为空则本开关不生效（保持明文）。\n"
+"let visit_ip_salt = str_or(env_or(\"VISIT_IP_SALT\", \"\"), \"\");\n"
+"let visit_hash_on = false;\n"
+"if (visit_ip_salt != \"\") {\n"
+"  let hv = lower(str_or(env_or(\"VISIT_HASH_IP\", \"\"), \"\"));\n"
+"  if (hv == \"1\" or hv == \"true\" or hv == \"on\" or hv == \"yes\") { visit_hash_on = true; }\n"
+"}\n"
+"func hash_ip(ip) { return substr(sha256(visit_ip_salt + \":\" + ip), 0, 16); }\n"
 "\n"
 "// 172.16.0.0/12 整段（172.16–172.31）都是私有地址。早先只枚举 16–19 / 30–31，\n"
 "// 漏掉 172.20–29 这 10 个 /16：那一段的访问被当成公网真人计入 total/uv。\n"
@@ -291,11 +305,19 @@ const char *lume_builtin_visits_src(void) {
 "  if (ip == \"\" or ip_is_loopback(ip) or ip_excluded(ip)) {\n"
 "    return { ok: { recorded: false, excluded: true }, err: null };\n"
 "  }\n"
+"  // 哈希模式下库内不再有原始 IP，汇总时无法再判内网，故写入前就丢弃。\n"
+"  if (visit_hash_on and ip_is_local(ip)) {\n"
+"    return { ok: { recorded: false, excluded: true }, err: null };\n"
+"  }\n"
+"  // ip_store: 落库用的 IP（哈希模式下是去标识化值）。限流与去重都要用它，\n"
+"  // 否则哈希库里永远查不到同 IP 的历史行，限流会形同虚设。\n"
+"  let ip_store = ip;\n"
+"  if (visit_hash_on) { ip_store = hash_ip(ip); }\n"
 "  // 公开埋点限流：同 IP 每分钟 VISIT_RATE_LIMIT_PER_MIN（默认 20，0=关）。\n"
 "  // visitor 由客户端提供，换一个 visitor 就能绕开 60s 去重，故按 IP 再兜一层。\n"
 "  let rate_cap = as_int(env_or(\"VISIT_RATE_LIMIT_PER_MIN\", \"\"), 20);\n"
 "  if (rate_cap > 0) {\n"
-"    let cnt = q(\"SELECT COUNT(*) AS n FROM visits WHERE ip = ? AND created >= ?\", [ip, now() - 60]);\n"
+"    let cnt = q(\"SELECT COUNT(*) AS n FROM visits WHERE ip = ? AND created >= ?\", [ip_store, now() - 60]);\n"
 "    if (as_int(get(get(cnt, 0, {}), \"n\", 0), 0) >= rate_cap) {\n"
 "      return { ok: { recorded: false, throttled: true }, err: null };\n"
 "    }\n"
@@ -309,7 +331,7 @@ const char *lume_builtin_visits_src(void) {
 "  if (visit_retention > 0 and now() - visit_last_cleanup >= 86400) { cleanup_visits(); }\n"
 "  let w = try(() => sql_write(visit_db,\n"
 "    \"INSERT INTO visits (path, referrer, ua, visitor, ip, created) VALUES (?,?,?,?,?,?)\",\n"
-"    [path, referrer, ua, visitor, ip, now()]));\n"
+"    [path, referrer, ua, visitor, ip_store, now()]));\n"
 "  if (get(w, \"err\", null) != null) {\n"
 "    return { err: get(w, \"err\", \"记录访问失败\") };\n"
 "  }\n"
