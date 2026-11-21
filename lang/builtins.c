@@ -34,11 +34,8 @@ static void native_print(VM *vm, int argc, Value *args, Value *out) {
              * wrapped i64 printed as a different number than it holds. */
             if (IS_INT(args[i]))
                 printf("%lld", AS_INT(args[i]));
-            else {
-                char nb[64];
-                lume_fmt_double(nb, sizeof nb, AS_NUM(args[i]));
-                printf("%s", nb);
-            }
+            else
+                printf("%g", AS_NUM(args[i]));
         } else if (IS_BOOL(args[i]) || IS_NULL(args[i])) {
             printf(IS_BOOL(args[i]) ? (AS_BOOL(args[i]) ? "true" : "false") : "null");
         } else {
@@ -63,7 +60,7 @@ void str_of_value(VM *vm, Value v, Value *out) {
         if (IS_INT(v))
             snprintf(buf, sizeof(buf), "%lld", AS_INT(v));
         else
-            lume_fmt_double(buf, sizeof(buf), AS_NUM(v));
+            snprintf(buf, sizeof(buf), "%g", AS_NUM(v));
         sb_str(&b, buf);
     } else if (IS_BOOL(v)) {
         sb_str(&b, AS_BOOL(v) ? "true" : "false");

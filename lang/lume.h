@@ -827,13 +827,6 @@ Value vm_pop(VM *vm);
 Value vm_peek(VM *vm, int depth);
 void vm_set_error(VM *vm, const char *fmt, ...);
 
-/* value.c — format a double with the shortest round-trip representation
- * (Go strconv 'g' -1 / json.Marshal semantics). %g keeps 6 significant
- * digits and truncates cost_usd/error_rate-style values; the short loop
- * finds the minimal precision that survives strtod, so common values
- * (0.1, 2.5) stay compact while precise ones keep full digits. */
-void lume_fmt_double(char *buf, size_t n, double d);
-
 /* bridge.c — translate DSL constructs into libagenthttpd calls. */
 void bridge_init(VM *vm);                      /* bind the shim's VM pointer */
 void bridge_seed_builtins(VM *vm);
