@@ -4,7 +4,18 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
-## [0.14.0] - 2026-11-21
+## [0.14.1] - 2026-11-21
+
+### Added
+
+- **`proxy_stream` 流式透传信封（HTTP 路由）。** 路由返回
+  `{ proxy_stream: { url, method?, headers?, body?, timeout?, allow_private? } }`
+  时，把上游 HTTP 响应**逐块**转发给客户端（读一块写一块，不缓冲整响应）：
+  `builtins_http.c` 新增 `lume_http_relay()`（复用连接逻辑，按
+  Content-Length / chunked / EOF 转发），`bridge.c` 识别信封并装
+  `stream_fn`。响应透传状态码 + Content-Type + 安全头，不跟随重定向。
+  与 `{ sse: [...] }` 预生成数组不同，这是**真流式**（SSE/长响应首字节
+  更快、内存 O(块)）。见 `docs/LUME.md` 路由信封一节。
 
 ### Fixed
 
