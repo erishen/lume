@@ -925,6 +925,147 @@ static int read_body(Conn *c, sbuf *b, size_t max_bytes, const char *hdr,
     }
 }
 
+/* ---- 流式转发（供 bridge.c 的 proxy_stream 信封使用）----
+ * 与 http_call 的区别：不缓冲整响应体，读一块写一块到 out_fd。用于 DSL 的
+ * { proxy_stream: {...} } —— 把上游 SSE / 大响应原样流式转给客户端。
+ * 不跟随重定向（3xx 连同 Location 原样转发给客户端，由客户端处理）。
+ * 返回：body 字节数；<0 表示失败。 */
+
+/* 按 Content-Length / chunked / EOF 逐块读上游 body 并 write(out_fd)。 */
+static long relay_body(Conn *c, const char *hdr, int out_fd, long deadline) {
+    long sent = 0;
+    const char *cl = strstr(hdr, "Content-Length:");
+    if (cl) {
+        cl += strlen("Content-Length:");
+        while (*cl == ' ' || *cl == '\t') cl++;
+        long long want = strtoll(cl, NULL, 10);
+        if (want > 0) {
+            char buf[16384];
+            size_t remaining = (size_t)want;
+            while (remaining > 0) {
+                size_t chunk = remaining < sizeof buf ? remaining : sizeof buf;
+                size_t got = 0;
+                if (conn_read_exact(c, buf, chunk, &got, deadline) != 0 || got == 0) break;
+                ssize_t w = write(out_fd, buf, got);
+                if (w <= 0) break; /* 客户端断开 */
+                sent += (long)w;
+                remaining -= got;
+            }
+        }
+        return sent;
+    }
+    if (strstr(hdr, "Transfer-Encoding:") && strstr(hdr, "chunked")) {
+        for (;;) {
+            char line[256]; size_t n = 0, got = 0;
+            for (; n + 1 < sizeof line;) {
+                if (conn_read_exact(c, line + n, 1, &got, deadline) != 0) return sent;
+                if (got == 0) return sent;
+                n += got;
+                if (line[n - 1] == '\n') break;
+            }
+            line[n > 0 ? n - 1 : 0] = '\0';
+            long len = strtol(line, NULL, 16); /* 十六进制块长 */
+            if (len <= 0) return sent;          /* 0 长度块结束 */
+            char *chunk = malloc((size_t)len);
+            if (!chunk) return sent;
+            size_t g = 0;
+            if (conn_read_exact(c, chunk, (size_t)len, &g, deadline) == 0 && g > 0) {
+                ssize_t w = write(out_fd, chunk, g);
+                if (w > 0) sent += (long)w;
+            }
+            free(chunk);
+            char crlf[2]; size_t g2 = 0;
+            conn_read_exact(c, crlf, 2, &g2, deadline); /* 吃掉块尾 CRLF */
+        }
+    }
+    /* 无 Content-Length：读到 EOF（Connection: close 的常规响应）。 */
+    char buf[16384];
+    for (;;) {
+        size_t g = 0;
+        int r = conn_read_some(c, buf, sizeof buf, &g, deadline);
+        if (r != 0 || g == 0) return sent;
+        ssize_t w = write(out_fd, buf, g);
+        if (w <= 0) return sent;
+        sent += (long)w;
+    }
+}
+
+/* 写响应状态行 + 透传 Content-Type + 安全头。返回写出的字节数（0 = 失败）。 */
+static long relay_write_head(int status, const char *hdr, int out_fd) {
+    char reason[96] = "OK";
+    const char *sp1 = strchr(hdr, ' ');
+    const char *sp2 = sp1 ? strchr(sp1 + 1, ' ') : NULL;
+    const char *cr = sp2 ? strpbrk(sp2 + 1, "\r\n") : NULL;
+    if (sp2 && cr && cr > sp2 + 1) {
+        size_t rl = (size_t)(cr - (sp2 + 1));
+        if (rl >= sizeof reason) rl = sizeof reason - 1;
+        memcpy(reason, sp2 + 1, rl); reason[rl] = '\0';
+    }
+    char ctype[256] = "application/octet-stream";
+    const char *ct = strstr(hdr, "Content-Type:");
+    if (ct) {
+        ct += strlen("Content-Type:");
+        while (*ct == ' ' || *ct == '\t') ct++;
+        const char *ce = strpbrk(ct, "\r\n");
+        if (ce) {
+            size_t cl = (size_t)(ce - ct);
+            if (cl >= sizeof ctype) cl = sizeof ctype - 1;
+            memcpy(ctype, ct, cl); ctype[cl] = '\0';
+        }
+    }
+    char head[512];
+    int hn = snprintf(head, sizeof head,
+        "HTTP/1.1 %d %s\r\n"
+        "Content-Type: %s\r\n"
+        "Cache-Control: no-cache\r\n"
+        "X-Accel-Buffering: no\r\n"
+        "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"
+        "X-Frame-Options: DENY\r\n"
+        "Referrer-Policy: no-referrer\r\n"
+        "\r\n",
+        status, reason, ctype);
+    if (hn <= 0 || (size_t)hn >= sizeof head) return 0;
+    return write(out_fd, head, (size_t)hn) == hn ? (long)hn : 0;
+}
+
+/* 把上游 URL 的响应流式转发到 out_fd（客户端 socket）。供 bridge.c 调用。 */
+long lume_http_relay(const char *url0, Obj *hdrs, const char *method,
+                     const char *body, size_t body_len,
+                     int allow_private, long timeout_ms, size_t max_bytes,
+                     int out_fd) {
+    (void)max_bytes; /* 流式转发不截断；上限由连接超时兜底 */
+    if (!url0 || !url0[0]) return -1;
+    char cur[1024]; snprintf(cur, sizeof cur, "%s", url0);
+    char hostbuf[512];
+    char hdr[HTTP_MAX_HEADER_SZ];
+    int status = 0;
+    sbuf req_body = {0};
+    if (body && body_len > 0) { req_body.p = (char *)body; req_body.len = body_len; req_body.cap = body_len; }
+
+    Url u; memset(&u, 0, sizeof u);
+    if (url_parse(cur, hostbuf, sizeof hostbuf, &u) != 0) return -2;
+    if (!allow_private && host_blocked(u.host)) return -3;
+    Conn c = { -1, NULL, { 0 } };
+    long deadline = now_ms() + timeout_ms;
+    const char *px = effective_proxy(&u);
+    int rc = open_conn(&u, px, &c, deadline);
+    if (rc != 0) { conn_close(&c); return -4; }
+    sbuf req = {0};
+    int brc = build_request(&req, &u, px, hdrs, method ? method : "GET", &req_body, NULL);
+    if (brc == 0) brc = conn_write(&c, req.p, req.len, deadline);
+    free(req.p);
+    if (brc != 0) { conn_close(&c); return -5; }
+    memset(hdr, 0, sizeof hdr);
+    int rrc = read_head(&c, hdr, sizeof hdr, &status, deadline);
+    if (rrc != 0) { conn_close(&c); return -6; }
+    long hw = relay_write_head(status, hdr, out_fd);
+    if (hw <= 0) { conn_close(&c); return -7; } /* 客户端断开 */
+    long sent = relay_body(&c, hdr, out_fd, deadline);
+    conn_close(&c);
+    return sent;
+}
+
 /* ---- 内建 ---- */
 
 /* 五个谓词共用一份实现。复制五遍只会让「哪天补一条 307 的语义」这类改动

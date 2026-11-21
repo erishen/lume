@@ -159,6 +159,32 @@ return { type: "text/html", cache_control: "no-store", body: html };
 值超过 64 字符会被截断(切不准的缓存策略比没有更坏)。它只在信封里认,
 普通 map(不带 `body`)当 JSON 载荷返回时无效。。
 
+**`proxy_stream`** —— 把上游 HTTP 响应**流式**透传给客户端(真流式:读一块
+写一块,不缓冲整响应)。信封带这个键时,handler 声明目标即可,stream_fn 连
+上游、逐块转发到 `client_fd`。适合 SSE/大文件/长响应:
+
+```lume
+// 上游返回 text/event-stream,Lume 原样流式转发(内容+状态码+content-type)
+return {
+  proxy_stream: {
+    url: "http://127.0.0.1:9070/v1/chat/completions",
+    method: "POST",
+    headers: { "Authorization": "Bearer sk-tr-…" },
+    body: "{\"model\":\"chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":true}",
+    timeout: 300,        // 秒,默认 300(长生成/SSE 放宽)
+    allow_private: true, // 上游是私网/回环时开(默认 false,SSRF 闸门)
+  },
+};
+```
+
+- `url` 必填;`method` 默认 `GET`;`headers` 为请求头 map(可选);`body` 为
+  字符串(可选,POST 用)。
+- 响应按原样透传:状态码 + `Content-Type` + 安全头;结束靠关闭连接(无
+  Content-Length,与 SSE 一致)。**不跟随重定向**(3xx 连同 `Location`
+  原样转发给客户端,由客户端处理)。
+- 与 `{ sse: [...] }` 的区别:后者是**预生成**事件(内存数组,伪流式),
+  `proxy_stream` 是**从上游边读边写**(真流式,首字节更快、内存 O(块))。
+
 处理函数收到一个 **请求 map**,字段有:`method`、`path`(含 query 串)、
 `remote_addr`、`host`、`content_type`、`content_length`、`user_agent`、
 `body`、`query`(原始查询串,不含 `?`;无查询 → `null`)、`query_params`

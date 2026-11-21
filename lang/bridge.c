@@ -14,6 +14,11 @@
 extern void url_decode(char *dst, const char *src);
 /* from agent-httpd auth.c — base64-decode a Basic-auth header payload */
 extern void b64_decode(const char *in, char *out, size_t out_size);
+/* from lang/builtins_http.c — stream an upstream response to a client fd */
+extern long lume_http_relay(const char *url0, Obj *hdrs, const char *method,
+                            const char *body, size_t body_len,
+                            int allow_private, long timeout_ms, size_t max_bytes,
+                            int out_fd);
 
 /* bridge.c — the language's runtime translated into libagenthttpd.a calls.
  *
@@ -512,6 +517,82 @@ static bool try_sse(VM *vm, Value result, HttpResponse *res,
     return true;
 }
 
+/* ---- proxy_stream: 路由返回 { proxy_stream: {...} } 时走流式透传 ----
+ * 与 { sse } 同理：不走"填 res.body 再序列化"那条路 —— 流式没有
+ * Content-Length，结束靠关闭连接，需要 client_fd 与"我来写完整响应"的钩子。
+ * 与 sse 的区别：数据源不在内存（预生成事件），而在上游 HTTP 响应 ——
+ * stream_fn 用 lume_http_relay 连上游，读一块写一块到 client_fd（真流式）。
+ *
+ *   return { proxy_stream: {
+ *     url, method?, headers?, body?, timeout?, allow_private? } };
+ *
+ * 字段：url 必填；method 默认 GET；headers 为请求头 map（可选）；
+ * body 为字符串（可选，POST 用）；timeout 秒（默认 300，长生成/SSE 放宽）；
+ * allow_private 默认 false（上游是私网/回环时开 true）。 */
+
+typedef struct {
+    char *url;        /* strdup'd */
+    char method[8];
+    Obj *headers;     /* 请求内 GC 存活期有效 */
+    char *body;       /* malloc'd 拷贝或 NULL */
+    size_t body_len;
+    long timeout_ms;
+    int allow_private;
+} ProxyStreamPayload;
+
+static long proxy_stream_flush(void *data, int fd, const HttpRequest *req, int *handled) {
+    (void)req;
+    ProxyStreamPayload *p = (ProxyStreamPayload *)data;
+    long n = lume_http_relay(p->url, p->headers, p->method,
+                             p->body, p->body_len, p->allow_private,
+                             p->timeout_ms, 0, fd);
+    *handled = 1;
+    return n > 0 ? n : 0;
+}
+
+static bool try_proxy_stream(VM *vm, Value result, HttpResponse *res) {
+    if (!IS_OBJ(result) || AS_OBJ(result)->type != OBJ_MAP) return false;
+    int found = 0;
+    Value pv = map_get(vm, AS_OBJ(result), "proxy_stream", &found);
+    if (!found || !IS_OBJ(pv) || AS_OBJ(pv)->type != OBJ_MAP) return false;
+    Obj *o = AS_OBJ(pv);
+    int f = 0;
+    Value uv = map_get(vm, o, "url", &f);
+    if (!f || !IS_OBJ(uv) || AS_OBJ(uv)->type != OBJ_STRING) return false;
+    static ProxyStreamPayload payload;   /* 单线程请求处理，无并发写 */
+    memset(&payload, 0, sizeof payload);
+    payload.url = strdup(obj_string(AS_OBJ(uv)));
+    if (!payload.url) return false;
+    Value mv = map_get(vm, o, "method", &f);
+    if (f && IS_OBJ(mv) && AS_OBJ(mv)->type == OBJ_STRING)
+        snprintf(payload.method, sizeof payload.method, "%s", obj_string(AS_OBJ(mv)));
+    else
+        snprintf(payload.method, sizeof payload.method, "GET");
+    Value hv = map_get(vm, o, "headers", &f);
+    if (f && IS_OBJ(hv) && AS_OBJ(hv)->type == OBJ_MAP) payload.headers = AS_OBJ(hv);
+    Value bv = map_get(vm, o, "body", &f);
+    if (f && IS_OBJ(bv) && AS_OBJ(bv)->type == OBJ_STRING) {
+        Obj *s = AS_OBJ(bv);
+        payload.body_len = s->as.str.len;
+        if (payload.body_len > 0) {
+            payload.body = malloc(payload.body_len);
+            if (!payload.body) { free(payload.url); return false; }
+            memcpy(payload.body, obj_string(s), payload.body_len);
+        }
+    }
+    Value tv = map_get(vm, o, "timeout", &f);
+    if (f && IS_NUM(tv)) payload.timeout_ms = (long)(AS_NUM(tv) * 1000.0);
+    else payload.timeout_ms = 300000L;
+    Value av = map_get(vm, o, "allow_private", &f);
+    if (f && IS_BOOL(av)) payload.allow_private = AS_BOOL(av) ? 1 : 0;
+    res->stream_fn = proxy_stream_flush;
+    res->stream_data = &payload;
+    res->status_code = 200;       /* 会被 handled 跳过，占位 */
+    res->body = strdup("");
+    res->body_length = 0;
+    return true;
+}
+
 static void result_to_response(VM *vm, Value result, HttpResponse *res,
                                const char *method, const char *path) {
     if (vm->error) {
@@ -718,7 +799,9 @@ static int route_shim(HttpRequest *req, HttpResponse *res) {
             }
         }
         if (!(wants_sse && try_sse(vm, result, res, req->method, req->path))) {
-            result_to_response(vm, result, res, req->method, req->path);
+            if (!try_proxy_stream(vm, result, res)) {
+                result_to_response(vm, result, res, req->method, req->path);
+            }
         }
         vm_pop(vm);
         vm_after_request(vm);
