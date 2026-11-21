@@ -62,7 +62,7 @@ static void scalar_into(sbuf *b, Value v) {
         if (d == (long long)d)
             snprintf(buf, sizeof(buf), "%lld", (long long)d);
         else
-            snprintf(buf, sizeof(buf), "%g", d);
+            lume_fmt_double(buf, sizeof(buf), d);
         sb_str(b, buf);
         return;
     }

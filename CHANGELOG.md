@@ -4,6 +4,20 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
+## [0.14.2] - 2026-11-21
+
+### Fixed
+
+- **`stringify()`/`str()`/`print()` 浮点精度截断。** JSON/字符串序列化用
+  `%g` 只保留 6 位有效数字，`cost_usd`/`error_rate` 等被截断
+  （`2.141205` → `2.1412`）。新增 `lume_fmt_double()`（host-pinned
+  `value.c`）：尝试 `%.*g` 从 1 到 17 位，取第一个能 `strtod` round-trip 的
+  （Go `strconv 'g' -1` / `json.Marshal` 语义）；整数值走 `%lld`（避免
+  `110.0` → `1.1e+02`）。常见值仍紧凑（`0.1` → `0.1`），高精度保留完整
+  （`13.979032000000005` 原样）。替换 `json_append_value`/`vdom`/`print`/
+  `str` 的 4 处 `%g`。这是 host 有意与 lume-core 的差异（`PIN.lag`
+  accept-lag 记录）。
+
 ## [0.14.1] - 2026-11-21
 
 ### Added
