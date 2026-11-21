@@ -480,6 +480,19 @@ bool values_equal(Value a, Value b) { return value_eq(a, b); }
 
 /* ---------- JSON encoding (Value -> sbuf) ---------- */
 
+/* Format a double with the shortest representation that round-trips
+ * (Go strconv 'g' -1 / json.Marshal semantics). %g keeps only 6 significant
+ * digits and truncates cost_usd/error_rate-style values; the short loop
+ * finds the minimal precision that survives strtod, so common values
+ * (0.1, 2.5) still print compactly while precise ones keep full digits. */
+void lume_fmt_double(char *buf, size_t n, double d) {
+    for (int prec = 1; prec <= 17; prec++) {
+        snprintf(buf, n, "%.*g", prec, d);
+        if (strtod(buf, NULL) == d) return;
+    }
+    snprintf(buf, n, "%.17g", d);
+}
+
 static void json_escape(void *sbufp, const char *s, size_t n) {
     sbuf *b = sbufp;
     sb_chr(b, '"');
@@ -518,7 +531,7 @@ void json_append_value(VM *vm, void *sbufp, Value v) {
         if (IS_INT(v))
             snprintf(buf, sizeof(buf), "%lld", AS_INT(v));
         else
-            snprintf(buf, sizeof(buf), "%g", AS_NUM(v));
+            lume_fmt_double(buf, sizeof(buf), AS_NUM(v));
         sb_str(b, buf);
         return;
     }
