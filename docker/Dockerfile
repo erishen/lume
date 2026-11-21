@@ -41,6 +41,7 @@ FROM debian:bookworm-slim AS lume-build
 # 失败而不可用 (与无 Python 的现状同理, 原生 SQL 正是为了摆脱 Python)。
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc libc6-dev libcrypt-dev libsqlite3-dev make m4 \
+       zlib1g-dev liblzma-dev libzstd-dev libbrotli-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build/lume
 COPY agent-httpd/ agent-httpd/
