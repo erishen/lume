@@ -309,6 +309,12 @@ jobs:
       - name: Cross-build darwin-x64 and stage tarball
         if: runner.os == 'macOS'
         run: |
+          # make clean wipes dist/ (the release staging dir), which would
+          # destroy the *-arm64 tarball the previous step just staged. Preserve
+          # it under $RUNNER_TEMP first and restore it after the rebuild so the
+          # upload below still finds both darwin assets.
+          mkdir -p "$RUNNER_TEMP/lume-rel"
+          cp dist/lume-darwin-arm64.tar.gz dist/lume-darwin-arm64.sha256 "$RUNNER_TEMP/lume-rel/" 2>/dev/null || true
           make clean
           make -C agent-httpd clean
           make -C agent-httpd CC="clang -target x86_64-apple-darwin" OPENSSL_PREFIX="$OPENSSL_X64_PREFIX" bin/libagenthttpd.a
@@ -329,6 +335,8 @@ jobs:
             shasum -a 256 lume-darwin-x64.tar.gz > lume-darwin-x64.sha256
           fi
           cd ..
+          # Restore the arm64 tarball wiped by make clean above.
+          cp "$RUNNER_TEMP/lume-rel/lume-darwin-arm64.tar.gz" "$RUNNER_TEMP/lume-rel/lume-darwin-arm64.sha256" dist/ 2>/dev/null || true
 
       # Verify before upload: a truncated/empty tarball, a mismatched
       # checksum or a missing payload directory must fail the build rather
