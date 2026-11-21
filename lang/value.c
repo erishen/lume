@@ -486,12 +486,6 @@ bool values_equal(Value a, Value b) { return value_eq(a, b); }
  * finds the minimal precision that survives strtod, so common values
  * (0.1, 2.5) still print compactly while precise ones keep full digits. */
 void lume_fmt_double(char *buf, size_t n, double d) {
-    /* %g prints an integral double as 1.1e+02 — keep "110" for the common
-     * whole-number case (and match the previous %g behavior there). */
-    if (d == (long long)d) {
-        snprintf(buf, n, "%lld", (long long)d);
-        return;
-    }
     for (int prec = 1; prec <= 17; prec++) {
         snprintf(buf, n, "%.*g", prec, d);
         if (strtod(buf, NULL) == d) return;
