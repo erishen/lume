@@ -1162,3 +1162,34 @@ builtins not accepted). After the decisions above and the lag refresh both
 are green: `ok lang/ matches lume-core @ b18ffc3 — 33 synced, 17 host-owned,
 6 host-only` and `ok builtin parity: 109 core-only / 1 host-only accepted,
 128 shared builtins`.
+
+## 2026-11-22 — time-series storage: no TSDB backend (filed, open)
+
+Filed after a review of what the stack can persist today. The relational
+side is well covered — the DSL builtins are SQLite-only (`builtins_sql.c`),
+but the server's `db_layer.c` has a SQLite default plus compiled libpq and
+libmysqlclient backends (cap-8 pools, `ubuntu-db` CI against live DSNs).
+The other half of the persistence picture is empty: **high-frequency
+sampled numerics (timestamp + tags + value) have no first-class store.**
+
+- [ ] **No TSDB backend or client.** Sampled telemetry (sub-second to
+      few-second cadence) still has to land in relational tables, which
+      is write-amplifying and awkward for range scans and downsampling.
+      The usual tools for this shape of data are InfluxDB, TDengine or
+      TimescaleDB (the PostgreSQL extension). Decide whether this belongs
+      in the framework as a `db_layer` backend alongside PG/MySQL, or
+      stays an app-level HTTP client of an external TSDB — the latter
+      preserves the zero-extra-dependency property that keeps the shipped
+      image small.
+- [ ] **No core builtin by reflex.** Per the P14 / P17 / P18 discipline
+      (gate first, interpreter-only, compiled emitters stay clean), any
+      new storage primitive lands in the interpreter first, stays out of
+      `codegen_call.c` / `llvm_codegen_internal.h`'s `BUILTINS[]`, and
+      reaches the host mirror only through the five-coordinated-edit +
+      `make sync-lang` + `PIN.manifest` refresh path.
+- [ ] **Keep the size tradeoff explicit.** Every backend linked into the
+      shipped binary spends part of the ~12 MB scratch-image budget.
+      Prefer an HTTP client to an external TSDB over linking a client
+      library unless measurement justifies the latter.
+
+No product code changed; this is a filed gap, not an accepted design.
