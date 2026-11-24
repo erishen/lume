@@ -16,6 +16,19 @@
 #include <sys/event.h>
 #endif
 
+/* setenv() is POSIX-only.  mingw-w64's UCRT headers do not declare it, and
+ * current GCC treats the implicit declaration as a hard error even without
+ * -Werror (host Windows CI run 45188939446: `lang/main.c:428 implicit
+ * declaration of function 'setenv'`).  _putenv_s is the CRT equivalent; keep
+ * setenv's overwrite semantics: 0 leaves an existing value alone, 1 replaces. */
+static void lume_setenv(const char *key, const char *val, int overwrite) {
+#ifdef _WIN32
+    if (overwrite || getenv(key) == NULL) _putenv_s(key, val);
+#else
+    setenv(key, val, overwrite);
+#endif
+}
+
 /* Lume entry point: parse + type check + interpret a script, then hand the
  * process over to agenthttpd_run() when the script calls run().
  *
@@ -425,7 +438,7 @@ static void lume_load_dotenv(const char *script) {
         char key[256], val[4096];
         memcpy(key, q, klen); key[klen] = '\0';
         memcpy(val, v, vlen); val[vlen] = '\0';
-        setenv(key, val, 0);   /* 不覆盖已有环境变量 */
+        lume_setenv(key, val, 0);   /* 不覆盖已有环境变量 */
     next_line:
         if (!nl) break;
         p = nl + 1;
@@ -473,7 +486,7 @@ int main(int argc, char **argv) {
      * listening on a TCP port (agent-httpd src/http/stdio_serve.h). It is
      * handed down through the environment so the language and every .lume
      * script stay unchanged — the transport is a host-level concern. */
-    if (do_stdio) setenv("AGENTHTTPD_STDIO", "1", 1);
+    if (do_stdio) lume_setenv("AGENTHTTPD_STDIO", "1", 1);
 
     /* 启动时加载 .env（$LUME_ENV_FILE 或 <脚本目录>/.env）：把 KEY=VALUE 补进
      * 进程环境供 env() 读——隐私配置（访客统计 PIN / 排除 IP / 保留期、API

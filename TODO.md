@@ -1,5 +1,7 @@
 # TODO — lume (host)
 
+> **现状快照（2026-11-24 实测/更新）**：HEAD `8ee9ec9`（`v0.14.2-2-g8ee9ec9`，tag `v0.14.2` 指向 `b4bedb7`），与 `origin/main` 同步、ahead 0；11-24 本地修复 CW1 后工作区有 `lang/main.c` + `TODO.md` 两处未提交改动（local only，未 push）。gitlink 钉 `agent-httpd@5511d0d`，与内嵌树 HEAD 一致；canonical `work/lume/agent-httpd` 已前进到 `403fe38`（CW2 决定暂不 bump）。最新 CI：CI `45188939319` success、Release `45188939294` success，**Windows `45188939446` failure（连续第二笔；CW1 已本地修复，待 Windows CI 验证转绿）**。下方 P9–P18 全部已关闭；真正 open 的只有「2026-11-22 时序存储」与 fastapi-web 移植的若干决策项。
+
 The host repo mirrors `lume-core`'s `lang/` tree via `make sync-lang`;
 interpreter/language fixes belong in lume-core and flow here. The files
 that must be hand-merged are the 17 entries under `host_owned:` in
@@ -1193,3 +1195,60 @@ sampled numerics (timestamp + tags + value) have no first-class store.**
       library unless measurement justifies the latter.
 
 No product code changed; this is a filed gap, not an accepted design.
+
+## CW1 (filed 2026-11-24) — Windows CI red: `setenv` implicit declaration in `lang/main.c`
+
+**Observed**: Windows (MSYS2) run `45188939446` @ `8ee9ec9` = `failure`,
+and the prior push's `45032711921` @ `8fef016` = `failure` too — two
+consecutive Windows failures. CI `45188939319` and Release `45188939294`
+on the same commits are `success`; only the Windows lane is red.
+
+**Root cause**: `lang/main.c:428` calls POSIX `setenv(key, val, 0)`
+(no-overwrite) in `lume_load_dotenv()`, introduced by `94643af`
+("feat(lang): 启动时加载 .env 供 env() 读"). UCRT64's `stdlib.h` does not
+declare `setenv` (it has `_putenv_s`), so under `-Wall -Wextra` the
+implicit declaration trips the build — `make: *** [Makefile:328:
+build/main.o] Error 1`. The .env loader itself (v0.14.1 batch) is fine on
+POSIX and was verified there; this is a Windows-portability gap that
+predates the v0.14.2 tag and was never green on the Windows lane.
+
+**Fix applied 2026-11-24 (local only, not pushed)**: added `lume_setenv()`
+in `lang/main.c` (HOST_PINNED, so no sync drift) — `_WIN32` branch uses
+`_putenv_s` with `overwrite || getenv(key) == NULL`, preserving both the
+no-overwrite `.env` semantics and the forced `AGENTHTTPD_STDIO=1`
+override; POSIX branch keeps `setenv`. Both call sites switched to the
+helper (`.env` loader `overwrite=0`; `--stdio` `overwrite=1`). lume-core's
+`src/main.c` has no `setenv`, so its Windows lane stays green untouched.
+
+**Verified locally**: full rebuild after `rm build/*.o` rc=0; `make check`
+rc=0; `make check-sync` rc=0 (`main.c` accepted as host-owned); the actual
+helper body extracted from source compiles clean under BOTH `-D_WIN32`
+and POSIX with `gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only`;
+`make test` passed every smoke/tool/HTTP case but the final
+`no server processes` leg aborted because the sandbox denies `/bin/ps`
+(`Operation not permitted`) — an environment check, not a code failure.
+
+**Still outstanding**: no MSYS2/mingw cross-compiler on this host, so a
+real Windows build remains unverified — the next push must be followed by
+the Windows lane going green before CW1 can be closed. No push was made.
+
+## CW2 (filed 2026-11-24) — agent-httpd gitlink vs canonical tree divergence
+
+Host gitlink is `agent-httpd@5511d0d`, matching the nested
+`work/lume/lume/agent-httpd` HEAD (`5511d0d`, clean, on origin/main).
+The separate canonical tree `work/lume/agent-httpd` has moved on to
+`403fe38` (commits `bd22330` grow-workers-on-demand, `16e5c9e`
+stream-file-bodies-from-loop, `403fe38` README) and is clean on its own
+origin/main. **This is a real divergence, not mirroring drift in `lang/`**:
+the two trees share the same remote but are at different commits. Decide
+whether the host should bump its gitlink to `403fe38` (then re-run
+`make check` / CI; the new pool + streaming behavior changes the server)
+or leave it pinned. Do not bump casually — `5511d0d` is the last commit
+verified by the green CI runs above, and the canonical advances touch
+worker-pool and event-streaming semantics.
+
+**Decision (2026-11-24): leave it pinned at `5511d0d`.** The bump is a
+behavioral change (worker pool + event streaming) unrelated to the CW1
+Windows portability fix, and `5511d0d` is the CI-verified baseline.
+Revisit only with an explicit instruction and a full `make check` / CI
+pass.
