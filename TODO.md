@@ -1,6 +1,6 @@
 # TODO — lume (host)
 
-> **现状快照（2026-11-24 实测/更新）**：HEAD `8ee9ec9`（`v0.14.2-2-g8ee9ec9`，tag `v0.14.2` 指向 `b4bedb7`），与 `origin/main` 同步、ahead 0；11-24 本地修复 CW1 后工作区有 `lang/main.c` + `TODO.md` 两处未提交改动（local only，未 push）。gitlink 钉 `agent-httpd@5511d0d`，与内嵌树 HEAD 一致；canonical `work/lume/agent-httpd` 已前进到 `403fe38`（CW2 决定暂不 bump）。最新 CI：CI `45188939319` success、Release `45188939294` success，**Windows `45188939446` failure（连续第二笔；CW1 已本地修复，待 Windows CI 验证转绿）**。下方 P9–P18 全部已关闭；真正 open 的只有「2026-11-22 时序存储」与 fastapi-web 移植的若干决策项。
+> **现状快照（2026-11-24 收口）**：HEAD `189648e`（`fix(host): guard setenv() for MSYS2/UCRT64 (CW1)`，已 push），与 `origin/main` 同步、ahead 0、工作区干净。gitlink 钉 `agent-httpd@5511d0d`，与内嵌树 HEAD 一致；canonical `work/lume/agent-httpd` 到 `403fe38`（CW2 决定暂不 bump）。**push 后三 lane 全绿**：CI `45393837169`、Windows `45393837224`、Release `45393837349` —— **CW1 已关闭**（此前 Windows 连续两笔 failure 的隐式声明错误消失）。下方 P9–P18 全部已关闭；真正 open 的只有「2026-11-22 时序存储」与 fastapi-web 移植的若干决策项。
 
 The host repo mirrors `lume-core`'s `lang/` tree via `make sync-lang`;
 interpreter/language fixes belong in lume-core and flow here. The files
@@ -1196,7 +1196,7 @@ sampled numerics (timestamp + tags + value) have no first-class store.**
 
 No product code changed; this is a filed gap, not an accepted design.
 
-## CW1 (filed 2026-11-24) — Windows CI red: `setenv` implicit declaration in `lang/main.c`
+## CW1 (filed & closed 2026-11-24) — Windows CI red: `setenv` implicit declaration in `lang/main.c`
 
 **Observed**: Windows (MSYS2) run `45188939446` @ `8ee9ec9` = `failure`,
 and the prior push's `45032711921` @ `8fef016` = `failure` too — two
@@ -1228,9 +1228,11 @@ and POSIX with `gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only`;
 `no server processes` leg aborted because the sandbox denies `/bin/ps`
 (`Operation not permitted`) — an environment check, not a code failure.
 
-**Still outstanding**: no MSYS2/mingw cross-compiler on this host, so a
-real Windows build remains unverified — the next push must be followed by
-the Windows lane going green before CW1 can be closed. No push was made.
+**Verified on the real runner & closed 2026-11-24**: pushed as `189648e`;
+Windows (MSYS2 UCRT64) `45393837224` = success, CI `45393837169` =
+success, Release `45393837349` = success. The implicit-declaration error
+is gone on the actual runner, so CW1 is closed. The local sandbox has no
+mingw cross-compiler, but that gap is now covered by CI.
 
 ## CW2 (filed 2026-11-24) — agent-httpd gitlink vs canonical tree divergence
 
