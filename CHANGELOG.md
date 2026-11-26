@@ -4,6 +4,22 @@ All notable changes to Lume are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and versions aim for
 [SemVer](https://semver.org/).
 
+## [0.15.0] - 2026-11-26
+
+### Added
+
+- **梯度提升回归内建：`gbdt_fit` / `gbdt_predict`。** 零依赖的平方误差 GBDT 回归树，
+  `.lume` 管线无需 sklearn 即可训练/打分信号模型。`gbdt_fit(X, y, rounds, depth,
+  lr, min_leaf)` 返回 GC 持有的 model map（前序扁平树列表），`gbdt_predict(model, X)`
+  对行矩阵打分。以自包含 `lang/builtins_math_gbdt.inc` 实现（gb_ 前缀 helper，
+  不依赖任一树的本地 helper 名），四处登记（builtins.h / builtins_math.c /
+  interp.c / typecheck.c）；与 lume-core 双树镜像，两份字节一致。解释器专用
+  （同 `server{}`），本版无原生/LLVM 后端 parity、无分类、无缺失值处理。
+  两棵树的二进制均在 `y = 2*x1 - x2` 冒烟测试上验证通过。
+- **同步规则更新**：`lang/PIN.lag` 接受 GBDT 引入的 4 个 host-owned 文件 delta
+  （builtins.h / builtins_math.c / interp.c / typecheck.c），`make check-sync`
+  恢复通过。
+
 ## [0.14.2] - 2026-11-21
 
 ### Fixed
