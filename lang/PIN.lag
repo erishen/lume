@@ -4,18 +4,18 @@
 # check fails when the count grows OR the md5 changes.
 bridge_stub.c 1 258c9e4f0367c00afc78a2f63e46ba2f
 builtins.c 125 1f667ca618eb74d3f4a3341cea6bcfe6
-builtins.h 161 56d690e51a5181877621227ed764f398
+builtins.h 162 f425a87fe120243aea75f95332b0dc96
 builtins_catalog.c 46 8020c1791dada91d0e84cd810a8c1159
 builtins_fs.c 41 019d8d7597682e5f8dff72ca1a27e1da
 builtins_http.c 483 8bb73cbdaf2779974574efebe74edccd
 builtins_internal.h 79 ced09054aa538914d1d006d84d936571
-builtins_math.c 12 25bae054ea8df83bb06fa6c51f24ebea
+builtins_math.c 13 0343760f60b40305f462ab3fbd638f97
 builtins_sql.c 506 7acac0bdff4426947d62064b5dfed35d
-interp.c 239 6f30aac73a85c695b14ff08e78ac007b
+interp.c 241 e51bfb656e606dc6dbb12837b62c04b4
 loader.c 5 4987cf832d9e3e78f6de4e6fe7a45eb5
 lume.h 102 3a26fe568f4b18b6716570dff9cbee06
 main.c 406 7b813bd867eb1d0c986889445c0052cf
-typecheck.c 128 1852cacc09aa796b9fd78e1bcce3d202
+typecheck.c 130 5c0e151932e528b2b64d41965c742226
 typecheck_expr.c 9 cf33d61836f64f0ad10c0be311d88ed8
 typecheck_stmt.c 52 ea0f01f1b8a02e4b06a0b11708beea2a
 value.c 28 92f7a5115fadd4501cb19f4a42163b09

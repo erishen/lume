@@ -1488,3 +1488,6 @@ static void native_mod(VM *vm, int argc, Value *args, Value *out) {
 
 Value b_div(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_div); }
 Value b_mod(VM *vm, int argc, Value *args) { return vm_native(vm, argc, args, native_mod); }
+
+/* GBDT regression (2026-11-26) — self-contained, mirrors lume-core's copy. */
+#include "builtins_math_gbdt.inc"

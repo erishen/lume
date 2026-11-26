@@ -163,4 +163,8 @@ Value b_el(VM *vm, int argc, Value *args);
 Value b_render(VM *vm, int argc, Value *args);
 Value b_html(VM *vm, int argc, Value *args);
 
+/* GBDT regression (builtins_math_gbdt.inc) */
+Value b_gbdt_fit(VM *vm, int argc, Value *args);
+Value b_gbdt_predict(VM *vm, int argc, Value *args);
+
 #endif /* LUME_BUILTINS_H */

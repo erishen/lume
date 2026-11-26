@@ -1646,6 +1646,8 @@ void bridge_seed_builtins(VM *vm) {
         {"ewma", b_ewma},
         {"pct_change", b_pct_change},
         {"max_drawdown", b_max_drawdown},
+        {"gbdt_fit", b_gbdt_fit},
+        {"gbdt_predict", b_gbdt_predict},
         {"rsi", b_rsi},
         {"rsi_cutler", b_rsi_cutler},
         {"macd", b_macd},
